@@ -16,9 +16,10 @@ logger = logging.getLogger(__name__)
 class SubprocessLauncher(ProcessLauncher):
     """Launcher that uses subprocess to start app processes"""
 
-    def __init__(self):
+    def __init__(self, agent_url: str = "ws://localhost:8000/ws"):
         self._running_processes: Dict[str, asyncio.subprocess.Process] = {}
         self._process_events: Dict[str, asyncio.Event] = {}
+        self._agent_url = agent_url
 
     async def launch_app(
         self,
@@ -49,7 +50,7 @@ class SubprocessLauncher(ProcessLauncher):
                     "FDC3_APP_ID": app_id,
                     "FDC3_INSTANCE_ID": instance_id,
                     "FDC3_INSTANCE_UUID": instance_uuid,
-                    "FDC3_DESKTOP_AGENT_URL": "ws://localhost:8000/ws",  # TODO: Make configurable
+                    "FDC3_DESKTOP_AGENT_URL": self._agent_url,
                 }
             )
 

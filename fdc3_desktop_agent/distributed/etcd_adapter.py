@@ -17,7 +17,9 @@ from .adapter import DistributedLogAdapter
 
 try:
     # prefer etcd3gw (HTTP gateway client)
-    from etcd3gw import client as _etcd3gw_client # pyright: ignore[reportMissingImports]
+    from etcd3gw import (
+        client as _etcd3gw_client,
+    )  # pyright: ignore[reportMissingImports]
 
     _GW_ETCD = True
 except Exception:

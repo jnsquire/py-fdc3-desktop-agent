@@ -19,7 +19,7 @@
       "label": "Run Agent (dev)",
       "type": "shell",
       "group": "none",
-      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe -m uv run uvicorn fdc3_desktop_agent.server:app --reload --host localhost --port 8000",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe -m uvicorn fdc3_desktop_agent.server:app --reload --host localhost --port 8000",
       "presentation": {
         "echo": true,
         "reveal": "always",

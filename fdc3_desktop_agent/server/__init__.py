@@ -10,11 +10,12 @@ import logging
 import os
 from typing import Dict, Set, Optional
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from ..api.graphql import schema, set_graphql_storage
 from ..protocol.dacp.dacp import AgentEventMeta, AgentEvent, AgentEventPayload
 from ..transport.wcp.wcp import WCP4ValidateAppIdentity
-from ..core import core_services
+from ..core import CoreServices
 from ..distributed.factory import get_adapter
 from ..storage import SqliteStorage
 from ..storage.interfaces import AppMetadata
@@ -26,156 +27,13 @@ from ..handlers import (
     DACPHandler,
     WebSocketConnectionManager,
 )
+from ..config import DesktopAgentConfig
 
 logger = logging.getLogger(__name__)
 
 
-# Server configuration
-def get_allowed_origins():
-    """Get allowed origins with localhost default"""
-    env_origins = os.getenv("FDC3_ALLOWED_ORIGINS")
-    if env_origins:
-        return env_origins.split(",")
-    # Default to allowing localhost connections (common development setup)
-    return ["localhost", "127.0.0.1", "localhost:*", "127.0.0.1:*"]
-
-
-SERVER_CONFIG = {
-    "host": os.getenv("FDC3_HOST", "localhost"),
-    "port": int(os.getenv("FDC3_PORT", "8000")),
-    "db_path": os.getenv("FDC3_DB_PATH", "fdc3_agent.db"),
-    "log_level": os.getenv("FDC3_LOG_LEVEL", "INFO"),
-    "allowed_origins": get_allowed_origins(),
-}
-
-
-@asynccontextmanager
-async def _lifespan(app: FastAPI):
-    """Lifespan handler to initialize and teardown resources."""
-    # Startup
-    # Configure logging
-    logging.basicConfig(level=getattr(logging, SERVER_CONFIG["log_level"]))
-
-    # Initialize storage before any use
-    await storage.initialize()
-    logger.info(f"FDC3 Desktop Agent storage initialized at {SERVER_CONFIG['db_path']}")
-
-    # Register the system app (after storage is ready)
-    await storage.apps.add_app(system_app_metadata)
-    logger.info(
-        f"Server configured for {SERVER_CONFIG['host']}:{SERVER_CONFIG['port']}"
-    )
-    logger.info(f"Allowed origins: {', '.join(SERVER_CONFIG['allowed_origins'])}")
-
-    # Log connection URIs for convenience
-    host = SERVER_CONFIG["host"]
-    port = SERVER_CONFIG["port"]
-    logger.info(f"HTTP API available at: http://{host}:{port}")
-    logger.info(f"GraphQL endpoint at: http://{host}:{port}/graphql")
-    logger.info(f"WebSocket endpoint at: ws://{host}:{port}/ws")
-    logger.info(f"Admin interface at: http://{host}:{port}/admin")
-
-    # Initialize optional distributed adapter (etcd/consul/noop)
-    try:
-        adapter = get_adapter()
-        await adapter.start()
-        app.state.distributed_adapter = adapter
-
-        async def _distributed_event_handler(ev):
-            try:
-                # ev may be a dict or JSON string depending on adapter
-                if isinstance(ev, str):
-                    payload = json.loads(ev)
-                else:
-                    payload = ev
-
-                # Forward into local ChannelManager without re-publishing
-                core_services.channel_manager._emit_event(
-                    payload.get("event_type"),
-                    payload.get("channel_id"),
-                    payload.get("instance_uuid"),
-                    (
-                        json.loads(payload.get("context"))
-                        if payload.get("context")
-                        else None
-                    ),
-                    remote=True,
-                )
-            except Exception:
-                return
-
-        # Subscribe (best-effort). Adapter.subscribe is async and returns a subscription id.
-        try:
-
-            def _sub_cb(ev: dict):
-                asyncio.create_task(_distributed_event_handler(ev))
-                return None
-
-            sub_id = await adapter.subscribe("channel_events", _sub_cb)
-            app.state.distributed_subscription_id = sub_id
-        except Exception:
-            app.state.distributed_subscription_id = None
-    except Exception:
-        app.state.distributed_adapter = None
-        app.state.distributed_subscription_id = None
-
-    try:
-        yield
-    finally:
-        # Shutdown
-        try:
-            adapter = getattr(app.state, "distributed_adapter", None)
-            sub_id = getattr(app.state, "distributed_subscription_id", None)
-            if adapter and sub_id:
-                try:
-                    await adapter.unsubscribe(sub_id)
-                except Exception:
-                    pass
-            if adapter:
-                try:
-                    await adapter.stop()
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-        # Stop any launched subprocesses and close connection managers to avoid
-        # lingering proactor pipe transports during interpreter shutdown.
-        try:
-            await launcher.stop()
-        except Exception:
-            pass
-
-        try:
-            await agent_client_manager.close_all()
-        except Exception:
-            pass
-
-        try:
-            await instance_connection_manager.close_all()
-        except Exception:
-            pass
-
-        await storage.close()
-        logger.info("FDC3 Desktop Agent storage closed")
-
-
-app = FastAPI(
-    title="FDC3 Desktop Agent",
-    version="0.9.0",
-    description="FDC3 Desktop Agent with WebSocket and DACP support",
-    lifespan=_lifespan,
-)
-
-# Configure templates
-templates = Jinja2Templates(directory="fdc3_desktop_agent/templates")
-
-# Initialize storage and launcher
-storage = SqliteStorage(SERVER_CONFIG["db_path"])
-launcher = SubprocessLauncher()
-
-# Register the desktop agent itself as a system app
-system_app_metadata = AppMetadata(
+# System app metadata (constant)
+_SYSTEM_APP_METADATA = AppMetadata(
     app_id="fdc3-desktop-agent",
     name="FDC3 Desktop Agent",
     version="0.1.0",
@@ -207,19 +65,9 @@ system_app_metadata = AppMetadata(
 )
 
 
-# Initialize access control with default allowlist policy
-access_control = AccessControlManager()
-if SERVER_CONFIG["allowed_origins"]:
-    allowlist_policy = AllowlistAccessPolicy(SERVER_CONFIG["allowed_origins"])
-    access_control.set_policy(allowlist_policy)
-
-# Initialize WebSocket connection managers and handlers
-# `WebSocketConnectionManager` imported from handlers manages app instance connections.
-instance_connection_manager = WebSocketConnectionManager()
-
-
-# Agent-client manager handles UI/agent client side connections and broadcasts.
 class AgentClientConnectionManager:
+    """Manages WebSocket connections for agent UI clients."""
+
     def __init__(self):
         self._connections: Dict[str, WebSocket] = {}
         self._active_connections: Set[WebSocket] = set()
@@ -281,179 +129,272 @@ class AgentClientConnectionManager:
         self._connections.clear()
 
 
-agent_client_manager = AgentClientConnectionManager()
+def create_app(config: Optional[DesktopAgentConfig] = None) -> FastAPI:
+    """Create and configure the FDC3 Desktop Agent FastAPI application.
 
-access_control_handler = AccessControlHandler(
-    access_control, SERVER_CONFIG["allowed_origins"]
-)
-wcp_handler = WCPHandler(storage)
-dacp_handler = DACPHandler(storage, launcher, instance_connection_manager)
+    This factory function allows embedding the agent in another Python project
+    with full control over configuration.
 
-# Initialize GraphQL with storage
-set_graphql_storage(storage)
+    Args:
+        config: Optional configuration. If None, uses environment variables
+                and defaults.
 
-# Add GraphQL router
-graphql_app = GraphQLRouter(schema)
-app.include_router(graphql_app, prefix="/graphql")
+    Returns:
+        A configured FastAPI application ready to be run with uvicorn or
+        mounted into a larger ASGI application.
 
+    Example:
+        # Standalone usage
+        app = create_app()
 
-# Admin routes
-@app.get("/admin", response_class=HTMLResponse)
-async def admin_page(request: Request):
-    """Admin page for managing launch configurations"""
-    return templates.TemplateResponse("admin.html", {"request": request})
+        # With custom config
+        config = DesktopAgentConfig(host="0.0.0.0", port=9000, db_path=":memory:")
+        app = create_app(config)
 
+        # Mount in larger app
+        main_app = FastAPI()
+        main_app.mount("/fdc3", create_app())
+    """
+    if config is None:
+        config = DesktopAgentConfig()
 
-@app.get("/app-directory", response_class=HTMLResponse)
-async def app_directory_page(request: Request):
-    """App directory management interface"""
-    return templates.TemplateResponse("app_directory.html", {"request": request})
+    # Create or use provided components
+    storage = config.storage or SqliteStorage(config.db_path)
+    launcher = config.launcher or SubprocessLauncher(
+        agent_url=config.computed_agent_url
+    )
+    core_services = CoreServices()
 
+    # Access control
+    access_control = AccessControlManager()
+    if config.allowed_origins:
+        allowlist_policy = AllowlistAccessPolicy(config.allowed_origins)
+        access_control.set_policy(allowlist_policy)
 
-@app.get("/system-settings", response_class=HTMLResponse)
-async def system_settings_page(request: Request):
-    """System configuration panel"""
-    return templates.TemplateResponse("system_settings.html", {"request": request})
+    # Connection managers
+    instance_connection_manager = WebSocketConnectionManager()
+    agent_client_manager = AgentClientConnectionManager()
 
+    # Handlers
+    access_control_handler = AccessControlHandler(
+        access_control, config.allowed_origins
+    )
+    wcp_handler = WCPHandler(storage)
+    dacp_handler = DACPHandler(storage, launcher, instance_connection_manager)
 
-@app.get("/diagnostics", response_class=HTMLResponse)
-async def diagnostics_page(request: Request):
-    """System diagnostics and health checks"""
-    return templates.TemplateResponse("diagnostics.html", {"request": request})
+    # WCP session state
+    wcp_sessions: Dict[str, dict] = {}
 
+    # Templates (use absolute path for ASGI mounting compatibility)
+    templates = Jinja2Templates(directory=str(config.templates_dir))
 
-@app.get("/channel-monitor", response_class=HTMLResponse)
-async def channel_monitor_page(request: Request):
-    """Channel monitor UI for subscribing to channel events"""
-    return templates.TemplateResponse("channel_monitor.html", {"request": request})
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        """Lifespan handler to initialize and teardown resources."""
+        # Startup
+        logging.basicConfig(level=getattr(logging, config.log_level))
 
+        await storage.initialize()
+        logger.info(f"FDC3 Desktop Agent storage initialized at {config.db_path}")
 
-# Placeholder for WCP session management
-wcp_sessions = {}
+        await storage.apps.add_app(_SYSTEM_APP_METADATA)
+        logger.info(f"Server configured for {config.host}:{config.port}")
+        logger.info(f"Allowed origins: {', '.join(config.allowed_origins)}")
 
+        logger.info(f"HTTP API available at: http://{config.host}:{config.port}")
+        logger.info(f"GraphQL endpoint at: http://{config.host}:{config.port}/graphql")
+        logger.info(f"WebSocket endpoint at: {config.computed_agent_url}")
+        logger.info(f"Admin interface at: http://{config.host}:{config.port}/admin")
 
-async def _validate_app_identity(
-    wcp4: WCP4ValidateAppIdentity, session_id: str
-) -> dict:
-    """Validate WCP4 app identity request"""
-    from urllib.parse import urlparse
+        # Initialize distributed adapter
+        adapter = config.distributed_adapter
+        sub_id = None
+        if adapter is None:
+            try:
+                adapter = get_adapter()
+            except Exception:
+                adapter = None
 
-    # Get the WCP1 identity info from session
-    wcp1_identity = wcp_sessions[session_id].get("wcp1_identity")
-    if not wcp1_identity:
-        return {"valid": False, "error": "No WCP1 identity information found"}
+        if adapter:
+            try:
+                await adapter.start()
+                app.state.distributed_adapter = adapter
 
-    identity_url = wcp1_identity.get("identityUrl")
-    actual_url = wcp1_identity.get("actualUrl")
+                async def _distributed_event_handler(ev):
+                    try:
+                        if isinstance(ev, str):
+                            payload = json.loads(ev)
+                        else:
+                            payload = ev
+                        core_services.channel_manager._emit_event(
+                            payload.get("event_type"),
+                            payload.get("channel_id"),
+                            payload.get("instance_uuid"),
+                            (
+                                json.loads(payload.get("context"))
+                                if payload.get("context")
+                                else None
+                            ),
+                            remote=True,
+                        )
+                    except Exception:
+                        pass
 
-    # Check if there's a pending instance with the requested instanceUuid
-    instance_uuid = wcp4.payload.instanceUuid
-    if instance_uuid:
-        pending_instance = core_services.app_registry.get_instance(instance_uuid)
-        if pending_instance and not pending_instance.connected:
-            # Found pending instance - validate origins
-            app_id = pending_instance.app_id
+                def _sub_cb(ev: dict):
+                    asyncio.create_task(_distributed_event_handler(ev))
 
-            # Check if origins are allowed for this app
-            allowed_origins = await storage.origins.get_allowed_origins(app_id)
-            if allowed_origins:
-                # Validate identityUrl and actualUrl origins
-                identity_origin = (
-                    urlparse(identity_url).netloc if identity_url else None
-                )
-                actual_origin = urlparse(actual_url).netloc if actual_url else None
-
-                if identity_origin and actual_origin:
-                    # Both origins must be in allowed list
-                    if (
-                        identity_origin not in allowed_origins
-                        or actual_origin not in allowed_origins
-                    ):
-                        return {
-                            "valid": False,
-                            "error": "Origin not allowed for this app",
-                        }
-                else:
-                    return {"valid": False, "error": "Invalid identity or actual URL"}
-
-            instance_id = wcp4.payload.instanceId or pending_instance.instance_id
-            return {
-                "valid": True,
-                "identity": {
-                    "appId": app_id,
-                    "instanceId": instance_id,
-                    "instanceUuid": instance_uuid,
-                },
-            }
+                sub_id = await adapter.subscribe("channel_events", _sub_cb)
+                app.state.distributed_subscription_id = sub_id
+            except Exception:
+                app.state.distributed_adapter = None
+                app.state.distributed_subscription_id = None
         else:
-            return {
-                "valid": False,
-                "error": "Instance UUID not found or already connected",
-            }
-    else:
-        # No instance UUID provided - this shouldn't happen in normal flow
-        return {"valid": False, "error": "No instance UUID provided"}
+            app.state.distributed_adapter = None
+            app.state.distributed_subscription_id = None
 
+        # Store references for route handlers
+        app.state.storage = storage
+        app.state.launcher = launcher
+        app.state.core_services = core_services
+        app.state.wcp_sessions = wcp_sessions
 
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket endpoint for FDC3 WCP and DACP communication"""
-
-    # Validate access using the access control handler
-    access_granted = await access_control_handler.validate_connection(websocket)
-    if not access_granted:
-        return
-
-    await websocket.accept()
-    session_id = None
-    dacp_active = False
-    heartbeat_task = None
-
-    async def send_heartbeat():
-        """Send periodic heartbeat events"""
-        while True:
-            await asyncio.sleep(30)  # Send heartbeat every 30 seconds
-            if session_id and dacp_active:
-                from ..protocol.dacp.dacp import HeartbeatEvent, AgentEventMeta
-
-                heartbeat_event = HeartbeatEvent(meta=AgentEventMeta())
+        try:
+            yield
+        finally:
+            # Shutdown
+            adapter = getattr(app.state, "distributed_adapter", None)
+            sub_id = getattr(app.state, "distributed_subscription_id", None)
+            if adapter:
+                if sub_id:
+                    try:
+                        await adapter.unsubscribe(sub_id)
+                    except Exception:
+                        pass
                 try:
-                    await websocket.send_text(heartbeat_event.model_dump_json())
-                except Exception as e:
-                    logger.error(f"Failed to send heartbeat: {e}")
-                    break
+                    await adapter.stop()
+                except Exception:
+                    pass
 
-    try:
-        while True:
-            data = await websocket.receive_text()
-            message = json.loads(data)
+            try:
+                await launcher.stop()
+            except Exception:
+                pass
 
-            if not dacp_active:
-                # WCP phase - use WCP handler
-                transition = await wcp_handler.handle_message(
-                    message, session_id or "", wcp_sessions, websocket
+            try:
+                await agent_client_manager.close_all()
+            except Exception:
+                pass
+
+            try:
+                await instance_connection_manager.close_all()
+            except Exception:
+                pass
+
+            await storage.close()
+            logger.info("FDC3 Desktop Agent storage closed")
+
+    # Create FastAPI app
+    app = FastAPI(
+        title="FDC3 Desktop Agent",
+        version="0.9.0",
+        description="FDC3 Desktop Agent with WebSocket and DACP support",
+        lifespan=lifespan,
+    )
+
+    # Initialize GraphQL with storage
+    set_graphql_storage(storage)
+    graphql_app = GraphQLRouter(schema)
+    app.include_router(graphql_app, prefix="/graphql")
+
+    # Admin routes
+    @app.get("/admin", response_class=HTMLResponse)
+    async def admin_page(request: Request):
+        """Admin page for managing launch configurations"""
+        return templates.TemplateResponse("admin.html", {"request": request})
+
+    @app.get("/app-directory", response_class=HTMLResponse)
+    async def app_directory_page(request: Request):
+        """App directory management interface"""
+        return templates.TemplateResponse("app_directory.html", {"request": request})
+
+    @app.get("/system-settings", response_class=HTMLResponse)
+    async def system_settings_page(request: Request):
+        """System configuration panel"""
+        return templates.TemplateResponse("system_settings.html", {"request": request})
+
+    @app.get("/diagnostics", response_class=HTMLResponse)
+    async def diagnostics_page(request: Request):
+        """System diagnostics and health checks"""
+        return templates.TemplateResponse("diagnostics.html", {"request": request})
+
+    @app.get("/channel-monitor", response_class=HTMLResponse)
+    async def channel_monitor_page(request: Request):
+        """Channel monitor UI for subscribing to channel events"""
+        return templates.TemplateResponse("channel_monitor.html", {"request": request})
+
+    @app.websocket("/ws")
+    async def websocket_endpoint(websocket: WebSocket):
+        """WebSocket endpoint for FDC3 WCP and DACP communication"""
+        access_granted = await access_control_handler.validate_connection(websocket)
+        if not access_granted:
+            return
+
+        await websocket.accept()
+        session_id = None
+        dacp_active = False
+        heartbeat_task = None
+
+        async def send_heartbeat():
+            """Send periodic heartbeat events"""
+            while True:
+                await asyncio.sleep(30)
+                if session_id and dacp_active:
+                    from ..protocol.dacp.dacp import (
+                        HeartbeatEvent,
+                        AgentEventMeta as HBMeta,
+                    )
+
+                    heartbeat_event = HeartbeatEvent(meta=HBMeta())
+                    try:
+                        await websocket.send_text(heartbeat_event.model_dump_json())
+                    except Exception as e:
+                        logger.error(f"Failed to send heartbeat: {e}")
+                        break
+
+        try:
+            while True:
+                data = await websocket.receive_text()
+                message = json.loads(data)
+
+                if not dacp_active:
+                    transition = await wcp_handler.handle_message(
+                        message, session_id or "", wcp_sessions, websocket
+                    )
+                    if transition == "dacp":
+                        dacp_active = True
+                        heartbeat_task = asyncio.create_task(send_heartbeat())
+                else:
+                    await dacp_handler.handle_message(
+                        message, session_id or "", wcp_sessions, websocket
+                    )
+
+        except WebSocketDisconnect:
+            if heartbeat_task:
+                heartbeat_task.cancel()
+            if session_id in wcp_sessions:
+                identity = wcp_sessions[session_id]["identity"]
+                instance_uuid = identity["instanceUuid"]
+                core_services.app_registry.unregister_instance(instance_uuid)
+                core_services.listener_store.remove_listeners_for_instance(
+                    instance_uuid
                 )
-                if transition == "dacp":
-                    dacp_active = True
-                    # Start heartbeat task when entering DACP phase
-                    heartbeat_task = asyncio.create_task(send_heartbeat())
-            else:
-                # DACP phase - use DACP handler
-                await dacp_handler.handle_message(
-                    message, session_id or "", wcp_sessions, websocket
-                )
+                core_services.channel_manager.leave_current_channel(instance_uuid)
+                await agent_client_manager.disconnect(websocket, instance_uuid)
+                del wcp_sessions[session_id]
+            logger.info("WebSocket disconnected")
 
-    except WebSocketDisconnect:
-        if heartbeat_task:
-            heartbeat_task.cancel()
-        if session_id in wcp_sessions:
-            identity = wcp_sessions[session_id]["identity"]
-            instance_uuid = identity["instanceUuid"]
-            # Clean up
-            core_services.app_registry.unregister_instance(instance_uuid)
-            core_services.listener_store.remove_listeners_for_instance(instance_uuid)
-            core_services.channel_manager.leave_current_channel(instance_uuid)
-            # Unregister agent-client WebSocket connection
-            await agent_client_manager.disconnect(websocket, instance_uuid)
-            del wcp_sessions[session_id]
-        logger.info("WebSocket disconnected")
+    return app
+
+
+# Default app instance for backwards compatibility and standalone usage
+app = create_app()
