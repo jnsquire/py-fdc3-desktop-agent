@@ -1,8 +1,10 @@
 from fdc3_desktop_agent import __version__, create_app, DesktopAgentConfig
+from fdc3_desktop_agent.version import __version__ as package_version
 
 
 def test_version():
-    assert __version__ == "0.9.0"
+    # Ensure package exposes the same version as the centralized version module
+    assert __version__ == package_version
 
 
 def test_create_app():

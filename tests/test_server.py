@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 from fdc3_desktop_agent.storage import SqliteStorage
 from contextlib import asynccontextmanager
+from fdc3_desktop_agent.version import __version__ as package_version
 
 
 class TestServerIntegration:
@@ -23,7 +24,7 @@ class TestServerIntegration:
         from fastapi import FastAPI
 
         test_app = FastAPI(
-            title="Test FDC3 Desktop Agent", version="0.9.0", lifespan=_lifespan
+            title="Test FDC3 Desktop Agent", version=package_version, lifespan=_lifespan
         )
 
         @test_app.get("/health")

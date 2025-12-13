@@ -25,6 +25,7 @@ from ..handlers import (
     WebSocketConnectionManager,
 )
 from ..config import DesktopAgentConfig
+from ..version import __version__
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ logger = logging.getLogger(__name__)
 _SYSTEM_APP_METADATA = AppMetadata(
     app_id="fdc3-desktop-agent",
     name="FDC3 Desktop Agent",
-    version="0.1.0",
+    version=__version__,
     description="Built-in system app for FDC3 Desktop Agent functionality",
     intents=[
         # App Directory Management
@@ -293,7 +294,7 @@ def create_app(config: Optional[DesktopAgentConfig] = None) -> FastAPI:
     # Create FastAPI app
     app = FastAPI(
         title="FDC3 Desktop Agent",
-        version="0.9.0",
+        version=__version__,
         description="FDC3 Desktop Agent with WebSocket and DACP support",
         lifespan=lifespan,
     )

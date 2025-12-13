@@ -6,6 +6,7 @@ import logging
 # Import storage types
 from ..storage.interfaces import Storage as StorageInterface
 from ..core import core_services
+from ..version import __version__
 
 # Global storage instance - will be set by the server
 _storage: Optional[StorageInterface] = None
@@ -188,7 +189,7 @@ class Query:
     @strawberry.field
     def version(self) -> str:
         """Version information"""
-        return "0.1.0"
+        return __version__
 
 
 @strawberry.type

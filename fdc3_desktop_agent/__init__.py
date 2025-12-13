@@ -30,7 +30,7 @@ Mounting in a larger application::
     main_app.mount("/fdc3", create_app(DesktopAgentConfig(db_path=":memory:")))
 """
 
-__version__ = "0.9.0"
+from .version import __version__
 
 from .config import DesktopAgentConfig
 from .server import create_app, app
