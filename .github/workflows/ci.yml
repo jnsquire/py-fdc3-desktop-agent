@@ -43,9 +43,24 @@ jobs:
           ruff check .
           black --check .
 
-      - name: Run tests
+      - name: Run tests with coverage
         env:
           FDC3_DISTRIBUTED_ADAPTER: ''
           FDC3_DB_PATH: ':memory:'
         run: |
-          python -m pytest -q
+          python -m pytest --cov=fdc3_desktop_agent --cov-report=xml -q
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
+
+      - name: Upload coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage.xml
+          # token is optional for public repos; set CODECOV_TOKEN in repo secrets if needed
+          token: ${{ secrets.CODECOV_TOKEN }}

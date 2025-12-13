@@ -168,7 +168,7 @@ app = FastAPI(
 )
 
 # Configure templates
-templates = Jinja2Templates(directory="src/fdc3_desktop_agent/templates")
+templates = Jinja2Templates(directory="fdc3_desktop_agent/templates")
 
 # Initialize storage and launcher
 storage = SqliteStorage(SERVER_CONFIG["db_path"])

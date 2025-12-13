@@ -5,8 +5,8 @@ This document summarizes current implementation choices and how to change them.
 ## WCP over FastAPI WebSocket
 
 - The project carries WCP messages over a single FastAPI WebSocket connection. Handshake and identity validation are implemented in:
-  - `src/fdc3_desktop_agent/handlers/wcp.py` (WCPHandler)
-  - `src/fdc3_desktop_agent/server/__init__.py` (websocket endpoint)
+  - `fdc3_desktop_agent/handlers/wcp.py` (WCPHandler)
+  - `fdc3_desktop_agent/server/__init__.py` (websocket endpoint)
 
 - Message flow:
   - Browser app sends `WCP1Hello` -> server replies with `WCP3Handshake`.
@@ -64,9 +64,9 @@ This document summarizes current implementation choices and how to change them.
   - Emit structured logs with context (requestUuid, instanceUuid) for easier debugging.
 
 ## References
-- `src/fdc3_desktop_agent/handlers/wcp.py`
-- `src/fdc3_desktop_agent/handlers/dacp.py`
-- `src/fdc3_desktop_agent/server/__init__.py`
-- `src/fdc3_desktop_agent/core/channel_manager.py`
+- `fdc3_desktop_agent/handlers/wcp.py`
+- `fdc3_desktop_agent/handlers/dacp.py`
+- `fdc3_desktop_agent/server/__init__.py`
+- `fdc3_desktop_agent/core/channel_manager.py`
 
 *** End of notes

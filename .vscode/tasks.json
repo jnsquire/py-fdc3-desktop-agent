@@ -1,96 +1,31 @@
 {
-    "version": "2.0.0",
-    "tasks": [
-        {
-            "label": "Launch FDC3 Desktop Agent",
-            "type": "shell",
-            "command": "uv",
-            "args": [
-                "run",
-                "uvicorn",
-                "src.fdc3_desktop_agent.server:app",
-                "--reload"
-            ],
-            "group": {
-                "kind": "build",
-                "isDefault": true
-            },
-            "presentation": {
-                "echo": true,
-                "reveal": "always",
-                "focus": false,
-                "panel": "shared",
-                "showReuseMessage": true,
-                "clear": false
-            },
-            "problemMatcher": [],
-            "isBackground": true,
-            "options": {
-                "cwd": "${workspaceFolder}"
-            }
-        },
-        {
-            "label": "Launch FDC3 Desktop Agent (Debug)",
-            "type": "shell",
-            "command": "uv",
-            "args": [
-                "run",
-                "uvicorn",
-                "src.fdc3_desktop_agent.server:app",
-                "--host",
-                "localhost",
-                "--port",
-                "8000",
-                "--reload",
-                "--log-level",
-                "debug"
-            ],
-            "group": "build",
-            "presentation": {
-                "echo": true,
-                "reveal": "always",
-                "focus": false,
-                "panel": "shared",
-                "showReuseMessage": true,
-                "clear": false
-            },
-            "problemMatcher": [],
-            "isBackground": true,
-            "options": {
-                "cwd": "${workspaceFolder}"
-            }
-        },
-        {
-            "label": "Launch FDC3 Desktop Agent (Production)",
-            "type": "shell",
-            "command": "uv",
-            "args": [
-                "run",
-                "uvicorn",
-                "src.fdc3_desktop_agent.server:app",
-                "--host",
-                "0.0.0.0",
-                "--port",
-                "8000",
-                "--workers",
-                "4",
-                "--log-level",
-                "warning"
-            ],
-            "group": "build",
-            "presentation": {
-                "echo": true,
-                "reveal": "always",
-                "focus": false,
-                "panel": "shared",
-                "showReuseMessage": true,
-                "clear": false
-            },
-            "problemMatcher": [],
-            "isBackground": true,
-            "options": {
-                "cwd": "${workspaceFolder}"
-            }
-        }
-    ]
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Install Dev Dependencies",
+      "type": "shell",
+      "group": "build",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe -m pip install --upgrade pip && ${workspaceFolder}\\.venv\\Scripts\\python.exe -m pip install -e '.[dev]'",
+      "problemMatcher": []
+    },
+    {
+      "label": "Run Tests (venv)",
+      "type": "shell",
+      "group": "test",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe -m pytest -q",
+      "problemMatcher": []
+    },
+    {
+      "label": "Run Agent (dev)",
+      "type": "shell",
+      "group": "none",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe -m uv run uvicorn fdc3_desktop_agent.server:app --reload --host localhost --port 8000",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    }
+  ]
 }

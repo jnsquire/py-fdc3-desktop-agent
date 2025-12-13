@@ -46,17 +46,17 @@ The agent can be started in different modes using uv run:
 
 ### Development Mode (with auto-reload)
 ```bash
-uv run uvicorn src.fdc3_desktop_agent.server:app --host localhost --port 8000 --reload --log-level info
+uv run uvicorn fdc3_desktop_agent.server:app --host localhost --port 8000 --reload --log-level info
 ```
 
 ### Production Mode (multi-worker)
 ```bash
-uv run uvicorn src.fdc3_desktop_agent.server:app --host 0.0.0.0 --port 8000 --workers 4 --log-level warning
+uv run uvicorn fdc3_desktop_agent.server:app --host 0.0.0.0 --port 8000 --workers 4 --log-level warning
 ```
 
 ### Debug Mode (verbose logging)
 ```bash
-uv run uvicorn src.fdc3_desktop_agent.server:app --host localhost --port 8000 --reload --log-level debug
+uv run uvicorn fdc3_desktop_agent.server:app --host localhost --port 8000 --reload --log-level debug
 ```
 
 ### Running Tests
@@ -66,7 +66,7 @@ uv run python -m pytest tests/ -v
 
 ### Quick Development Start
 ```bash
-uv run uvicorn src.fdc3_desktop_agent.server:app --reload
+uv run uvicorn fdc3_desktop_agent.server:app --reload
 ```
 
 ## Distributed Adapters (optional)
