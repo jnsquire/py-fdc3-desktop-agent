@@ -4,11 +4,11 @@ build-backend = "uv_build"
 
 [project]
 name = "fdc3-desktop-agent"
-version = "0.1.0"
+version = "0.9.0"
 description = "FDC3 Desktop Agent for Python"
 readme = "README.md"
 requires-python = ">=3.11"
-authors = [ { name = "Your Name", email = "you@example.com" } ]
+authors = [ { name = "Joel Squire", email = "joel@squire.org" } ]
 dependencies = [
   "fastapi>=0.115",
   "uvicorn[standard]>=0.30",
@@ -27,6 +27,20 @@ dev = [
   "httpx>=0.27"
 ]
 
+# Optional dependencies for distributed adapters
+etcd = [
+  "etcd3aio>=1.1"
+]
+
+consul = [
+  "aiohttp>=3.8"
+]
+
+distributed = [
+  "etcd3aio>=1.1",
+  "aiohttp>=3.8"
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
@@ -34,9 +48,8 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = [
     "--strict-markers",
-    "--strict-config",
-    "--disable-warnings",
-    "--tb=short"
+  "--strict-config",
+  "--tb=short"
 ]
 markers = [
     "asyncio: marks tests as async (using pytest-asyncio)",
@@ -44,3 +57,4 @@ markers = [
     "unit: marks tests as unit tests"
 ]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

@@ -6,6 +6,9 @@ Handles the initial handshake and app identity validation phase.
 import logging
 from datetime import datetime
 from typing import Dict, Any, Optional
+import os
+import sys
+import platform
 
 from fastapi import WebSocket
 
@@ -98,12 +101,53 @@ class WCPHandler:
             wcp_sessions[session_id]["identity"] = identity
 
             # Send success response
+            # Populate implementationMetadata from storage if available (best-effort)
+            impl_meta = {}
+            try:
+                app_id = identity.get("appId")
+                if app_id and hasattr(self.storage, "apps"):
+                    app_meta = await self.storage.apps.get_app_metadata(app_id)
+                    if app_meta:
+                        impl_meta = {
+                            "appId": getattr(app_meta, "app_id", None),
+                            "name": getattr(app_meta, "name", None),
+                            "version": getattr(app_meta, "version", None),
+                            "description": getattr(app_meta, "description", None),
+                            "icons": getattr(app_meta, "icons", []),
+                            "intents": getattr(app_meta, "intents", []),
+                        }
+            except Exception:
+                impl_meta = {}
+
+            # Add runtime launcher info (best-effort)
+            try:
+                agent_url = os.getenv("FDC3_DESKTOP_AGENT_URL") or f"ws://{os.getenv('FDC3_HOST','localhost')}:{os.getenv('FDC3_PORT','8000')}/ws"
+                runtime_info = {
+                    "launcher": {
+                        "type": "subprocess",
+                        "python": sys.executable,
+                        "platform": platform.platform(),
+                        "agentUrl": agent_url,
+                    }
+                }
+            except Exception:
+                runtime_info = {}
+
+            # Merge runtime info into implementation metadata
+            try:
+                if impl_meta and isinstance(impl_meta, dict):
+                    impl_meta.update(runtime_info)
+                else:
+                    impl_meta = runtime_info
+            except Exception:
+                pass
+
             wcp5 = WCP5ValidateAppIdentityResponse(
                 payload=WCP5ValidateAppIdentityResponsePayload(
                     appId=identity["appId"],
                     instanceId=identity["instanceId"],
                     instanceUuid=identity["instanceUuid"],
-                    implementationMetadata={}
+                    implementationMetadata=impl_meta
                 ),
                 meta={"requestUuid": message["meta"]["connectionAttemptUuid"],
                       "timestamp": datetime.now().isoformat()}

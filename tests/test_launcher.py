@@ -6,6 +6,53 @@ from fdc3_desktop_agent.launcher.subprocess_launcher import SubprocessLauncher
 from fdc3_desktop_agent.storage import LaunchConfig
 
 
+@pytest.fixture(autouse=True)
+def _mock_subprocess(monkeypatch):
+    """Replace asyncio.create_subprocess_exec with a fake process for tests.
+
+    The fake adapts to the invoked command to simulate immediate-exit
+    commands (e.g., echo) and long-running commands (e.g., sleep).
+    """
+    class FakeProcess:
+        def __init__(self, long_running: bool = False):
+            self.returncode = None if long_running else 0
+            self._exited = asyncio.Event()
+            if not long_running:
+                # already exited
+                self._exited.set()
+            # simulate stdout/stderr attributes (None when not captured)
+            self.stdout = None
+            self.stderr = None
+
+        async def wait(self):
+            await self._exited.wait()
+            return self.returncode
+
+        def terminate(self):
+            # simulate graceful termination
+            self.returncode = -15
+            self._exited.set()
+
+        def kill(self):
+            self.returncode = -9
+            self._exited.set()
+
+    async def _fake_create_subprocess_exec(*cmd, **kwargs):
+        # simulate command-not-found for specific invalid command used in tests
+        if any('nonexistent_command_12345' in str(c) for c in cmd):
+            raise FileNotFoundError("No such file or directory")
+        # determine if command should be long-running by inspecting args
+        cmdline = ' '.join(str(x) for x in cmd)
+        long_running = False
+        if 'sleep' in cmdline or 'time.sleep' in cmdline:
+            long_running = True
+        proc = FakeProcess(long_running=long_running)
+        return proc
+
+    monkeypatch.setattr(asyncio, 'create_subprocess_exec', _fake_create_subprocess_exec)
+    yield
+
+
 class TestSubprocessLauncher:
     """Test SubprocessLauncher functionality"""
 

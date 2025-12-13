@@ -3,30 +3,26 @@
 import pytest
 from fastapi.testclient import TestClient
 from fdc3_desktop_agent.storage import SqliteStorage
+from contextlib import asynccontextmanager
 
 
 class TestServerIntegration:
     """Test server integration with storage and launcher"""
 
     @pytest.fixture
-    async def test_app(self):
-        """Create test app with in-memory storage"""
-        # For testing, we'll create a separate app instance
-        # In a real implementation, we'd modify the server to accept storage/launcher as parameters
+    def test_app(self):
+        """Create test app with in-memory storage using FastAPI lifespan."""
         test_storage = SqliteStorage(":memory:")
-        await test_storage.initialize()
 
-        # Create a test FastAPI app
-        from fastapi import FastAPI
-        test_app = FastAPI(title="Test FDC3 Desktop Agent", version="0.1.0")
-
-        @test_app.on_event("startup")
-        async def startup_event():
+        @asynccontextmanager
+        async def _lifespan(app):
             await test_storage.initialize()
-
-        @test_app.on_event("shutdown")
-        async def shutdown_event():
+            yield
             await test_storage.close()
+
+        from fastapi import FastAPI
+
+        test_app = FastAPI(title="Test FDC3 Desktop Agent", version="0.9.0", lifespan=_lifespan)
 
         @test_app.get("/health")
         async def health():
@@ -37,14 +33,13 @@ class TestServerIntegration:
             apps = await test_storage.apps.list_apps()
             return {"apps": apps}
 
-        yield test_app
-
-        await test_storage.close()
+        return test_app
 
     @pytest.fixture
     def client(self, test_app):
-        """Create test client"""
-        return TestClient(test_app)
+        """Create test client and ensure it is closed after use."""
+        with TestClient(test_app) as c:
+            yield c
 
     def test_health_endpoint(self, client):
         """Test health check endpoint"""

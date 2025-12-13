@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Channel Monitor</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 1000px; margin: 0 auto; padding: 20px; }
+        .header { background:#2c3e50; color:#fff; padding:16px; border-radius:6px; margin-bottom:16px }
+        .controls { margin-bottom:12px }
+        .events { border:1px solid #ddd; padding:12px; border-radius:6px; max-height:480px; overflow:auto; background:#fff }
+        .event { border-bottom:1px solid #f1f1f1; padding:8px 0 }
+        .meta { color:#666; font-size:12px }
+        .btn { background:#3498db; color:#fff; padding:8px 12px; border-radius:4px; text-decoration:none; border:none }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Channel Monitor</h1>
+        <p>Subscribe to realtime channel events via GraphQL subscription.</p>
+    </div>
+
+    <div class="controls">
+        <label for="channel">Channel ID (leave empty for all):</label>
+        <input id="channel" placeholder="e.g. user:default" style="padding:6px; width:300px" />
+        <button id="start" class="btn">Start</button>
+        <button id="stop" class="btn" disabled>Stop</button>
+    </div>
+
+    <div class="events" id="events">
+        <p class="meta">No events yet.</p>
+    </div>
+
+    <script>
+        // Minimal graphql-ws client implementation (works with Strawberry's websocket transport)
+        let socket = null;
+        let subId = '1';
+
+        function appendEvent(ev) {
+            const out = document.getElementById('events');
+            if (out.querySelector('.meta')) out.querySelector('.meta').remove();
+            const div = document.createElement('div');
+            div.className = 'event';
+            const ctx = ev.context ? JSON.stringify(JSON.parse(ev.context), null, 2) : '';
+            div.innerHTML = `<div><strong>${ev.event_type}</strong> — <em>${ev.channel_id}</em></div>` +
+                             `<div class="meta">instance: ${ev.instance_uuid || 'system'} — ${ev.timestamp}</div>` +
+                             `<pre style="background:#f9f9f9;padding:8px;border-radius:4px">${ctx}</pre>`;
+            out.prepend(div);
+        }
+
+        function startSubscription() {
+            const channel = document.getElementById('channel').value.trim();
+            const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
+            const host = location.host;
+            const url = `${wsProto}://${host}/graphql`;
+
+            socket = new WebSocket(url, 'graphql-ws');
+            socket.onopen = () => {
+                // init
+                socket.send(JSON.stringify({ type: 'connection_init', payload: {} }));
+                // wait briefly then start
+                setTimeout(() => {
+                    const query = `subscription ($channelId: String) { channelEvents(channelId: $channelId) { event_type channel_id instance_uuid context timestamp } }`;
+                    const payload = { query, variables: { channelId: channel || null } };
+                    socket.send(JSON.stringify({ id: subId, type: 'start', payload }));
+                }, 50);
+            };
+
+            socket.onmessage = (msg) => {
+                try {
+                    const data = JSON.parse(msg.data);
+                    if (data.type === 'data' && data.id === subId) {
+                        const ev = data.payload.data.channelEvents;
+                        appendEvent(ev);
+                    }
+                } catch (e) {
+                    console.warn('Invalid WS message', e);
+                }
+            };
+
+            socket.onclose = () => {
+                document.getElementById('start').disabled = false;
+                document.getElementById('stop').disabled = true;
+            };
+
+            document.getElementById('start').disabled = true;
+            document.getElementById('stop').disabled = false;
+        }
+
+        function stopSubscription() {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ id: subId, type: 'stop' }));
+                socket.close();
+            }
+            document.getElementById('start').disabled = false;
+            document.getElementById('stop').disabled = true;
+        }
+
+        document.getElementById('start').addEventListener('click', startSubscription);
+        document.getElementById('stop').addEventListener('click', stopSubscription);
+    </script>
+</body>
+</html>

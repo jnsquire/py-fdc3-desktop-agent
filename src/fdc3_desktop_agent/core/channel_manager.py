@@ -1,6 +1,8 @@
 from typing import Dict, List, Optional, Callable, Any
 import json
+import asyncio
 from datetime import datetime
+from ..distributed.adapter import DistributedLogAdapter
 from ..api import DisplayMetadata
 
 class ChannelInstance:
@@ -18,6 +20,8 @@ class ChannelManager:
         self.instance_channels: Dict[str, str] = {}  # instance_uuid -> current_channel_id
         self.event_subscriptions: Dict[str, Dict[str, Any]] = {}  # subscription_id -> subscription info
         self.next_subscription_id = 1
+        # Optional distributed adapter to relay events across workers
+        self.distributed_adapter: Optional[DistributedLogAdapter] = None
 
     def create_channel(self, channel_id: str, channel_type: str, display_metadata: Optional[DisplayMetadata] = None) -> ChannelInstance:
         channel = ChannelInstance(channel_id, channel_type, display_metadata)
@@ -100,7 +104,7 @@ class ChannelManager:
             del self.event_subscriptions[subscription_id]
 
     def _emit_event(self, event_type: str, channel_id: str, instance_uuid: Optional[str] = None,
-                   context: Optional[Dict[str, Any]] = None):
+                   context: Optional[Dict[str, Any]] = None, remote: bool = False):
         """Emit an event to all subscribers."""
         event_data = {
             'event_type': event_type,
@@ -118,3 +122,22 @@ class ChannelManager:
                 except Exception as e:
                     # Log error but don't let it break the event emission
                     print(f"Error in channel event callback: {e}")
+
+        # Publish to distributed adapter for cross-worker delivery unless this event
+        # originated from the distributed bus (avoid loops).
+        if not remote and self.distributed_adapter is not None:
+            try:
+                asyncio.create_task(self._publish_event(event_data))
+            except Exception:
+                # Best-effort: do not break local emission if publishing fails
+                pass
+
+    async def _publish_event(self, event_data: Dict[str, Any]):
+        try:
+            adapter = self.distributed_adapter
+            if adapter is None:
+                return
+            await adapter.publish("channel_events", event_data)
+        except Exception:
+            # Swallow errors - publishing is best-effort
+            return

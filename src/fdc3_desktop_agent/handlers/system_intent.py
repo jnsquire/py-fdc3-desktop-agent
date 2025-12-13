@@ -7,7 +7,9 @@ import logging
 import os
 import webbrowser
 import subprocess
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union
+from pydantic import BaseModel
+from ..api import RequestUuid
 from pathlib import Path
 
 from fastapi import WebSocket
@@ -66,11 +68,10 @@ class SystemIntentHandler:
 
     def get_system_app_identifier(self) -> AppIdentifier:
         """Get the system app identifier"""
-        return AppIdentifier(appId=self.system_app_id)
-
+        return AppIdentifier(appId=self.system_app_id, instanceId=None, desktopAgent=None)
     async def handle_system_intent(self, intent: str, context: Optional[Dict[str, Any]],
                                   target: Optional[AppIdentifier], websocket: WebSocket,
-                                  request_uuid: str) -> Optional[RaiseIntentResponse]:
+                                  request_uuid: Union[str, RequestUuid]) -> Optional[BaseModel]:
         """Handle a system intent and return response"""
 
         handler_method = self.SYSTEM_INTENTS.get(intent)
@@ -88,27 +89,52 @@ class SystemIntentHandler:
                     source=self.get_system_app_identifier(),
                     intent=intent
                 )
+                # Ensure requestUuid is of correct type
+                try:
+                    if isinstance(request_uuid, RequestUuid):
+                        req_id = request_uuid
+                    else:
+                        req_id = RequestUuid(root=str(request_uuid))
+                except Exception:
+                    req_id = RequestUuid()
+
                 response = RaiseIntentResponse(
                     type="raiseIntentResponse",
                     payload=RaiseIntentResponsePayload(intentResolution=resolution.model_dump()),
-                    meta=AgentResponseMeta(requestUuid=request_uuid)
+                    meta=AgentResponseMeta(requestUuid=req_id)
                 )
                 return response
             else:
                 # Handler failed
+                try:
+                    if isinstance(request_uuid, RequestUuid):
+                        req_id = request_uuid
+                    else:
+                        req_id = RequestUuid(root=str(request_uuid))
+                except Exception:
+                    req_id = RequestUuid()
+
                 response = AgentResponse(
                     type="raiseIntentResponse",
                     payload=ErrorResponsePayload(error="IntentHandlingFailed"),
-                    meta=AgentResponseMeta(requestUuid=request_uuid)
+                    meta=AgentResponseMeta(requestUuid=req_id)
                 )
                 return response
 
         except Exception as e:
             logger.error(f"Failed to handle system intent {intent}: {e}")
+            try:
+                if isinstance(request_uuid, RequestUuid):
+                    req_id = request_uuid
+                else:
+                    req_id = RequestUuid(root=str(request_uuid))
+            except Exception:
+                req_id = RequestUuid()
+
             response = AgentResponse(
                 type="raiseIntentResponse",
                 payload=ErrorResponsePayload(error="IntentHandlingFailed"),
-                meta=AgentResponseMeta(requestUuid=request_uuid)
+                meta=AgentResponseMeta(requestUuid=req_id)
             )
             return response
 

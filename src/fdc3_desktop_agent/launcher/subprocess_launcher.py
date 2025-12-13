@@ -56,17 +56,21 @@ class SubprocessLauncher(ProcessLauncher):
             logger.info(f"Launching app {app_id} with command: {' '.join(cmd)}")
 
             # Launch the process
+            # By default do not capture stdout/stderr to avoid creating pipe transports
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 env=env,
                 cwd=cwd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stdout=None,
+                stderr=None
             )
 
             # Store the process
             self._running_processes[instance_uuid] = process
             self._process_events[instance_uuid] = asyncio.Event()
+
+            # Start a background reaper to clean up transports when the process exits
+            asyncio.create_task(self._reap_process(instance_uuid, process))
 
             logger.info(f"App {app_id} launched successfully with instance UUID {instance_uuid}")
 
@@ -96,17 +100,84 @@ class SubprocessLauncher(ProcessLauncher):
                 # Force kill if it doesn't terminate gracefully
                 process.kill()
                 await process.wait()
+            # Attempt to close underlying transports to avoid hanging proactor pipes
+            try:
+                tr = getattr(process, "_transport", None)
+                if tr is not None:
+                    try:
+                        tr.close()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
 
-            del self._running_processes[instance_uuid]
-            # Set the exit event
-            if instance_uuid in self._process_events:
-                self._process_events[instance_uuid].set()
+            # Clear stored refs
+            try:
+                if instance_uuid in self._process_events:
+                    self._process_events[instance_uuid].set()
+            except Exception:
+                pass
+
+            try:
+                del self._running_processes[instance_uuid]
+            except Exception:
+                pass
             logger.info(f"Terminated app instance {instance_uuid}")
             return True
 
         except Exception as e:
             logger.error(f"Failed to terminate app instance {instance_uuid}: {e}")
             return False
+
+    async def _reap_process(self, instance_uuid: str, process: asyncio.subprocess.Process) -> None:
+        """Background task: wait for process exit and ensure transports are closed."""
+        try:
+            await process.wait()
+        except Exception:
+            pass
+
+        # Attempt to close underlying transports to avoid hanging proactor pipes
+        try:
+            tr = getattr(process, "_transport", None)
+            if tr is not None:
+                try:
+                    tr.close()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # Also try to close stdout/stderr stream transports if present
+        for stream_name in ("stdout", "stderr"):
+            try:
+                stream = getattr(process, stream_name, None)
+                if stream is not None:
+                    tr = getattr(stream, "_transport", None)
+                    if tr is not None:
+                        try:
+                            tr.close()
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+        # Signal any waiters and remove references
+        try:
+            if instance_uuid in self._process_events:
+                self._process_events[instance_uuid].set()
+        except Exception:
+            pass
+
+        try:
+            if instance_uuid in self._running_processes:
+                del self._running_processes[instance_uuid]
+        except Exception:
+            pass
+        # Give the event loop a moment to finalize transports on Windows
+        try:
+            await asyncio.sleep(0.01)
+        except Exception:
+            pass
 
     async def is_app_running(self, instance_uuid: str) -> bool:
         """Check if an app instance is still running"""
@@ -135,3 +206,64 @@ class SubprocessLauncher(ProcessLauncher):
             return True
         except asyncio.TimeoutError:
             return False
+
+    async def stop(self) -> None:
+        """Stop all running subprocesses and close their transports/pipes."""
+        uuids = list(self._running_processes.keys())
+        for instance_uuid in uuids:
+            proc = self._running_processes.get(instance_uuid)
+            if not proc:
+                continue
+            try:
+                if proc.returncode is None:
+                    try:
+                        proc.terminate()
+                        await asyncio.wait_for(proc.wait(), timeout=5.0)
+                    except asyncio.TimeoutError:
+                        try:
+                            proc.kill()
+                            await proc.wait()
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+            # Attempt to close underlying transports to avoid hanging proactor pipes
+            try:
+                tr = getattr(proc, "_transport", None)
+                if tr is not None:
+                    try:
+                        tr.close()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            # Also try to close stdout/stderr stream transports if present
+            for stream_name in ("stdout", "stderr"):
+                try:
+                    stream = getattr(proc, stream_name, None)
+                    if stream is not None:
+                        tr = getattr(stream, "_transport", None)
+                        if tr is not None:
+                            try:
+                                tr.close()
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+
+            # Clear stored refs
+            try:
+                if instance_uuid in self._process_events:
+                    self._process_events[instance_uuid].set()
+            except Exception:
+                pass
+
+            try:
+                del self._running_processes[instance_uuid]
+            except Exception:
+                pass
+
+        # Ensure events dict is cleared
+        self._process_events.clear()
