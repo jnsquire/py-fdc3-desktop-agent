@@ -45,7 +45,7 @@ from ..protocol.dacp.dacp import (
 )
 from ..core import core_services
 from ..storage import Storage
-from ..launcher import SubprocessLauncher
+from ..launcher.interfaces import ProcessLauncher
 from .connection_manager import WebSocketConnectionManager
 from .system_intent import SystemIntentHandler
 
@@ -58,7 +58,7 @@ class DACPHandler:
     def __init__(
         self,
         storage: Storage,
-        launcher: SubprocessLauncher,
+        launcher: ProcessLauncher,
         connection_manager: WebSocketConnectionManager,
     ):
         self.storage = storage

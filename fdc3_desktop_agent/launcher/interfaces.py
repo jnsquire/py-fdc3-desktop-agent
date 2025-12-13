@@ -52,3 +52,8 @@ class ProcessLauncher(ABC):
     ) -> bool:
         """Wait for an app instance to exit. Returns True if it exited, False if timeout."""
         pass
+
+    @abstractmethod
+    async def stop(self) -> None:
+        """Clean up launcher resources (terminate all running processes, etc.)."""
+        pass

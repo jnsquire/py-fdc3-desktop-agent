@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 jobs:
   test:
@@ -32,7 +32,7 @@ jobs:
 
       - name: Install project (dev extras)
         env:
-          PIP_DISABLE_PIP_VERSION_CHECK: '1'
+          PIP_DISABLE_PIP_VERSION_CHECK: "1"
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e '.[dev]'
@@ -45,8 +45,8 @@ jobs:
 
       - name: Run tests with coverage
         env:
-          FDC3_DISTRIBUTED_ADAPTER: ''
-          FDC3_DB_PATH: ':memory:'
+          FDC3_DISTRIBUTED_ADAPTER: ""
+          FDC3_DB_PATH: ":memory:"
         run: |
           python -m pytest --cov=fdc3_desktop_agent --cov-report=xml -q
 

@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, List, Optional
 if TYPE_CHECKING:
     from .distributed.adapter import DistributedLogAdapter
     from .launcher.interfaces import ProcessLauncher
-    from .storage.interfaces import StorageInterface
+    from .storage.interfaces import Storage
 
 
 def _default_allowed_origins() -> List[str]:
@@ -66,7 +66,7 @@ class DesktopAgentConfig:
     allowed_origins: List[str] = field(default_factory=_default_allowed_origins)
 
     # Optional custom implementations (if None, defaults are used)
-    storage: Optional["StorageInterface"] = None
+    storage: Optional["Storage"] = None
     launcher: Optional["ProcessLauncher"] = None
     distributed_adapter: Optional["DistributedLogAdapter"] = None
 

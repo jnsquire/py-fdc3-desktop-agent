@@ -7,14 +7,11 @@ from strawberry.fastapi import GraphQLRouter
 import asyncio
 import json
 import logging
-import os
 from typing import Dict, Set, Optional
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from ..api.graphql import schema, set_graphql_storage
 from ..protocol.dacp.dacp import AgentEventMeta, AgentEvent, AgentEventPayload
-from ..transport.wcp.wcp import WCP4ValidateAppIdentity
 from ..core import CoreServices
 from ..distributed.factory import get_adapter
 from ..storage import SqliteStorage
