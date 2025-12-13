@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FDC3 Desktop Agent - System Settings</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .header {
+            background: #2c3e50;
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, textarea, select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .btn {
+            background: #3498db;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            margin-right: 10px;
+        }
+        .btn:hover {
+            background: #2980b9;
+        }
+        .btn-success {
+            background: #27ae60;
+        }
+        .btn-success:hover {
+            background: #229954;
+        }
+        .setting-item {
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+        }
+        .origins-list {
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .origin-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 5px 0;
+            border-bottom: 1px solid #eee;
+        }
+        .origin-item:last-child {
+            border-bottom: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>FDC3 Desktop Agent - System Settings</h1>
+        <p>Configure desktop agent behavior and security settings</p>
+    </div>
+
+    <div class="section">
+        <h2>Security Settings</h2>
+        <form id="security-form">
+            <div class="form-group">
+                <label for="allowed-origins">Allowed Origins (one per line):</label>
+                <textarea id="allowed-origins" rows="10" placeholder="http://localhost:3000&#10;https://myapp.com&#10;*.example.com"></textarea>
+            </div>
+            <button type="submit" class="btn btn-success">Save Security Settings</button>
+        </form>
+    </div>
+
+    <div class="section">
+        <h2>System Information</h2>
+        <div class="setting-item">
+            <strong>Version:</strong> 0.1.0
+        </div>
+        <div class="setting-item">
+            <strong>Status:</strong> <span id="status">Running</span>
+        </div>
+        <div class="setting-item">
+            <strong>WebSocket Port:</strong> 8000
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Quick Actions</h2>
+        <a href="/app-directory" class="btn">App Directory</a>
+        <a href="/channels" class="btn">Channel Management</a>
+        <a href="/diagnostics" class="btn">System Diagnostics</a>
+        <a href="/admin" class="btn">Admin Panel</a>
+    </div>
+
+    <script>
+        // Load current settings
+        async function loadSettings() {
+            try {
+                // For now, just show placeholder data
+                // In a real implementation, this would fetch from the server
+                document.getElementById('allowed-origins').value =
+                    'http://localhost:3000\nhttps://example.com\n*.trusted.com';
+            } catch (error) {
+                console.error('Failed to load settings:', error);
+            }
+        }
+
+        // Save security settings
+        document.getElementById('security-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const origins = document.getElementById('allowed-origins').value
+                .split('\n')
+                .map(line => line.trim())
+                .filter(line => line.length > 0);
+
+            try {
+                // In a real implementation, this would save to the server
+                alert('Security settings saved successfully!');
+            } catch (error) {
+                alert('Failed to save settings: ' + error.message);
+            }
+        });
+
+        // Load settings on page load
+        loadSettings();
+    </script>
+</body>
+</html>

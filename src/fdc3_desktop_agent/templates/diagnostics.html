@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FDC3 Desktop Agent - System Diagnostics</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .header {
+            background: #2c3e50;
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .diagnostic-item {
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+        }
+        .status {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .status-pass {
+            background: #27ae60;
+            color: white;
+        }
+        .status-fail {
+            background: #e74c3c;
+            color: white;
+        }
+        .status-warn {
+            background: #f39c12;
+            color: white;
+        }
+        .btn {
+            background: #3498db;
+            color: white;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            margin-right: 10px;
+        }
+        .btn:hover {
+            background: #2980b9;
+        }
+        .btn-primary {
+            background: #3498db;
+        }
+        .btn-success {
+            background: #27ae60;
+        }
+        .btn-success:hover {
+            background: #229954;
+        }
+        .metric {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 5px 0;
+        }
+        .metric-value {
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>FDC3 Desktop Agent - System Diagnostics</h1>
+        <p>Health checks and system status monitoring</p>
+    </div>
+
+    <div class="section">
+        <h2>System Health</h2>
+        <div id="health-checks">
+            <p>Loading diagnostics...</p>
+        </div>
+        <button id="run-diagnostics" class="btn btn-primary">Run Full Diagnostics</button>
+    </div>
+
+    <div class="section">
+        <h2>System Metrics</h2>
+        <div id="metrics">
+            <div class="metric">
+                <span>Server Status:</span>
+                <span class="metric-value status-pass">Running</span>
+            </div>
+            <div class="metric">
+                <span>Active Connections:</span>
+                <span class="metric-value">0</span>
+            </div>
+            <div class="metric">
+                <span>Registered Apps:</span>
+                <span class="metric-value">1</span>
+            </div>
+            <div class="metric">
+                <span>Memory Usage:</span>
+                <span class="metric-value">45 MB</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Recent Activity</h2>
+        <div id="activity-log">
+            <p>No recent activity</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Quick Actions</h2>
+        <a href="/system-settings" class="btn">System Settings</a>
+        <a href="/app-directory" class="btn">App Directory</a>
+        <a href="/admin" class="btn">Admin Panel</a>
+    </div>
+
+    <script>
+        // Mock diagnostic data
+        const mockDiagnostics = [
+            { name: 'WebSocket Server', status: 'pass', message: 'Running on port 8000' },
+            { name: 'Database Connection', status: 'pass', message: 'SQLite database accessible' },
+            { name: 'App Registry', status: 'pass', message: '1 system app registered' },
+            { name: 'Intent Resolution', status: 'pass', message: 'System intents available' },
+            { name: 'Access Control', status: 'warn', message: 'No origins configured' },
+            { name: 'Channel Manager', status: 'pass', message: 'Default channels available' }
+        ];
+
+        function displayDiagnostics(diagnostics) {
+            const container = document.getElementById('health-checks');
+
+            container.innerHTML = diagnostics.map(diagnostic => `
+                <div class="diagnostic-item">
+                    <strong>${diagnostic.name}:</strong>
+                    <span class="status status-${diagnostic.status}">${diagnostic.status.toUpperCase()}</span>
+                    <p>${diagnostic.message}</p>
+                </div>
+            `).join('');
+        }
+
+        function runDiagnostics() {
+            // Simulate running diagnostics
+            document.getElementById('run-diagnostics').disabled = true;
+            document.getElementById('run-diagnostics').textContent = 'Running...';
+
+            setTimeout(() => {
+                displayDiagnostics(mockDiagnostics);
+                document.getElementById('run-diagnostics').disabled = false;
+                document.getElementById('run-diagnostics').textContent = 'Run Full Diagnostics';
+            }, 2000);
+        }
+
+        // Initialize
+        displayDiagnostics(mockDiagnostics);
+
+        // Event listeners
+        document.getElementById('run-diagnostics').addEventListener('click', runDiagnostics);
+    </script>
+</body>
+</html>
