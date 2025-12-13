@@ -16,7 +16,9 @@ logger = logging.getLogger(__name__)
 class AccessControlHandler:
     """Handles WebSocket access control validation"""
 
-    def __init__(self, access_control_manager: AccessControlManager, allowed_origins: List[str]):
+    def __init__(
+        self, access_control_manager: AccessControlManager, allowed_origins: List[str]
+    ):
         self.access_control = access_control_manager
         self.allowed_origins = allowed_origins
 
@@ -30,8 +32,7 @@ class AccessControlHandler:
         origin = websocket.headers.get("origin")
 
         access_request = AccessRequest(
-            origin=origin,
-            user_agent=websocket.headers.get("user-agent")
+            origin=origin, user_agent=websocket.headers.get("user-agent")
         )
 
         access_decision = await self.access_control.check_access(access_request)

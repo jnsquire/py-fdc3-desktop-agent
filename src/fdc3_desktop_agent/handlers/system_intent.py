@@ -15,8 +15,11 @@ from pathlib import Path
 from fastapi import WebSocket
 
 from ..protocol.dacp.dacp import (
-    AgentResponse, AgentResponseMeta, ErrorResponsePayload,
-    RaiseIntentResponse, RaiseIntentResponsePayload
+    AgentResponse,
+    AgentResponseMeta,
+    ErrorResponsePayload,
+    RaiseIntentResponse,
+    RaiseIntentResponsePayload,
 )
 from ..api import IntentResolution, AppIdentifier
 
@@ -33,25 +36,20 @@ class SystemIntentHandler:
         "fdc3.manageApps": "manage_apps",
         "fdc3.installApp": "install_app",
         "fdc3.uninstallApp": "uninstall_app",
-
         # System Configuration
         "fdc3.systemSettings": "system_settings",
         "fdc3.configureChannels": "configure_channels",
         "fdc3.systemDiagnostics": "system_diagnostics",
-
         # Channel Management
         "fdc3.createChannel": "create_channel",
         "fdc3.deleteChannel": "delete_channel",
         "fdc3.manageChannel": "manage_channel",
-
         # Built-in System Apps
         "fdc3.resolveIntent": "resolve_intent",
-
         # System Browser/File Manager
         "fdc3.openUrl": "open_url",
         "fdc3.openFile": "open_file",
         "fdc3.systemSearch": "system_search",
-
         # System Notifications
         "fdc3.showNotification": "show_notification",
         "fdc3.systemAlert": "system_alert",
@@ -68,10 +66,18 @@ class SystemIntentHandler:
 
     def get_system_app_identifier(self) -> AppIdentifier:
         """Get the system app identifier"""
-        return AppIdentifier(appId=self.system_app_id, instanceId=None, desktopAgent=None)
-    async def handle_system_intent(self, intent: str, context: Optional[Dict[str, Any]],
-                                  target: Optional[AppIdentifier], websocket: WebSocket,
-                                  request_uuid: Union[str, RequestUuid]) -> Optional[BaseModel]:
+        return AppIdentifier(
+            appId=self.system_app_id, instanceId=None, desktopAgent=None
+        )
+
+    async def handle_system_intent(
+        self,
+        intent: str,
+        context: Optional[Dict[str, Any]],
+        target: Optional[AppIdentifier],
+        websocket: WebSocket,
+        request_uuid: Union[str, RequestUuid],
+    ) -> Optional[BaseModel]:
         """Handle a system intent and return response"""
 
         handler_method = self.SYSTEM_INTENTS.get(intent)
@@ -86,8 +92,7 @@ class SystemIntentHandler:
             if success:
                 # Create successful resolution
                 resolution = IntentResolution(
-                    source=self.get_system_app_identifier(),
-                    intent=intent
+                    source=self.get_system_app_identifier(), intent=intent
                 )
                 # Ensure requestUuid is of correct type
                 try:
@@ -100,8 +105,10 @@ class SystemIntentHandler:
 
                 response = RaiseIntentResponse(
                     type="raiseIntentResponse",
-                    payload=RaiseIntentResponsePayload(intentResolution=resolution.model_dump()),
-                    meta=AgentResponseMeta(requestUuid=req_id)
+                    payload=RaiseIntentResponsePayload(
+                        intentResolution=resolution.model_dump()
+                    ),
+                    meta=AgentResponseMeta(requestUuid=req_id),
                 )
                 return response
             else:
@@ -117,7 +124,7 @@ class SystemIntentHandler:
                 response = AgentResponse(
                     type="raiseIntentResponse",
                     payload=ErrorResponsePayload(error="IntentHandlingFailed"),
-                    meta=AgentResponseMeta(requestUuid=req_id)
+                    meta=AgentResponseMeta(requestUuid=req_id),
                 )
                 return response
 
@@ -134,11 +141,13 @@ class SystemIntentHandler:
             response = AgentResponse(
                 type="raiseIntentResponse",
                 payload=ErrorResponsePayload(error="IntentHandlingFailed"),
-                meta=AgentResponseMeta(requestUuid=req_id)
+                meta=AgentResponseMeta(requestUuid=req_id),
             )
             return response
 
-    async def _handle_open_app_directory(self, context: Optional[Dict[str, Any]], target: Optional[AppIdentifier]) -> bool:
+    async def _handle_open_app_directory(
+        self, context: Optional[Dict[str, Any]], target: Optional[AppIdentifier]
+    ) -> bool:
         """Open app directory management interface"""
         try:
             # Open the app directory management page
@@ -149,7 +158,9 @@ class SystemIntentHandler:
             logger.error(f"Failed to open app directory: {e}")
             return False
 
-    async def _handle_manage_apps(self, context: Optional[Dict[str, Any]], target: Optional[AppIdentifier]) -> bool:
+    async def _handle_manage_apps(
+        self, context: Optional[Dict[str, Any]], target: Optional[AppIdentifier]
+    ) -> bool:
         """Launch app management/configuration UI"""
         try:
             # Open the app management interface
@@ -160,7 +171,9 @@ class SystemIntentHandler:
             logger.error(f"Failed to open app management: {e}")
             return False
 
-    async def _handle_install_app(self, context: Optional[Dict[str, Any]], target: Optional[AppIdentifier]) -> bool:
+    async def _handle_install_app(
+        self, context: Optional[Dict[str, Any]], target: Optional[AppIdentifier]
+    ) -> bool:
         """Handle app installation from app directory"""
         # For now, just open the app directory with install mode
         try:
@@ -171,7 +184,9 @@ class SystemIntentHandler:
             logger.error(f"Failed to open app installation: {e}")
             return False
 
-    async def _handle_uninstall_app(self, context: Optional[Dict[str, Any]], target: Optional[AppIdentifier]) -> bool:
+    async def _handle_uninstall_app(
+        self, context: Optional[Dict[str, Any]], target: Optional[AppIdentifier]
+    ) -> bool:
         """Remove apps from the system"""
         try:
             uninstall_url = "http://localhost:8000/manage-apps?mode=uninstall"
@@ -181,7 +196,9 @@ class SystemIntentHandler:
             logger.error(f"Failed to open app uninstallation: {e}")
             return False
 
-    async def _handle_system_settings(self, context: Optional[Dict[str, Any]], target: Optional[AppIdentifier]) -> bool:
+    async def _handle_system_settings(
+        self, context: Optional[Dict[str, Any]], target: Optional[AppIdentifier]
+    ) -> bool:
         """Open system configuration panel"""
         try:
             settings_url = "http://localhost:8000/system-settings"
@@ -191,7 +208,9 @@ class SystemIntentHandler:
             logger.error(f"Failed to open system settings: {e}")
             return False
 
-    async def _handle_configure_channels(self, context: Optional[Dict[str, Any]], target: Optional[AppIdentifier]) -> bool:
+    async def _handle_configure_channels(
+        self, context: Optional[Dict[str, Any]], target: Optional[AppIdentifier]
+    ) -> bool:
         """Manage user/system channels"""
         try:
             channels_url = "http://localhost:8000/channels"
@@ -201,7 +220,9 @@ class SystemIntentHandler:
             logger.error(f"Failed to open channel configuration: {e}")
             return False
 
-    async def _handle_system_diagnostics(self, context: Optional[Dict[str, Any]], target: Optional[AppIdentifier]) -> bool:
+    async def _handle_system_diagnostics(
+        self, context: Optional[Dict[str, Any]], target: Optional[AppIdentifier]
+    ) -> bool:
         """Run system health checks and diagnostics"""
         try:
             diagnostics_url = "http://localhost:8000/diagnostics"
@@ -211,7 +232,9 @@ class SystemIntentHandler:
             logger.error(f"Failed to open diagnostics: {e}")
             return False
 
-    async def _handle_create_channel(self, context: Optional[Dict[str, Any]], target: Optional[AppIdentifier]) -> bool:
+    async def _handle_create_channel(
+        self, context: Optional[Dict[str, Any]], target: Optional[AppIdentifier]
+    ) -> bool:
         """Create new user channels"""
         try:
             create_channel_url = "http://localhost:8000/channels?mode=create"
@@ -221,7 +244,9 @@ class SystemIntentHandler:
             logger.error(f"Failed to open channel creation: {e}")
             return False
 
-    async def _handle_delete_channel(self, context: Optional[Dict[str, Any]], target: Optional[AppIdentifier]) -> bool:
+    async def _handle_delete_channel(
+        self, context: Optional[Dict[str, Any]], target: Optional[AppIdentifier]
+    ) -> bool:
         """Remove user channels"""
         try:
             delete_channel_url = "http://localhost:8000/channels?mode=delete"
@@ -231,7 +256,9 @@ class SystemIntentHandler:
             logger.error(f"Failed to open channel deletion: {e}")
             return False
 
-    async def _handle_manage_channel(self, context: Optional[Dict[str, Any]], target: Optional[AppIdentifier]) -> bool:
+    async def _handle_manage_channel(
+        self, context: Optional[Dict[str, Any]], target: Optional[AppIdentifier]
+    ) -> bool:
         """Configure channel settings and membership"""
         try:
             manage_channel_url = "http://localhost:8000/channels?mode=manage"
@@ -241,7 +268,9 @@ class SystemIntentHandler:
             logger.error(f"Failed to open channel management: {e}")
             return False
 
-    async def _handle_resolve_intent(self, context: Optional[Dict[str, Any]], target: Optional[AppIdentifier]) -> bool:
+    async def _handle_resolve_intent(
+        self, context: Optional[Dict[str, Any]], target: Optional[AppIdentifier]
+    ) -> bool:
         """Show intent resolver when multiple apps can handle an intent"""
         try:
             # Extract intent information from context
@@ -255,7 +284,9 @@ class SystemIntentHandler:
             logger.error(f"Failed to open intent resolver: {e}")
             return False
 
-    async def _handle_open_url(self, context: Optional[Dict[str, Any]], target: Optional[AppIdentifier]) -> bool:
+    async def _handle_open_url(
+        self, context: Optional[Dict[str, Any]], target: Optional[AppIdentifier]
+    ) -> bool:
         """Launch system browser for URLs"""
         try:
             if context and "url" in context:
@@ -269,16 +300,18 @@ class SystemIntentHandler:
             logger.error(f"Failed to open URL: {e}")
             return False
 
-    async def _handle_open_file(self, context: Optional[Dict[str, Any]], target: Optional[AppIdentifier]) -> bool:
+    async def _handle_open_file(
+        self, context: Optional[Dict[str, Any]], target: Optional[AppIdentifier]
+    ) -> bool:
         """Launch system file manager for local files"""
         try:
             if context and "filePath" in context:
                 file_path = context["filePath"]
                 # Use system default application for the file
-                if os.name == 'nt':  # Windows
+                if os.name == "nt":  # Windows
                     os.startfile(file_path)
                 else:  # Unix-like systems
-                    subprocess.run(['xdg-open', file_path])
+                    subprocess.run(["xdg-open", file_path])
                 return True
             else:
                 logger.warning("No filePath provided in context for fdc3.openFile")
@@ -287,7 +320,9 @@ class SystemIntentHandler:
             logger.error(f"Failed to open file: {e}")
             return False
 
-    async def _handle_system_search(self, context: Optional[Dict[str, Any]], target: Optional[AppIdentifier]) -> bool:
+    async def _handle_system_search(
+        self, context: Optional[Dict[str, Any]], target: Optional[AppIdentifier]
+    ) -> bool:
         """System-wide search functionality"""
         try:
             search_url = "http://localhost:8000/search"
@@ -299,7 +334,9 @@ class SystemIntentHandler:
             logger.error(f"Failed to open system search: {e}")
             return False
 
-    async def _handle_show_notification(self, context: Optional[Dict[str, Any]], target: Optional[AppIdentifier]) -> bool:
+    async def _handle_show_notification(
+        self, context: Optional[Dict[str, Any]], target: Optional[AppIdentifier]
+    ) -> bool:
         """Display system notifications"""
         try:
             # For now, just log the notification - in a real implementation,
@@ -313,7 +350,9 @@ class SystemIntentHandler:
             logger.error(f"Failed to show notification: {e}")
             return False
 
-    async def _handle_system_alert(self, context: Optional[Dict[str, Any]], target: Optional[AppIdentifier]) -> bool:
+    async def _handle_system_alert(
+        self, context: Optional[Dict[str, Any]], target: Optional[AppIdentifier]
+    ) -> bool:
         """Show system alerts and confirmations"""
         try:
             alert_url = "http://localhost:8000/alert"

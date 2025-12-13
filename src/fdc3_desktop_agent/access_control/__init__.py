@@ -5,7 +5,7 @@ from .interfaces import (
     AccessRequest,
     AccessDecision,
     AccessControlManager,
-    AllowlistAccessPolicy
+    AllowlistAccessPolicy,
 )
 
 __all__ = [
@@ -13,5 +13,5 @@ __all__ = [
     "AccessRequest",
     "AccessDecision",
     "AccessControlManager",
-    "AllowlistAccessPolicy"
+    "AllowlistAccessPolicy",
 ]

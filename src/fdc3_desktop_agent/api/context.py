@@ -11,20 +11,20 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class Schema(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra="allow",
     )
     type: str = Field(
         ...,
-        description='The type property is the only _required_ part of the FDC3 context data schema. The FDC3 [API](https://fdc3.finos.org/docs/api/spec) relies on the `type` property being present to route shared context data appropriately.\n\nFDC3 [Intents](https://fdc3.finos.org/docs/intents/spec) also register the context data types they support in an FDC3 [App Directory](https://fdc3.finos.org/docs/app-directory/overview), used for intent discovery and routing.\n\nStandardized FDC3 context types have well-known `type` properties prefixed with the `fdc3` namespace, e.g. `fdc3.instrument`. For non-standard types, e.g. those defined and used by a particular organization, the convention is to prefix them with an organization-specific namespace, e.g. `blackrock.fund`.\n\nSee the [Context Data Specification](https://fdc3.finos.org/docs/context/spec) for more information about context data types.',
-        title='Type',
+        description="The type property is the only _required_ part of the FDC3 context data schema. The FDC3 [API](https://fdc3.finos.org/docs/api/spec) relies on the `type` property being present to route shared context data appropriately.\n\nFDC3 [Intents](https://fdc3.finos.org/docs/intents/spec) also register the context data types they support in an FDC3 [App Directory](https://fdc3.finos.org/docs/app-directory/overview), used for intent discovery and routing.\n\nStandardized FDC3 context types have well-known `type` properties prefixed with the `fdc3` namespace, e.g. `fdc3.instrument`. For non-standard types, e.g. those defined and used by a particular organization, the convention is to prefix them with an organization-specific namespace, e.g. `blackrock.fund`.\n\nSee the [Context Data Specification](https://fdc3.finos.org/docs/context/spec) for more information about context data types.",
+        title="Type",
     )
     name: Optional[str] = Field(
         None,
-        description='Context data objects may include a name property that can be used for more information, or display purposes. Some derived types may require the name object as mandatory, depending on use case.',
-        title='Name',
+        description="Context data objects may include a name property that can be used for more information, or display purposes. Some derived types may require the name object as mandatory, depending on use case.",
+        title="Name",
     )
     id: Optional[Dict[str, Any]] = Field(
         None,
-        description='Context data objects may include a set of equivalent key-value pairs that can be used to help applications identify and look up the context type they receive in their own domain. The idea behind this design is that applications can provide as many equivalent identifiers to a target application as possible, e.g. an instrument may be represented by an ISIN, CUSIP or Bloomberg identifier.\n\nIdentifiers do not make sense for all types of data, so the `id` property is therefore optional, but some derived types may choose to require at least one identifier. Identifier values SHOULD always be of type string.',
-        title='Id',
+        description="Context data objects may include a set of equivalent key-value pairs that can be used to help applications identify and look up the context type they receive in their own domain. The idea behind this design is that applications can provide as many equivalent identifiers to a target application as possible, e.g. an instrument may be represented by an ISIN, CUSIP or Bloomberg identifier.\n\nIdentifiers do not make sense for all types of data, so the `id` property is therefore optional, but some derived types may choose to require at least one identifier. Identifier values SHOULD always be of type string.",
+        title="Id",
     )

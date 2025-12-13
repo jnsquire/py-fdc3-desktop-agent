@@ -29,7 +29,7 @@ dev = [
 
 # Optional dependencies for distributed adapters
 etcd = [
-  "etcd3aio>=1.1"
+  "etcd3>=0.12"
 ]
 
 consul = [
@@ -37,7 +37,7 @@ consul = [
 ]
 
 distributed = [
-  "etcd3aio>=1.1",
+  "etcd3>=0.12",
   "aiohttp>=3.8"
 ]
 

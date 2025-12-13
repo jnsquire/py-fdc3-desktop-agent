@@ -3,10 +3,16 @@ from .listener_store import ListenerStore
 from .channel_manager import ChannelManager
 from .app_registry import AppRegistry
 
+
 class ContextRouter:
     """Handles broadcast routing, context validation, and avoids echo."""
 
-    def __init__(self, listener_store: ListenerStore, channel_manager: ChannelManager, app_registry: AppRegistry):
+    def __init__(
+        self,
+        listener_store: ListenerStore,
+        channel_manager: ChannelManager,
+        app_registry: AppRegistry,
+    ):
         self.listener_store = listener_store
         self.channel_manager = channel_manager
         self.app_registry = app_registry
@@ -16,7 +22,7 @@ class ContextRouter:
         targets = set()
 
         # Get context type
-        context_type = context.get('type')
+        context_type = context.get("type")
         if not context_type:
             raise ValueError("Context must have a 'type' field")
 
@@ -34,6 +40,8 @@ class ContextRouter:
                     targets.add(member_uuid)
 
             # Emit broadcast event for the channel
-            self.channel_manager.broadcast_to_channel(current_channel.id, context, source_instance_uuid)
+            self.channel_manager.broadcast_to_channel(
+                current_channel.id, context, source_instance_uuid
+            )
 
         return list(targets)

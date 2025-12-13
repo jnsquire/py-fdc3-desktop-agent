@@ -1,9 +1,14 @@
 # WCP schema-level tests
 
 from fdc3_desktop_agent.transport.wcp.wcp import (
-    WCP1Hello, WCP3Handshake, WCP4ValidateAppIdentity,
-    WCP5ValidateAppIdentityResponse, WCP6Goodbye,
-    WCP1HelloPayload, WCP3HandshakePayload, WCP1HelloMeta
+    WCP1Hello,
+    WCP3Handshake,
+    WCP4ValidateAppIdentity,
+    WCP5ValidateAppIdentityResponse,
+    WCP6Goodbye,
+    WCP1HelloPayload,
+    WCP3HandshakePayload,
+    WCP1HelloMeta,
 )
 
 
@@ -17,12 +22,12 @@ class TestWCPMessages:
             "payload": {
                 "identityUrl": "https://example.com/app",
                 "actualUrl": "https://example.com/app/index.html",
-                "fdc3Version": "2.0"
+                "fdc3Version": "2.0",
             },
             "meta": {
                 "connectionAttemptUuid": "test-uuid",
-                "timestamp": "2025-01-01T00:00:00Z"
-            }
+                "timestamp": "2025-01-01T00:00:00Z",
+            },
         }
 
         wcp1 = WCP1Hello(**message)
@@ -39,12 +44,12 @@ class TestWCPMessages:
             "payload": {
                 "fdc3Version": "2.0",
                 "intentResolverUrl": None,
-                "channelSelectorUrl": None
+                "channelSelectorUrl": None,
             },
             "meta": {
                 "connectionAttemptUuid": "test-uuid",
-                "timestamp": "2025-01-01T00:00:00Z"
-            }
+                "timestamp": "2025-01-01T00:00:00Z",
+            },
         }
 
         wcp3 = WCP3Handshake(**message)
@@ -57,14 +62,11 @@ class TestWCPMessages:
         """Test parsing of WCP4ValidateAppIdentity payloads"""
         message = {
             "type": "WCP4ValidateAppIdentity",
-            "payload": {
-                "instanceId": "instance1",
-                "instanceUuid": "uuid1"
-            },
+            "payload": {"instanceId": "instance1", "instanceUuid": "uuid1"},
             "meta": {
                 "connectionAttemptUuid": "test-uuid",
-                "timestamp": "2025-01-01T00:00:00Z"
-            }
+                "timestamp": "2025-01-01T00:00:00Z",
+            },
         }
 
         wcp4 = WCP4ValidateAppIdentity(**message)
@@ -80,12 +82,9 @@ class TestWCPMessages:
                 "appId": "test-app",
                 "instanceId": "instance1",
                 "instanceUuid": "uuid1",
-                "implementationMetadata": {}
+                "implementationMetadata": {},
             },
-            "meta": {
-                "requestUuid": "test-uuid",
-                "timestamp": "2025-01-01T00:00:00Z"
-            }
+            "meta": {"requestUuid": "test-uuid", "timestamp": "2025-01-01T00:00:00Z"},
         }
 
         wcp5 = WCP5ValidateAppIdentityResponse(**message)
@@ -102,8 +101,8 @@ class TestWCPMessages:
             "payload": {},
             "meta": {
                 "connectionAttemptUuid": "test-uuid",
-                "timestamp": "2025-01-01T00:00:00Z"
-            }
+                "timestamp": "2025-01-01T00:00:00Z",
+            },
         }
 
         wcp6 = WCP6Goodbye(**message)
@@ -122,15 +121,14 @@ class TestWCPSerialization:
             payload=WCP1HelloPayload(
                 identityUrl="https://example.com/app",
                 actualUrl="https://example.com/app/index.html",
-                fdc3Version="2.0"
+                fdc3Version="2.0",
             ),
             meta=WCP1HelloMeta(
-                connectionAttemptUuid="test-uuid",
-                timestamp="2025-01-01T00:00:00Z"
-            )
+                connectionAttemptUuid="test-uuid", timestamp="2025-01-01T00:00:00Z"
+            ),
         )
 
-        data = wcp1.model_dump(mode='json')
+        data = wcp1.model_dump(mode="json")
         assert data["type"] == "WCP1Hello"
         assert data["payload"]["identityUrl"] == "https://example.com/app"
         assert data["payload"]["actualUrl"] == "https://example.com/app/index.html"
@@ -141,14 +139,11 @@ class TestWCPSerialization:
         wcp3 = WCP3Handshake(
             type="WCP3Handshake",
             payload=WCP3HandshakePayload(
-                fdc3Version="2.0",
-                intentResolverUrl=None,
-                channelSelectorUrl=None
+                fdc3Version="2.0", intentResolverUrl=None, channelSelectorUrl=None
             ),
             meta=WCP1HelloMeta(
-                connectionAttemptUuid="test-uuid",
-                timestamp="2025-01-01T00:00:00Z"
-            )
+                connectionAttemptUuid="test-uuid", timestamp="2025-01-01T00:00:00Z"
+            ),
         )
 
         data = wcp3.model_dump()
@@ -164,15 +159,15 @@ class TestOriginValidation:
     def test_origin_validation_allowed(self):
         """Test that allowed origins pass validation"""
         from urllib.parse import urlparse
-        
+
         # Test cases for origin validation
         identity_url = "https://example.com/app"
         actual_url = "https://example.com/app/index.html"
         allowed_origins = ["example.com"]
-        
+
         identity_origin = urlparse(identity_url).netloc
         actual_origin = urlparse(actual_url).netloc
-        
+
         # Both origins should be in allowed list
         assert identity_origin in allowed_origins
         assert actual_origin in allowed_origins
@@ -180,15 +175,15 @@ class TestOriginValidation:
     def test_origin_validation_blocked(self):
         """Test that blocked origins fail validation"""
         from urllib.parse import urlparse
-        
+
         # Test cases for origin validation
         identity_url = "https://malicious.com/app"
         actual_url = "https://malicious.com/app/index.html"
         allowed_origins = ["example.com"]
-        
+
         identity_origin = urlparse(identity_url).netloc
         actual_origin = urlparse(actual_url).netloc
-        
+
         # Neither origin should be in allowed list
         assert identity_origin not in allowed_origins
         assert actual_origin not in allowed_origins
@@ -196,15 +191,15 @@ class TestOriginValidation:
     def test_origin_validation_wildcard(self):
         """Test wildcard origin patterns"""
         from urllib.parse import urlparse
-        
+
         # Test wildcard patterns
         identity_url = "https://app.example.com/app"
         actual_url = "https://app.example.com/app/index.html"
         allowed_origins = ["*.example.com"]
-        
+
         identity_origin = urlparse(identity_url).netloc
         actual_origin = urlparse(actual_url).netloc
-        
+
         # Check wildcard matching
         allowed = False
         for allowed_origin in allowed_origins:
@@ -213,9 +208,11 @@ class TestOriginValidation:
                 if identity_origin.endswith(prefix):
                     allowed = True
                     break
-        
-        assert allowed, f"Origin {identity_origin} should match wildcard {allowed_origins[0]}"
-        
+
+        assert (
+            allowed
+        ), f"Origin {identity_origin} should match wildcard {allowed_origins[0]}"
+
         allowed = False
         for allowed_origin in allowed_origins:
             if allowed_origin.startswith("*."):
@@ -223,5 +220,7 @@ class TestOriginValidation:
                 if actual_origin.endswith(prefix):
                     allowed = True
                     break
-        
-        assert allowed, f"Origin {actual_origin} should match wildcard {allowed_origins[0]}"
+
+        assert (
+            allowed
+        ), f"Origin {actual_origin} should match wildcard {allowed_origins[0]}"

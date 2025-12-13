@@ -25,7 +25,7 @@ class TestSqliteStorage:
             version="1.0.0",
             description="A test app",
             icons=[{"src": "icon.png", "size": "32x32"}],
-            intents=["ViewChart", "CreateInteraction"]
+            intents=["ViewChart", "CreateInteraction"],
         )
 
         # Add app
@@ -61,7 +61,7 @@ class TestSqliteStorage:
             args=["-m", "myapp"],
             env={"ENV_VAR": "value"},
             cwd="/path/to/app",
-            timeout=60
+            timeout=60,
         )
 
         # Set config

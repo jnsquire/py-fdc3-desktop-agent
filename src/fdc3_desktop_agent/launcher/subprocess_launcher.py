@@ -20,9 +20,13 @@ class SubprocessLauncher(ProcessLauncher):
         self._running_processes: Dict[str, asyncio.subprocess.Process] = {}
         self._process_events: Dict[str, asyncio.Event] = {}
 
-    async def launch_app(self, app_id: str, launch_config: LaunchConfig,
-                        context: Optional[Dict[str, Any]] = None,
-                        target: Optional[AppIdentifier] = None) -> LaunchResult:
+    async def launch_app(
+        self,
+        app_id: str,
+        launch_config: LaunchConfig,
+        context: Optional[Dict[str, Any]] = None,
+        target: Optional[AppIdentifier] = None,
+    ) -> LaunchResult:
         """Launch an app process with the given configuration"""
         try:
             # Build command line arguments
@@ -33,19 +37,25 @@ class SubprocessLauncher(ProcessLauncher):
             env.update(launch_config.env)
 
             # Add FDC3-specific environment variables
-            instance_id = target.instanceId if target and target.instanceId else f"instance_{uuid.uuid4().hex[:8]}"
+            instance_id = (
+                target.instanceId
+                if target and target.instanceId
+                else f"instance_{uuid.uuid4().hex[:8]}"
+            )
             instance_uuid = str(uuid.uuid4())
 
-            env.update({
-                'FDC3_APP_ID': app_id,
-                'FDC3_INSTANCE_ID': instance_id,
-                'FDC3_INSTANCE_UUID': instance_uuid,
-                'FDC3_DESKTOP_AGENT_URL': 'ws://localhost:8000/ws',  # TODO: Make configurable
-            })
+            env.update(
+                {
+                    "FDC3_APP_ID": app_id,
+                    "FDC3_INSTANCE_ID": instance_id,
+                    "FDC3_INSTANCE_UUID": instance_uuid,
+                    "FDC3_DESKTOP_AGENT_URL": "ws://localhost:8000/ws",  # TODO: Make configurable
+                }
+            )
 
             # Add context if provided
             if context:
-                env['FDC3_CONTEXT'] = str(context)  # TODO: Proper JSON serialization
+                env["FDC3_CONTEXT"] = str(context)  # TODO: Proper JSON serialization
 
             # Determine working directory
             cwd = launch_config.cwd if launch_config.cwd else None
@@ -58,11 +68,7 @@ class SubprocessLauncher(ProcessLauncher):
             # Launch the process
             # By default do not capture stdout/stderr to avoid creating pipe transports
             process = await asyncio.create_subprocess_exec(
-                *cmd,
-                env=env,
-                cwd=cwd,
-                stdout=None,
-                stderr=None
+                *cmd, env=env, cwd=cwd, stdout=None, stderr=None
             )
 
             # Store the process
@@ -72,12 +78,12 @@ class SubprocessLauncher(ProcessLauncher):
             # Start a background reaper to clean up transports when the process exits
             asyncio.create_task(self._reap_process(instance_uuid, process))
 
-            logger.info(f"App {app_id} launched successfully with instance UUID {instance_uuid}")
+            logger.info(
+                f"App {app_id} launched successfully with instance UUID {instance_uuid}"
+            )
 
             return LaunchResult(
-                success=True,
-                instance_id=instance_id,
-                instance_uuid=instance_uuid
+                success=True, instance_id=instance_id, instance_uuid=instance_uuid
             )
 
         except Exception as e:
@@ -129,7 +135,9 @@ class SubprocessLauncher(ProcessLauncher):
             logger.error(f"Failed to terminate app instance {instance_uuid}: {e}")
             return False
 
-    async def _reap_process(self, instance_uuid: str, process: asyncio.subprocess.Process) -> None:
+    async def _reap_process(
+        self, instance_uuid: str, process: asyncio.subprocess.Process
+    ) -> None:
         """Background task: wait for process exit and ensure transports are closed."""
         try:
             await process.wait()
@@ -195,14 +203,18 @@ class SubprocessLauncher(ProcessLauncher):
             del self._running_processes[instance_uuid]
 
         return process.returncode is None
-            
-    async def wait_for_app_exit(self, instance_uuid: str, timeout: Optional[float] = None) -> bool:
+
+    async def wait_for_app_exit(
+        self, instance_uuid: str, timeout: Optional[float] = None
+    ) -> bool:
         """Wait for an app instance to exit. Returns True if it exited, False if timeout."""
         if instance_uuid not in self._process_events:
             return True  # Already exited or never existed
 
         try:
-            await asyncio.wait_for(self._process_events[instance_uuid].wait(), timeout=timeout)
+            await asyncio.wait_for(
+                self._process_events[instance_uuid].wait(), timeout=timeout
+            )
             return True
         except asyncio.TimeoutError:
             return False

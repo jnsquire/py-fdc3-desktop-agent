@@ -8,6 +8,7 @@ from dataclasses import dataclass
 @dataclass
 class AccessRequest:
     """Represents an access request to be evaluated by a policy"""
+
     origin: Optional[str] = None
     user_agent: Optional[str] = None
     app_id: Optional[str] = None
@@ -18,6 +19,7 @@ class AccessRequest:
 @dataclass
 class AccessDecision:
     """Result of an access control decision"""
+
     allowed: bool
     reason: Optional[str] = None
 
@@ -47,6 +49,7 @@ class AllowlistAccessPolicy(AccessControlPolicy):
             return AccessDecision(allowed=True, reason="Wildcard allowlist")
 
         from urllib.parse import urlparse
+
         origin_domain = urlparse(request.origin).netloc
 
         # Check for empty allowlist
@@ -59,12 +62,16 @@ class AllowlistAccessPolicy(AccessControlPolicy):
                 # Wildcard pattern - match subdomains (*.example.com matches app.example.com)
                 suffix = allowed_origin[2:]  # Remove the *.
                 if origin_domain == suffix or origin_domain.endswith("." + suffix):
-                    return AccessDecision(allowed=True, reason="Origin matches wildcard pattern")
+                    return AccessDecision(
+                        allowed=True, reason="Origin matches wildcard pattern"
+                    )
             elif allowed_origin.endswith("*"):
                 # Wildcard pattern - match prefix (example.com* matches example.com, example.com.au, etc.)
                 prefix = allowed_origin[:-1]  # Remove the *
                 if origin_domain.startswith(prefix):
-                    return AccessDecision(allowed=True, reason="Origin matches wildcard pattern")
+                    return AccessDecision(
+                        allowed=True, reason="Origin matches wildcard pattern"
+                    )
             elif origin_domain == allowed_origin:
                 return AccessDecision(allowed=True, reason="Origin in allowlist")
 
@@ -81,7 +88,9 @@ class AccessControlManager:
         """Check access using the configured policy"""
         if self.policy is None:
             # Default to allow all if no policy is set
-            return AccessDecision(allowed=True, reason="No access control policy configured")
+            return AccessDecision(
+                allowed=True, reason="No access control policy configured"
+            )
 
         return self.policy.evaluate_access(request)
 

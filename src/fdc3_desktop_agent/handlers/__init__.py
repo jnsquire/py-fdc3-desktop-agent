@@ -11,5 +11,5 @@ __all__ = [
     "AccessControlHandler",
     "WCPHandler",
     "DACPHandler",
-    "WebSocketConnectionManager"
+    "WebSocketConnectionManager",
 ]

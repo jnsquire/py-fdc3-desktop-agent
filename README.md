@@ -75,7 +75,7 @@ This project supports optional distributed log adapters to relay channel events 
 workers. Adapters are optional and require extra dependencies which are not installed by default.
 
 - Select adapter with environment variable `FDC3_DISTRIBUTED_ADAPTER`:
-	- `etcd` — use an etcd cluster (requires `etcd3aio`)
+	- `etcd` — use an etcd cluster (requires `etcd3` or `etcd3gw`)
 	- `consul` — use Consul KV (requires `aiohttp`)
 	- any other value or unset — no distributed adapter (local-only behavior)
 

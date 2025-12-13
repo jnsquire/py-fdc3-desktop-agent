@@ -22,7 +22,7 @@ CI should install the same extras so tests can be executed (see CI note below).
 
 The project supports optional distributed adapters to relay `channel_events` across workers. These adapters are optional and require extra dependencies:
 
-- `etcd` adapter: requires `etcd3aio` and a running etcd cluster.
+- `etcd` adapter: requires `etcd3` or an HTTP gateway client (`etcd3gw`) and a running etcd cluster.
 - `consul` adapter: requires `aiohttp` and a running Consul agent.
 
 To enable an adapter set the environment variable `FDC3_DISTRIBUTED_ADAPTER` to one of:

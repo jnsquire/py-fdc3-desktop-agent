@@ -36,12 +36,14 @@ def get_adapter() -> DistributedLogAdapter:
     if mode == "etcd":
         try:
             from .etcd_adapter import EtcdAdapter
+
             return EtcdAdapter()
         except Exception:
             return NoopAdapter()
     if mode == "consul":
         try:
             from .consul_adapter import ConsulAdapter
+
             return ConsulAdapter()
         except Exception:
             return NoopAdapter()

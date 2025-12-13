@@ -36,7 +36,7 @@ class TestAccessDecision:
 class TestAllowlistAccessPolicy:
     def test_allow_all_wildcard(self):
         policy = AllowlistAccessPolicy(["*"])
-        
+
         # Should allow any origin
         request = AccessRequest(origin="https://example.com", user_agent="Test")
         decision = policy.evaluate_access(request)
@@ -45,7 +45,7 @@ class TestAllowlistAccessPolicy:
 
     def test_exact_match(self):
         policy = AllowlistAccessPolicy(["example.com"])
-        
+
         # Should allow exact match
         request = AccessRequest(origin="https://example.com", user_agent="Test")
         decision = policy.evaluate_access(request)
@@ -54,7 +54,7 @@ class TestAllowlistAccessPolicy:
 
     def test_wildcard_prefix_match(self):
         policy = AllowlistAccessPolicy(["*.example.com"])
-        
+
         # Should allow subdomain
         request = AccessRequest(origin="https://app.example.com", user_agent="Test")
         decision = policy.evaluate_access(request)
@@ -63,7 +63,7 @@ class TestAllowlistAccessPolicy:
 
     def test_wildcard_prefix_no_match(self):
         policy = AllowlistAccessPolicy(["*.example.com"])
-        
+
         # Should deny different domain
         request = AccessRequest(origin="https://other.com", user_agent="Test")
         decision = policy.evaluate_access(request)
@@ -72,7 +72,7 @@ class TestAllowlistAccessPolicy:
 
     def test_no_origin(self):
         policy = AllowlistAccessPolicy(["example.com"])
-        
+
         # Should deny if no origin provided
         request = AccessRequest(origin=None, user_agent="Test")
         decision = policy.evaluate_access(request)
@@ -81,7 +81,7 @@ class TestAllowlistAccessPolicy:
 
     def test_empty_allowlist(self):
         policy = AllowlistAccessPolicy([])
-        
+
         # Should deny all
         request = AccessRequest(origin="https://example.com", user_agent="Test")
         decision = policy.evaluate_access(request)
@@ -99,10 +99,10 @@ class TestAccessControlManager:
     async def test_check_access_allowed(self):
         policy = AllowlistAccessPolicy(["example.com"])
         manager = AccessControlManager(policy)
-        
+
         request = AccessRequest(origin="https://example.com", user_agent="Test")
         decision = await manager.check_access(request)
-        
+
         assert decision.allowed is True
         assert decision.reason == "Origin in allowlist"
 
@@ -110,10 +110,10 @@ class TestAccessControlManager:
     async def test_check_access_denied(self):
         policy = AllowlistAccessPolicy(["example.com"])
         manager = AccessControlManager(policy)
-        
+
         request = AccessRequest(origin="https://blocked.com", user_agent="Test")
         decision = await manager.check_access(request)
-        
+
         assert decision.allowed is False
         assert decision.reason == "Origin not in allowlist"
 
@@ -132,9 +132,9 @@ class TestAccessControlManagerWithMock:
         mock_decision = AccessDecision(allowed=True, reason="Mock allowed")
         policy = MockAccessPolicy(mock_decision)
         manager = AccessControlManager(policy)
-        
+
         request = AccessRequest(origin="https://test.com", user_agent="Test")
         decision = await manager.check_access(request)
-        
+
         assert decision.allowed is True
         assert decision.reason == "Mock allowed"

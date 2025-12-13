@@ -1,7 +1,11 @@
 from fastapi import WebSocket, WebSocketDisconnect
 from ..transport.wcp.wcp import (
-    WCP1Hello, WCP3Handshake, WCP3HandshakePayload, WCP4ValidateAppIdentity,
-    WCP5ValidateAppIdentityResponse, WCP5ValidateAppIdentityResponsePayload
+    WCP1Hello,
+    WCP3Handshake,
+    WCP3HandshakePayload,
+    WCP4ValidateAppIdentity,
+    WCP5ValidateAppIdentityResponse,
+    WCP5ValidateAppIdentityResponsePayload,
 )
 from . import app
 import json
@@ -11,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 # Placeholder for WCP session management
 wcp_sessions = {}
+
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -36,9 +41,9 @@ async def websocket_endpoint(websocket: WebSocket):
                     payload=WCP3HandshakePayload(
                         fdc3Version="2.0",  # placeholder
                         intentResolverUrl=None,
-                        channelSelectorUrl=None
+                        channelSelectorUrl=None,
                     ),
-                    meta=wcp1.meta
+                    meta=wcp1.meta,
                 )
                 await websocket.send_text(wcp3.json())
 
@@ -54,7 +59,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 wcp_sessions[session_id]["identity"] = {
                     "appId": app_id,
                     "instanceId": instance_id,
-                    "instanceUuid": instance_uuid
+                    "instanceUuid": instance_uuid,
                 }
 
                 # Send WCP5Response
@@ -63,9 +68,12 @@ async def websocket_endpoint(websocket: WebSocket):
                         appId=app_id,
                         instanceId=instance_id,
                         instanceUuid=instance_uuid,
-                        implementationMetadata={}
+                        implementationMetadata={},
                     ),
-                    meta={"requestUuid": message["meta"]["connectionAttemptUuid"], "timestamp": "now"}
+                    meta={
+                        "requestUuid": message["meta"]["connectionAttemptUuid"],
+                        "timestamp": "now",
+                    },
                 )
                 await websocket.send_text(wcp5.json())
 

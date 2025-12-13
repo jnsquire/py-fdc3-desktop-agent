@@ -96,7 +96,9 @@ class TestListenerStore:
         """Test adding context listeners"""
         store = ListenerStore()
 
-        listener = store.add_context_listener(ListenerUuid(), "instance1", "fdc3.instrument")
+        listener = store.add_context_listener(
+            ListenerUuid(), "instance1", "fdc3.instrument"
+        )
         assert listener.instance_uuid == "instance1"
         assert listener.context_type == "fdc3.instrument"
         assert isinstance(listener.listener_uuid, ListenerUuid)
@@ -105,7 +107,9 @@ class TestListenerStore:
         """Test adding intent listeners"""
         store = ListenerStore()
 
-        listener = store.add_intent_listener(ListenerUuid("uuid1"), "instance1", "ViewChart")
+        listener = store.add_intent_listener(
+            ListenerUuid("uuid1"), "instance1", "ViewChart"
+        )
         assert listener.instance_uuid == "instance1"
         assert listener.intent == "ViewChart"
         assert isinstance(listener.listener_uuid, ListenerUuid)
@@ -114,8 +118,12 @@ class TestListenerStore:
         """Test getting context listeners"""
         store = ListenerStore()
 
-        store.add_context_listener(ListenerUuid("uuid1"), "instance1", "fdc3.instrument")
-        store.add_context_listener(ListenerUuid("uuid2"), "instance2", "fdc3.instrument")
+        store.add_context_listener(
+            ListenerUuid("uuid1"), "instance1", "fdc3.instrument"
+        )
+        store.add_context_listener(
+            ListenerUuid("uuid2"), "instance2", "fdc3.instrument"
+        )
         store.add_context_listener(ListenerUuid("uuid3"), "instance1", "fdc3.contact")
 
         listeners = store.get_context_listeners("fdc3.instrument")
@@ -128,7 +136,9 @@ class TestListenerStore:
 
         store.add_intent_listener(ListenerUuid("uuid1"), "instance1", "ViewChart")
         store.add_intent_listener(ListenerUuid("uuid2"), "instance2", "ViewChart")
-        store.add_intent_listener(ListenerUuid("uuid3"), "instance1", "CreateInteraction")
+        store.add_intent_listener(
+            ListenerUuid("uuid3"), "instance1", "CreateInteraction"
+        )
 
         listeners = store.get_intent_listeners_for_intent("ViewChart")
         assert len(listeners) == 2
@@ -138,7 +148,9 @@ class TestListenerStore:
         """Test removing listeners"""
         store = ListenerStore()
 
-        listener = store.add_context_listener(ListenerUuid("uuid1"), "instance1", "fdc3.instrument")
+        listener = store.add_context_listener(
+            ListenerUuid("uuid1"), "instance1", "fdc3.instrument"
+        )
         assert len(store.get_context_listeners("fdc3.instrument")) == 1
 
         store.remove_listener(listener.listener_uuid.root)
@@ -148,9 +160,13 @@ class TestListenerStore:
         """Test removing all listeners for an instance"""
         store = ListenerStore()
 
-        store.add_context_listener(ListenerUuid("uuid1"), "instance1", "fdc3.instrument")
+        store.add_context_listener(
+            ListenerUuid("uuid1"), "instance1", "fdc3.instrument"
+        )
         store.add_intent_listener(ListenerUuid("uuid2"), "instance1", "ViewChart")
-        store.add_context_listener(ListenerUuid("uuid3"), "instance2", "fdc3.instrument")
+        store.add_context_listener(
+            ListenerUuid("uuid3"), "instance2", "fdc3.instrument"
+        )
 
         assert len(store.get_context_listeners("fdc3.instrument")) == 2
         assert len(store.get_intent_listeners_for_intent("ViewChart")) == 1
@@ -176,8 +192,12 @@ class TestContextRouter:
         registry.register_instance("app2", "inst1", "uuid2")
 
         # Add listeners
-        store.add_context_listener(ListenerUuid("listener1"), "uuid1", "fdc3.instrument")
-        store.add_context_listener(ListenerUuid("listener2"), "uuid2", "fdc3.instrument")
+        store.add_context_listener(
+            ListenerUuid("listener1"), "uuid1", "fdc3.instrument"
+        )
+        store.add_context_listener(
+            ListenerUuid("listener2"), "uuid2", "fdc3.instrument"
+        )
 
         # Broadcast from uuid1
         targets = router.broadcast_context({"type": "fdc3.instrument"}, "uuid1")
@@ -224,12 +244,18 @@ class TestContextRouter:
         registry.register_instance("app2", "inst1", "target-uuid")
 
         # Add context listener for source (should be excluded)
-        store.add_context_listener(ListenerUuid("listener1"), "source-uuid", "fdc3.instrument")
+        store.add_context_listener(
+            ListenerUuid("listener1"), "source-uuid", "fdc3.instrument"
+        )
         # Add context listener for target (should receive)
-        store.add_context_listener(ListenerUuid("listener2"), "target-uuid", "fdc3.instrument")
+        store.add_context_listener(
+            ListenerUuid("listener2"), "target-uuid", "fdc3.instrument"
+        )
 
         # Broadcast from source
-        targets = router.broadcast_context({"type": "fdc3.instrument", "id": {"ticker": "AAPL"}}, "source-uuid")
+        targets = router.broadcast_context(
+            {"type": "fdc3.instrument", "id": {"ticker": "AAPL"}}, "source-uuid"
+        )
 
         # Should only target the other instance, not the source
         assert "target-uuid" in targets
@@ -247,11 +273,17 @@ class TestContextRouter:
         registry.register_instance("app2", "inst1", "uuid2")
 
         # Add context listeners
-        store.add_context_listener(ListenerUuid("listener1"), "uuid1", "fdc3.instrument")
-        store.add_context_listener(ListenerUuid("listener2"), "uuid2", "fdc3.instrument")
+        store.add_context_listener(
+            ListenerUuid("listener1"), "uuid1", "fdc3.instrument"
+        )
+        store.add_context_listener(
+            ListenerUuid("listener2"), "uuid2", "fdc3.instrument"
+        )
 
         # Broadcast
-        targets = router.broadcast_context({"type": "fdc3.instrument", "id": {"ticker": "AAPL"}}, "uuid3")
+        targets = router.broadcast_context(
+            {"type": "fdc3.instrument", "id": {"ticker": "AAPL"}}, "uuid3"
+        )
 
         # Both listeners should receive (no echo since source is different)
         assert len(targets) == 2
@@ -303,7 +335,9 @@ class TestIntentResolver:
         store.add_intent_listener(ListenerUuid("listener2"), "uuid2", "ViewChart")
 
         # Deliver event
-        targets = resolver.deliver_intent_event("ViewChart", {"type": "fdc3.instrument"}, None)
+        targets = resolver.deliver_intent_event(
+            "ViewChart", {"type": "fdc3.instrument"}, None
+        )
 
         assert len(targets) == 2
         assert "uuid1" in targets
@@ -323,15 +357,23 @@ class TestIntentResolver:
         store.add_intent_listener(ListenerUuid("listener1"), "target-uuid", "ViewChart")
 
         # Resolve intent
-        resolution = resolver.resolve_intent("ViewChart", {"type": "fdc3.instrument", "id": {"ticker": "AAPL"}}, None)
+        resolution = resolver.resolve_intent(
+            "ViewChart", {"type": "fdc3.instrument", "id": {"ticker": "AAPL"}}, None
+        )
 
         assert resolution is not None
         assert resolution.intent == "ViewChart"
         assert resolution.source.appId == "target-app"
 
         # Test intent event delivery
-        originating_app = AppIdentifier(appId="source-app", instanceId="source-instance", desktopAgent=None)
-        targets = resolver.deliver_intent_event("ViewChart", {"type": "fdc3.instrument", "id": {"ticker": "AAPL"}}, originating_app)
+        originating_app = AppIdentifier(
+            appId="source-app", instanceId="source-instance", desktopAgent=None
+        )
+        targets = resolver.deliver_intent_event(
+            "ViewChart",
+            {"type": "fdc3.instrument", "id": {"ticker": "AAPL"}},
+            originating_app,
+        )
 
         assert "target-uuid" in targets
 

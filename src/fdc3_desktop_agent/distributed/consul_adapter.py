@@ -22,9 +22,13 @@ except Exception:  # pragma: no cover - optional dependency
 
 
 class ConsulAdapter(DistributedLogAdapter):
-    def __init__(self, host: str = "127.0.0.1", port: int = 8500, prefix: str = "fdc3/logs"):
+    def __init__(
+        self, host: str = "127.0.0.1", port: int = 8500, prefix: str = "fdc3/logs"
+    ):
         if aiohttp is None:
-            raise ImportError("aiohttp is required for ConsulAdapter - install via 'pip install aiohttp'")
+            raise ImportError(
+                "aiohttp is required for ConsulAdapter - install via 'pip install aiohttp'"
+            )
 
         self.base = f"http://{host}:{port}/v1/kv/{prefix.rstrip('/') }"
         self._session: Optional[aiohttp.ClientSession] = None
@@ -76,7 +80,11 @@ class ConsulAdapter(DistributedLogAdapter):
                                     if value is None:
                                         continue
                                     # Consul KV returns base64-encoded values; aiohttp json decoder may decode already
-                                    data = json.loads(value) if isinstance(value, str) else value
+                                    data = (
+                                        json.loads(value)
+                                        if isinstance(value, str)
+                                        else value
+                                    )
                                 except Exception:
                                     data = {"raw": item}
                                 try:

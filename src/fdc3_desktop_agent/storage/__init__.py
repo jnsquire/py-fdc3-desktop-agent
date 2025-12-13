@@ -1,6 +1,13 @@
 # Storage interfaces + sqlite implementation
 
-from .interfaces import Storage, AppDirectoryRepository, LaunchConfigRepository, OriginRepository, AppMetadata, LaunchConfig
+from .interfaces import (
+    Storage,
+    AppDirectoryRepository,
+    LaunchConfigRepository,
+    OriginRepository,
+    AppMetadata,
+    LaunchConfig,
+)
 from .sqlite_storage import SqliteStorage
 
 __all__ = [
@@ -10,5 +17,5 @@ __all__ = [
     "OriginRepository",
     "AppMetadata",
     "LaunchConfig",
-    "SqliteStorage"
+    "SqliteStorage",
 ]

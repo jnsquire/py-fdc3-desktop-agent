@@ -13,9 +13,14 @@ import platform
 from fastapi import WebSocket
 
 from ..transport.wcp.wcp import (
-    WCP1Hello, WCP3Handshake, WCP3HandshakePayload,
-    WCP4ValidateAppIdentity, WCP5ValidateAppIdentityResponse, WCP5ValidateAppIdentityResponsePayload,
-    WCP5ValidateAppIdentityFailedResponse, WCP5ValidateAppIdentityFailedResponsePayload
+    WCP1Hello,
+    WCP3Handshake,
+    WCP3HandshakePayload,
+    WCP4ValidateAppIdentity,
+    WCP5ValidateAppIdentityResponse,
+    WCP5ValidateAppIdentityResponsePayload,
+    WCP5ValidateAppIdentityFailedResponse,
+    WCP5ValidateAppIdentityFailedResponsePayload,
 )
 from ..core import core_services
 from ..storage import Storage
@@ -36,8 +41,13 @@ class WCPHandler:
         except Exception as e:
             logger.error(f"Failed to send model {model.__class__.__name__}: {e}")
 
-    async def handle_message(self, message: Dict[str, Any], session_id: str,
-                           wcp_sessions: Dict[str, Any], websocket: WebSocket) -> Optional[str]:
+    async def handle_message(
+        self,
+        message: Dict[str, Any],
+        session_id: str,
+        wcp_sessions: Dict[str, Any],
+        websocket: WebSocket,
+    ) -> Optional[str]:
         """
         Handle WCP message and return next phase if transition occurs.
 
@@ -63,8 +73,13 @@ class WCPHandler:
 
         return None
 
-    async def _handle_wcp1_hello(self, message: Dict[str, Any], session_id: str,
-                                wcp_sessions: Dict[str, Any], websocket: WebSocket):
+    async def _handle_wcp1_hello(
+        self,
+        message: Dict[str, Any],
+        session_id: str,
+        wcp_sessions: Dict[str, Any],
+        websocket: WebSocket,
+    ):
         """Handle WCP1Hello message"""
         wcp1 = WCP1Hello(**message)
 
@@ -72,29 +87,34 @@ class WCPHandler:
             "wcp1_identity": {
                 "identityUrl": wcp1.payload.identityUrl,
                 "actualUrl": wcp1.payload.actualUrl,
-                "fdc3Version": wcp1.payload.fdc3Version
+                "fdc3Version": wcp1.payload.fdc3Version,
             },
             "identity": None,
-            "state": "handshake"
+            "state": "handshake",
         }
 
         # Send WCP3Handshake (skip WCP2 for now)
         wcp3 = WCP3Handshake(
             payload=WCP3HandshakePayload(
-                fdc3Version="2.0",
-                intentResolverUrl=None,
-                channelSelectorUrl=None
+                fdc3Version="2.0", intentResolverUrl=None, channelSelectorUrl=None
             ),
-            meta=wcp1.meta
+            meta=wcp1.meta,
         )
         await self._send_model(websocket, wcp3)
 
-    async def _handle_wcp4_validate_app_identity(self, message: Dict[str, Any], session_id: str,
-                                                wcp_sessions: Dict[str, Any], websocket: WebSocket) -> bool:
+    async def _handle_wcp4_validate_app_identity(
+        self,
+        message: Dict[str, Any],
+        session_id: str,
+        wcp_sessions: Dict[str, Any],
+        websocket: WebSocket,
+    ) -> bool:
         """Handle WCP4ValidateAppIdentity message. Returns True if transitioning to DACP."""
         wcp4 = WCP4ValidateAppIdentity(**message)
 
-        validation_result = await self._validate_app_identity(wcp4, session_id, wcp_sessions)
+        validation_result = await self._validate_app_identity(
+            wcp4, session_id, wcp_sessions
+        )
 
         if validation_result["valid"]:
             identity = validation_result["identity"]
@@ -121,7 +141,10 @@ class WCPHandler:
 
             # Add runtime launcher info (best-effort)
             try:
-                agent_url = os.getenv("FDC3_DESKTOP_AGENT_URL") or f"ws://{os.getenv('FDC3_HOST','localhost')}:{os.getenv('FDC3_PORT','8000')}/ws"
+                agent_url = (
+                    os.getenv("FDC3_DESKTOP_AGENT_URL")
+                    or f"ws://{os.getenv('FDC3_HOST','localhost')}:{os.getenv('FDC3_PORT','8000')}/ws"
+                )
                 runtime_info = {
                     "launcher": {
                         "type": "subprocess",
@@ -147,10 +170,12 @@ class WCPHandler:
                     appId=identity["appId"],
                     instanceId=identity["instanceId"],
                     instanceUuid=identity["instanceUuid"],
-                    implementationMetadata=impl_meta
+                    implementationMetadata=impl_meta,
                 ),
-                meta={"requestUuid": message["meta"]["connectionAttemptUuid"],
-                      "timestamp": datetime.now().isoformat()}
+                meta={
+                    "requestUuid": message["meta"]["connectionAttemptUuid"],
+                    "timestamp": datetime.now().isoformat(),
+                },
             )
             await self._send_model(websocket, wcp5)
 
@@ -166,8 +191,10 @@ class WCPHandler:
                 payload=WCP5ValidateAppIdentityFailedResponsePayload(
                     message=validation_result["error"]
                 ),
-                meta={"requestUuid": message["meta"]["connectionAttemptUuid"],
-                      "timestamp": datetime.now().isoformat()}
+                meta={
+                    "requestUuid": message["meta"]["connectionAttemptUuid"],
+                    "timestamp": datetime.now().isoformat(),
+                },
             )
             await self._send_model(websocket, wcp5_failed)
             return False
@@ -177,7 +204,12 @@ class WCPHandler:
         if session_id in wcp_sessions:
             del wcp_sessions[session_id]
 
-    async def _validate_app_identity(self, wcp4: WCP4ValidateAppIdentity, session_id: str, wcp_sessions: Dict[str, Any]) -> Dict[str, Any]:
+    async def _validate_app_identity(
+        self,
+        wcp4: WCP4ValidateAppIdentity,
+        session_id: str,
+        wcp_sessions: Dict[str, Any],
+    ) -> Dict[str, Any]:
         """Validate WCP4 app identity request"""
         from urllib.parse import urlparse
 
@@ -197,14 +229,25 @@ class WCPHandler:
                 # Check allowed origins
                 allowed_origins = await self.storage.origins.get_allowed_origins(app_id)
                 if allowed_origins:
-                    identity_origin = urlparse(identity_url).netloc if identity_url else None
+                    identity_origin = (
+                        urlparse(identity_url).netloc if identity_url else None
+                    )
                     actual_origin = urlparse(actual_url).netloc if actual_url else None
 
                     if identity_origin and actual_origin:
-                        if identity_origin not in allowed_origins or actual_origin not in allowed_origins:
-                            return {"valid": False, "error": "Origin not allowed for this app"}
+                        if (
+                            identity_origin not in allowed_origins
+                            or actual_origin not in allowed_origins
+                        ):
+                            return {
+                                "valid": False,
+                                "error": "Origin not allowed for this app",
+                            }
                     else:
-                        return {"valid": False, "error": "Invalid identity or actual URL"}
+                        return {
+                            "valid": False,
+                            "error": "Invalid identity or actual URL",
+                        }
 
                 instance_id = wcp4.payload.instanceId or pending_instance.instance_id
                 return {
@@ -212,10 +255,13 @@ class WCPHandler:
                     "identity": {
                         "appId": app_id,
                         "instanceId": instance_id,
-                        "instanceUuid": instance_uuid
-                    }
+                        "instanceUuid": instance_uuid,
+                    },
                 }
             else:
-                return {"valid": False, "error": "Instance UUID not found or already connected"}
+                return {
+                    "valid": False,
+                    "error": "Instance UUID not found or already connected",
+                }
         else:
             return {"valid": False, "error": "No instance UUID provided"}

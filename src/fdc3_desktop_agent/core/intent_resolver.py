@@ -3,6 +3,7 @@ from .listener_store import ListenerStore
 from .app_registry import AppRegistry
 from ..api import AppIdentifier, IntentResolution
 
+
 class IntentResolver:
     """Handles find/raise intents, app selection, and delivery to intent listeners."""
 
@@ -15,7 +16,12 @@ class IntentResolver:
         listeners = self.listener_store.get_intent_listeners_for_intent(intent)
         return [listener.instance_uuid for listener in listeners]
 
-    def resolve_intent(self, intent: str, context: Optional[dict] = None, target: Optional[AppIdentifier] = None) -> Optional[IntentResolution]:
+    def resolve_intent(
+        self,
+        intent: str,
+        context: Optional[dict] = None,
+        target: Optional[AppIdentifier] = None,
+    ) -> Optional[IntentResolution]:
         """Resolve an intent to an app instance."""
         # For now, find any listener for the intent
         listeners = self.listener_store.get_intent_listeners_for_intent(intent)
@@ -33,7 +39,12 @@ class IntentResolver:
         resolution = IntentResolution(source=source, intent=intent)
         return resolution
 
-    def deliver_intent_event(self, intent: str, context: Optional[dict], originating_app: Optional[AppIdentifier]) -> List[str]:
+    def deliver_intent_event(
+        self,
+        intent: str,
+        context: Optional[dict],
+        originating_app: Optional[AppIdentifier],
+    ) -> List[str]:
         """Deliver intent event to listeners. Returns target instance_uuids."""
         listeners = self.listener_store.get_intent_listeners_for_intent(intent)
         return [listener.instance_uuid for listener in listeners]

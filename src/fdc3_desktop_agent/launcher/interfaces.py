@@ -8,8 +8,14 @@ from ..storage import LaunchConfig
 
 class LaunchResult:
     """Result of a launch operation"""
-    def __init__(self, success: bool, instance_id: Optional[str] = None,
-                 instance_uuid: Optional[str] = None, error: Optional[str] = None):
+
+    def __init__(
+        self,
+        success: bool,
+        instance_id: Optional[str] = None,
+        instance_uuid: Optional[str] = None,
+        error: Optional[str] = None,
+    ):
         self.success = success
         self.instance_id = instance_id
         self.instance_uuid = instance_uuid
@@ -20,9 +26,13 @@ class ProcessLauncher(ABC):
     """Interface for launching app processes"""
 
     @abstractmethod
-    async def launch_app(self, app_id: str, launch_config: LaunchConfig,
-                        context: Optional[Dict[str, Any]] = None,
-                        target: Optional[AppIdentifier] = None) -> LaunchResult:
+    async def launch_app(
+        self,
+        app_id: str,
+        launch_config: LaunchConfig,
+        context: Optional[Dict[str, Any]] = None,
+        target: Optional[AppIdentifier] = None,
+    ) -> LaunchResult:
         """Launch an app process with the given configuration"""
         pass
 
@@ -37,6 +47,8 @@ class ProcessLauncher(ABC):
         pass
 
     @abstractmethod
-    async def wait_for_app_exit(self, instance_uuid: str, timeout: Optional[float] = None) -> bool:
+    async def wait_for_app_exit(
+        self, instance_uuid: str, timeout: Optional[float] = None
+    ) -> bool:
         """Wait for an app instance to exit. Returns True if it exited, False if timeout."""
         pass

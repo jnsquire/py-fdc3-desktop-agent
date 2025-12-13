@@ -6,8 +6,16 @@ from typing import List, Optional, Dict, Any
 
 class AppMetadata:
     """App metadata stored in the directory"""
-    def __init__(self, app_id: str, name: str, version: str = "", description: str = "",
-                 icons: List[Dict[str, Any]] = None, intents: List[str] = None):
+
+    def __init__(
+        self,
+        app_id: str,
+        name: str,
+        version: str = "",
+        description: str = "",
+        icons: List[Dict[str, Any]] = None,
+        intents: List[str] = None,
+    ):
         self.app_id = app_id
         self.name = name
         self.version = version
@@ -18,8 +26,16 @@ class AppMetadata:
 
 class LaunchConfig:
     """Launch configuration for an app"""
-    def __init__(self, app_id: str, command: str, args: List[str] = None,
-                 env: Dict[str, str] = None, cwd: str = "", timeout: int = 30):
+
+    def __init__(
+        self,
+        app_id: str,
+        command: str,
+        args: List[str] = None,
+        env: Dict[str, str] = None,
+        cwd: str = "",
+        timeout: int = 30,
+    ):
         self.app_id = app_id
         self.command = command
         self.args = args or []

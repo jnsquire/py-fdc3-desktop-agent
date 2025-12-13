@@ -3,9 +3,17 @@
 import uuid
 from datetime import datetime
 from fdc3_desktop_agent.protocol.dacp.dacp import (
-    AgentResponseMeta, AgentEventMeta,
-    OpenRequest, OpenResponse, BroadcastRequest, BroadcastEvent,
-    AddContextListenerRequest, RaiseIntentRequest, AgentResponse, ErrorResponsePayload, BroadcastEventPayload
+    AgentResponseMeta,
+    AgentEventMeta,
+    OpenRequest,
+    OpenResponse,
+    BroadcastRequest,
+    BroadcastEvent,
+    AddContextListenerRequest,
+    RaiseIntentRequest,
+    AgentResponse,
+    ErrorResponsePayload,
+    BroadcastEventPayload,
 )
 from fdc3_desktop_agent.api import OpenError
 
@@ -17,19 +25,12 @@ class TestDACPEnvelopes:
         """Test parsing of app request envelopes"""
         message = {
             "type": "open",
-            "payload": {
-                "app": {
-                    "appId": "test-app"
-                }
-            },
+            "payload": {"app": {"appId": "test-app"}},
             "meta": {
                 "requestUuid": "req-123",
                 "timestamp": "2025-01-01T00:00:00Z",
-                "source": {
-                    "appId": "source-app",
-                    "instanceId": "source-instance"
-                }
-            }
+                "source": {"appId": "source-app", "instanceId": "source-instance"},
+            },
         }
 
         request = OpenRequest(**message)
@@ -48,8 +49,8 @@ class TestDACPEnvelopes:
             meta=AgentResponseMeta(
                 requestUuid=request_uuid,
                 responseUuid=str(uuid.uuid4()),
-                timestamp=datetime.now().isoformat()
-            )
+                timestamp=datetime.now().isoformat(),
+            ),
         )
 
         assert response.meta.requestUuid.root == request_uuid
@@ -62,9 +63,8 @@ class TestDACPEnvelopes:
             type="broadcastEvent",
             payload=BroadcastEventPayload(context={"type": "test"}),
             meta=AgentEventMeta(
-                eventUuid=str(uuid.uuid4()),
-                timestamp=datetime.now().isoformat()
-            )
+                eventUuid=str(uuid.uuid4()), timestamp=datetime.now().isoformat()
+            ),
         )
 
         assert isinstance(uuid.UUID(event.meta.eventUuid.root), uuid.UUID)
@@ -77,8 +77,8 @@ class TestDACPEnvelopes:
             meta=AgentResponseMeta(
                 requestUuid="req-123",
                 responseUuid=str(uuid.uuid4()),
-                timestamp=datetime.now().isoformat()
-            )
+                timestamp=datetime.now().isoformat(),
+            ),
         )
 
         assert error_response.payload.error == "AppNotFound"
@@ -94,19 +94,13 @@ class TestDACPSpecificMessages:
         message = {
             "type": "broadcast",
             "payload": {
-                "context": {
-                    "type": "fdc3.instrument",
-                    "id": {"ticker": "AAPL"}
-                }
+                "context": {"type": "fdc3.instrument", "id": {"ticker": "AAPL"}}
             },
             "meta": {
                 "requestUuid": "req-123",
                 "timestamp": "2025-01-01T00:00:00Z",
-                "source": {
-                    "appId": "source-app",
-                    "instanceId": "source-instance"
-                }
-            }
+                "source": {"appId": "source-app", "instanceId": "source-instance"},
+            },
         }
 
         request = BroadcastRequest(**message)
@@ -118,13 +112,8 @@ class TestDACPSpecificMessages:
         """Test parsing of add context listener requests"""
         message = {
             "type": "addContextListener",
-            "payload": {
-                "contextType": "fdc3.instrument"
-            },
-            "meta": {
-                "requestUuid": "req-123",
-                "timestamp": "2025-01-01T00:00:00Z"
-            }
+            "payload": {"contextType": "fdc3.instrument"},
+            "meta": {"requestUuid": "req-123", "timestamp": "2025-01-01T00:00:00Z"},
         }
 
         request = AddContextListenerRequest(**message)
@@ -137,22 +126,14 @@ class TestDACPSpecificMessages:
             "type": "raiseIntent",
             "payload": {
                 "intent": "ViewChart",
-                "context": {
-                    "type": "fdc3.instrument",
-                    "id": {"ticker": "AAPL"}
-                },
-                "target": {
-                    "appId": "target-app"
-                }
+                "context": {"type": "fdc3.instrument", "id": {"ticker": "AAPL"}},
+                "target": {"appId": "target-app"},
             },
             "meta": {
                 "requestUuid": "req-123",
                 "timestamp": "2025-01-01T00:00:00Z",
-                "source": {
-                    "appId": "source-app",
-                    "instanceId": "source-instance"
-                }
-            }
+                "source": {"appId": "source-app", "instanceId": "source-instance"},
+            },
         }
 
         request = RaiseIntentRequest(**message)

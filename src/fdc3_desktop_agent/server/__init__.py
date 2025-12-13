@@ -20,9 +20,15 @@ from ..storage import SqliteStorage
 from ..storage.interfaces import AppMetadata
 from ..launcher import SubprocessLauncher
 from ..access_control import AccessControlManager, AllowlistAccessPolicy
-from ..handlers import AccessControlHandler, WCPHandler, DACPHandler, WebSocketConnectionManager
+from ..handlers import (
+    AccessControlHandler,
+    WCPHandler,
+    DACPHandler,
+    WebSocketConnectionManager,
+)
 
 logger = logging.getLogger(__name__)
+
 
 # Server configuration
 def get_allowed_origins():
@@ -33,32 +39,37 @@ def get_allowed_origins():
     # Default to allowing localhost connections (common development setup)
     return ["localhost", "127.0.0.1", "localhost:*", "127.0.0.1:*"]
 
+
 SERVER_CONFIG = {
     "host": os.getenv("FDC3_HOST", "localhost"),
     "port": int(os.getenv("FDC3_PORT", "8000")),
     "db_path": os.getenv("FDC3_DB_PATH", "fdc3_agent.db"),
     "log_level": os.getenv("FDC3_LOG_LEVEL", "INFO"),
-    "allowed_origins": get_allowed_origins()
+    "allowed_origins": get_allowed_origins(),
 }
+
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     """Lifespan handler to initialize and teardown resources."""
     # Startup
-    # Register the system app
-    await storage.apps.add_app(system_app_metadata)
-
     # Configure logging
     logging.basicConfig(level=getattr(logging, SERVER_CONFIG["log_level"]))
 
+    # Initialize storage before any use
     await storage.initialize()
     logger.info(f"FDC3 Desktop Agent storage initialized at {SERVER_CONFIG['db_path']}")
-    logger.info(f"Server configured for {SERVER_CONFIG['host']}:{SERVER_CONFIG['port']}")
+
+    # Register the system app (after storage is ready)
+    await storage.apps.add_app(system_app_metadata)
+    logger.info(
+        f"Server configured for {SERVER_CONFIG['host']}:{SERVER_CONFIG['port']}"
+    )
     logger.info(f"Allowed origins: {', '.join(SERVER_CONFIG['allowed_origins'])}")
 
     # Log connection URIs for convenience
-    host = SERVER_CONFIG['host']
-    port = SERVER_CONFIG['port']
+    host = SERVER_CONFIG["host"]
+    port = SERVER_CONFIG["port"]
     logger.info(f"HTTP API available at: http://{host}:{port}")
     logger.info(f"GraphQL endpoint at: http://{host}:{port}/graphql")
     logger.info(f"WebSocket endpoint at: ws://{host}:{port}/ws")
@@ -83,14 +94,19 @@ async def _lifespan(app: FastAPI):
                     payload.get("event_type"),
                     payload.get("channel_id"),
                     payload.get("instance_uuid"),
-                    json.loads(payload.get("context")) if payload.get("context") else None,
-                    remote=True
+                    (
+                        json.loads(payload.get("context"))
+                        if payload.get("context")
+                        else None
+                    ),
+                    remote=True,
                 )
             except Exception:
                 return
 
         # Subscribe (best-effort). Adapter.subscribe is async and returns a subscription id.
         try:
+
             def _sub_cb(ev: dict):
                 asyncio.create_task(_distributed_event_handler(ev))
                 return None
@@ -166,20 +182,29 @@ system_app_metadata = AppMetadata(
     description="Built-in system app for FDC3 Desktop Agent functionality",
     intents=[
         # App Directory Management
-        "fdc3.openAppDirectory", "fdc3.manageApps", "fdc3.installApp", "fdc3.uninstallApp",
+        "fdc3.openAppDirectory",
+        "fdc3.manageApps",
+        "fdc3.installApp",
+        "fdc3.uninstallApp",
         # System Configuration
-        "fdc3.systemSettings", "fdc3.configureChannels", "fdc3.systemDiagnostics",
+        "fdc3.systemSettings",
+        "fdc3.configureChannels",
+        "fdc3.systemDiagnostics",
         # Channel Management
-        "fdc3.createChannel", "fdc3.deleteChannel", "fdc3.manageChannel",
+        "fdc3.createChannel",
+        "fdc3.deleteChannel",
+        "fdc3.manageChannel",
         # Built-in System Apps
         "fdc3.resolveIntent",
         # System Browser/File Manager
-        "fdc3.openUrl", "fdc3.openFile", "fdc3.systemSearch",
+        "fdc3.openUrl",
+        "fdc3.openFile",
+        "fdc3.systemSearch",
         # System Notifications
-        "fdc3.showNotification", "fdc3.systemAlert"
-    ]
+        "fdc3.showNotification",
+        "fdc3.systemAlert",
+    ],
 )
-
 
 
 # Initialize access control with default allowlist policy
@@ -191,6 +216,7 @@ if SERVER_CONFIG["allowed_origins"]:
 # Initialize WebSocket connection managers and handlers
 # `WebSocketConnectionManager` imported from handlers manages app instance connections.
 instance_connection_manager = WebSocketConnectionManager()
+
 
 # Agent-client manager handles UI/agent client side connections and broadcasts.
 class AgentClientConnectionManager:
@@ -205,7 +231,9 @@ class AgentClientConnectionManager:
         logger.info(f"WebSocket connected for instance {instance_uuid}")
         await self.broadcast_agent_event("connected", instance_uuid)
 
-    async def disconnect(self, websocket: WebSocket, instance_uuid: Optional[str] = None):
+    async def disconnect(
+        self, websocket: WebSocket, instance_uuid: Optional[str] = None
+    ):
         if instance_uuid and instance_uuid in self._connections:
             del self._connections[instance_uuid]
         self._active_connections.discard(websocket)
@@ -228,7 +256,7 @@ class AgentClientConnectionManager:
         event = AgentEvent(
             type="agentEvent",
             payload=AgentEventPayload(eventType=event_type, instanceUuid=instance_uuid),
-            meta=AgentEventMeta()
+            meta=AgentEventMeta(),
         )
         event_json = event.model_dump_json()
         disconnected = []
@@ -252,9 +280,12 @@ class AgentClientConnectionManager:
         self._active_connections.clear()
         self._connections.clear()
 
+
 agent_client_manager = AgentClientConnectionManager()
 
-access_control_handler = AccessControlHandler(access_control, SERVER_CONFIG["allowed_origins"])
+access_control_handler = AccessControlHandler(
+    access_control, SERVER_CONFIG["allowed_origins"]
+)
 wcp_handler = WCPHandler(storage)
 dacp_handler = DACPHandler(storage, launcher, instance_connection_manager)
 
@@ -265,21 +296,25 @@ set_graphql_storage(storage)
 graphql_app = GraphQLRouter(schema)
 app.include_router(graphql_app, prefix="/graphql")
 
+
 # Admin routes
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_page(request: Request):
     """Admin page for managing launch configurations"""
     return templates.TemplateResponse("admin.html", {"request": request})
 
+
 @app.get("/app-directory", response_class=HTMLResponse)
 async def app_directory_page(request: Request):
     """App directory management interface"""
     return templates.TemplateResponse("app_directory.html", {"request": request})
 
+
 @app.get("/system-settings", response_class=HTMLResponse)
 async def system_settings_page(request: Request):
     """System configuration panel"""
     return templates.TemplateResponse("system_settings.html", {"request": request})
+
 
 @app.get("/diagnostics", response_class=HTMLResponse)
 async def diagnostics_page(request: Request):
@@ -292,21 +327,25 @@ async def channel_monitor_page(request: Request):
     """Channel monitor UI for subscribing to channel events"""
     return templates.TemplateResponse("channel_monitor.html", {"request": request})
 
+
 # Placeholder for WCP session management
 wcp_sessions = {}
 
-async def _validate_app_identity(wcp4: WCP4ValidateAppIdentity, session_id: str) -> dict:
+
+async def _validate_app_identity(
+    wcp4: WCP4ValidateAppIdentity, session_id: str
+) -> dict:
     """Validate WCP4 app identity request"""
     from urllib.parse import urlparse
-    
+
     # Get the WCP1 identity info from session
     wcp1_identity = wcp_sessions[session_id].get("wcp1_identity")
     if not wcp1_identity:
         return {"valid": False, "error": "No WCP1 identity information found"}
-    
+
     identity_url = wcp1_identity.get("identityUrl")
     actual_url = wcp1_identity.get("actualUrl")
-    
+
     # Check if there's a pending instance with the requested instanceUuid
     instance_uuid = wcp4.payload.instanceUuid
     if instance_uuid:
@@ -314,32 +353,43 @@ async def _validate_app_identity(wcp4: WCP4ValidateAppIdentity, session_id: str)
         if pending_instance and not pending_instance.connected:
             # Found pending instance - validate origins
             app_id = pending_instance.app_id
-            
+
             # Check if origins are allowed for this app
             allowed_origins = await storage.origins.get_allowed_origins(app_id)
             if allowed_origins:
                 # Validate identityUrl and actualUrl origins
-                identity_origin = urlparse(identity_url).netloc if identity_url else None
+                identity_origin = (
+                    urlparse(identity_url).netloc if identity_url else None
+                )
                 actual_origin = urlparse(actual_url).netloc if actual_url else None
-                
+
                 if identity_origin and actual_origin:
                     # Both origins must be in allowed list
-                    if identity_origin not in allowed_origins or actual_origin not in allowed_origins:
-                        return {"valid": False, "error": "Origin not allowed for this app"}
+                    if (
+                        identity_origin not in allowed_origins
+                        or actual_origin not in allowed_origins
+                    ):
+                        return {
+                            "valid": False,
+                            "error": "Origin not allowed for this app",
+                        }
                 else:
                     return {"valid": False, "error": "Invalid identity or actual URL"}
-            
+
             instance_id = wcp4.payload.instanceId or pending_instance.instance_id
             return {
                 "valid": True,
                 "identity": {
                     "appId": app_id,
                     "instanceId": instance_id,
-                    "instanceUuid": instance_uuid
-                }
+                    "instanceUuid": instance_uuid,
+                },
             }
         else:
-            return {"valid": False, "error": "Instance UUID not found or already connected"}
+            return {
+                "valid": False,
+                "error": "Instance UUID not found or already connected",
+            }
     else:
         # No instance UUID provided - this shouldn't happen in normal flow
         return {"valid": False, "error": "No instance UUID provided"}
@@ -365,6 +415,7 @@ async def websocket_endpoint(websocket: WebSocket):
             await asyncio.sleep(30)  # Send heartbeat every 30 seconds
             if session_id and dacp_active:
                 from ..protocol.dacp.dacp import HeartbeatEvent, AgentEventMeta
+
                 heartbeat_event = HeartbeatEvent(meta=AgentEventMeta())
                 try:
                     await websocket.send_text(heartbeat_event.model_dump_json())
@@ -379,14 +430,18 @@ async def websocket_endpoint(websocket: WebSocket):
 
             if not dacp_active:
                 # WCP phase - use WCP handler
-                transition = await wcp_handler.handle_message(message, session_id or "", wcp_sessions, websocket)
+                transition = await wcp_handler.handle_message(
+                    message, session_id or "", wcp_sessions, websocket
+                )
                 if transition == "dacp":
                     dacp_active = True
                     # Start heartbeat task when entering DACP phase
                     heartbeat_task = asyncio.create_task(send_heartbeat())
             else:
                 # DACP phase - use DACP handler
-                await dacp_handler.handle_message(message, session_id or "", wcp_sessions, websocket)
+                await dacp_handler.handle_message(
+                    message, session_id or "", wcp_sessions, websocket
+                )
 
     except WebSocketDisconnect:
         if heartbeat_task:

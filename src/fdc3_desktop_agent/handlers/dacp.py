@@ -9,18 +9,39 @@ from typing import Dict, Any
 from fastapi import WebSocket
 
 from ..protocol.dacp.dacp import (
-    AgentEventMeta, OpenRequest, AgentResponse,
-    ErrorResponsePayload, AgentResponseMeta, OpenResponse, OpenResponsePayload, BroadcastRequest,
-    BroadcastEvent, BroadcastEventPayload, AddContextListenerRequest, AddContextListenerResponse,
-    AddContextListenerResponsePayload, AddIntentListenerRequest, AddIntentListenerResponse,
-    AddIntentListenerResponsePayload, RaiseIntentRequest, RaiseIntentResponse,
-    RaiseIntentResponsePayload, RaiseIntentForContextRequest,
-    IntentEvent, IntentEventPayload,
-    ContextListenerUnsubscribeRequest, ContextListenerUnsubscribeResponse,
-    ContextListenerUnsubscribeResponsePayload, IntentListenerUnsubscribeRequest, IntentListenerUnsubscribeResponse,
-    IntentListenerUnsubscribeResponsePayload, HeartbeatAcknowledgmentRequest,
-    IntentResultRequest, IntentResultResponse, IntentResultResponsePayload,
-    RaiseIntentResultResponse
+    AgentEventMeta,
+    OpenRequest,
+    AgentResponse,
+    ErrorResponsePayload,
+    AgentResponseMeta,
+    OpenResponse,
+    OpenResponsePayload,
+    BroadcastRequest,
+    BroadcastEvent,
+    BroadcastEventPayload,
+    AddContextListenerRequest,
+    AddContextListenerResponse,
+    AddContextListenerResponsePayload,
+    AddIntentListenerRequest,
+    AddIntentListenerResponse,
+    AddIntentListenerResponsePayload,
+    RaiseIntentRequest,
+    RaiseIntentResponse,
+    RaiseIntentResponsePayload,
+    RaiseIntentForContextRequest,
+    IntentEvent,
+    IntentEventPayload,
+    ContextListenerUnsubscribeRequest,
+    ContextListenerUnsubscribeResponse,
+    ContextListenerUnsubscribeResponsePayload,
+    IntentListenerUnsubscribeRequest,
+    IntentListenerUnsubscribeResponse,
+    IntentListenerUnsubscribeResponsePayload,
+    HeartbeatAcknowledgmentRequest,
+    IntentResultRequest,
+    IntentResultResponse,
+    IntentResultResponsePayload,
+    RaiseIntentResultResponse,
 )
 from ..core import core_services
 from ..storage import Storage
@@ -34,8 +55,12 @@ logger = logging.getLogger(__name__)
 class DACPHandler:
     """Handles DACP (Desktop Agent Communication Protocol) messages"""
 
-    def __init__(self, storage: Storage, launcher: SubprocessLauncher,
-                 connection_manager: WebSocketConnectionManager):
+    def __init__(
+        self,
+        storage: Storage,
+        launcher: SubprocessLauncher,
+        connection_manager: WebSocketConnectionManager,
+    ):
         self.storage = storage
         self.launcher = launcher
         self.connection_manager = connection_manager
@@ -48,8 +73,13 @@ class DACPHandler:
         except Exception as e:
             logger.error(f"Failed to send model {model.__class__.__name__}: {e}")
 
-    async def handle_message(self, message: Dict[str, Any], session_id: str,
-                           wcp_sessions: Dict[str, Any], websocket: WebSocket):
+    async def handle_message(
+        self,
+        message: Dict[str, Any],
+        session_id: str,
+        wcp_sessions: Dict[str, Any],
+        websocket: WebSocket,
+    ):
         """Handle DACP message"""
         msg_type = message.get("type")
 
@@ -58,9 +88,13 @@ class DACPHandler:
         elif msg_type == "broadcast":
             await self._handle_broadcast(message, session_id, wcp_sessions)
         elif msg_type == "addContextListener":
-            await self._handle_add_context_listener(message, session_id, wcp_sessions, websocket)
+            await self._handle_add_context_listener(
+                message, session_id, wcp_sessions, websocket
+            )
         elif msg_type == "addIntentListener":
-            await self._handle_add_intent_listener(message, session_id, wcp_sessions, websocket)
+            await self._handle_add_intent_listener(
+                message, session_id, wcp_sessions, websocket
+            )
         elif msg_type == "intentListenerUnsubscribe":
             await self._handle_intent_listener_unsubscribe(message, websocket)
         elif msg_type == "raiseIntent":
@@ -90,25 +124,31 @@ class DACPHandler:
                 response = AgentResponse(
                     type="openResponse",
                     payload=ErrorResponsePayload(error="AppNotFound"),
-                    meta=AgentResponseMeta(requestUuid=request.meta.requestUuid)
+                    meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
                 )
                 await self._send_model(websocket, response)
                 return
 
             # Check existing instances
-            existing_instances = core_services.app_registry.get_instances_for_app(app_id)
-            requested_instance_id = getattr(request.payload.app, 'instanceId', None)
+            existing_instances = core_services.app_registry.get_instances_for_app(
+                app_id
+            )
+            requested_instance_id = getattr(request.payload.app, "instanceId", None)
 
             if requested_instance_id:
                 existing_instance = next(
-                    (inst for inst in existing_instances if inst.instance_id == requested_instance_id),
-                    None
+                    (
+                        inst
+                        for inst in existing_instances
+                        if inst.instance_id == requested_instance_id
+                    ),
+                    None,
                 )
                 if existing_instance:
                     response = OpenResponse(
                         type="openResponse",
                         payload=OpenResponsePayload(),
-                        meta=AgentResponseMeta(requestUuid=request.meta.requestUuid)
+                        meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
                     )
                     await self._send_model(websocket, response)
                     return
@@ -117,7 +157,7 @@ class DACPHandler:
                 response = OpenResponse(
                     type="openResponse",
                     payload=OpenResponsePayload(),
-                    meta=AgentResponseMeta(requestUuid=request.meta.requestUuid)
+                    meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
                 )
                 await self._send_model(websocket, response)
                 return
@@ -128,7 +168,7 @@ class DACPHandler:
                 response = AgentResponse(
                     type="openResponse",
                     payload=ErrorResponsePayload(error="AppNotFound"),
-                    meta=AgentResponseMeta(requestUuid=request.meta.requestUuid)
+                    meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
                 )
                 await self._send_model(websocket, response)
                 return
@@ -143,7 +183,7 @@ class DACPHandler:
                     response = AgentResponse(
                         type="openResponse",
                         payload=ErrorResponsePayload(error="ErrorOnLaunch"),
-                        meta=AgentResponseMeta(requestUuid=request.meta.requestUuid)
+                        meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
                     )
                     await self._send_model(websocket, response)
                     return
@@ -154,28 +194,32 @@ class DACPHandler:
                 )
 
                 # Wait for connection
-                connected = await core_services.app_registry.wait_for_instance_connection(
-                    launch_result.instance_uuid, timeout=15.0
+                connected = (
+                    await core_services.app_registry.wait_for_instance_connection(
+                        launch_result.instance_uuid, timeout=15.0
+                    )
                 )
 
                 if connected:
                     response = OpenResponse(
                         type="openResponse",
                         payload=OpenResponsePayload(),
-                        meta=AgentResponseMeta(requestUuid=request.meta.requestUuid)
+                        meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
                     )
                 else:
-                    core_services.app_registry.unregister_instance(launch_result.instance_uuid)
+                    core_services.app_registry.unregister_instance(
+                        launch_result.instance_uuid
+                    )
                     response = AgentResponse(
                         type="openResponse",
                         payload=ErrorResponsePayload(error="AppTimeout"),
-                        meta=AgentResponseMeta(requestUuid=request.meta.requestUuid)
+                        meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
                     )
             else:
                 response = AgentResponse(
                     type="openResponse",
                     payload=ErrorResponsePayload(error="ErrorOnLaunch"),
-                    meta=AgentResponseMeta(requestUuid=request.meta.requestUuid)
+                    meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
                 )
 
             await self._send_model(websocket, response)
@@ -187,14 +231,17 @@ class DACPHandler:
                 response = AgentResponse(
                     type="openResponse",
                     payload=ErrorResponsePayload(error="AppLaunchFailed"),
-                    meta=AgentResponseMeta(requestUuid=message.get("meta", {}).get("requestUuid"))
+                    meta=AgentResponseMeta(
+                        requestUuid=message.get("meta", {}).get("requestUuid")
+                    ),
                 )
                 await self._send_model(websocket, response)
             except Exception:
                 pass
 
-    async def _handle_broadcast(self, message: Dict[str, Any], session_id: str,
-                               wcp_sessions: Dict[str, Any]):
+    async def _handle_broadcast(
+        self, message: Dict[str, Any], session_id: str, wcp_sessions: Dict[str, Any]
+    ):
         """Handle broadcast request"""
         request = BroadcastRequest(**message)
         source_instance_uuid = wcp_sessions[session_id]["identity"]["instanceUuid"]
@@ -208,47 +255,67 @@ class DACPHandler:
             event = BroadcastEvent(
                 type="broadcastEvent",
                 payload=BroadcastEventPayload(context=request.payload.context),
-                meta=AgentEventMeta()
+                meta=AgentEventMeta(),
             )
-            await self.connection_manager.send_to_instance(target_uuid, event.model_dump_json())
+            await self.connection_manager.send_to_instance(
+                target_uuid, event.model_dump_json()
+            )
 
-    async def _handle_add_context_listener(self, message: Dict[str, Any], session_id: str,
-                                          wcp_sessions: Dict[str, Any], websocket: WebSocket):
+    async def _handle_add_context_listener(
+        self,
+        message: Dict[str, Any],
+        session_id: str,
+        wcp_sessions: Dict[str, Any],
+        websocket: WebSocket,
+    ):
         """Handle add context listener request"""
         request = AddContextListenerRequest(**message)
         source_instance_uuid = wcp_sessions[session_id]["identity"]["instanceUuid"]
 
         from ..api import ListenerUuid
+
         listener = core_services.listener_store.add_context_listener(
             ListenerUuid(), source_instance_uuid, request.payload.contextType
         )
 
         response = AddContextListenerResponse(
             type="addContextListenerResponse",
-            payload=AddContextListenerResponsePayload(listenerUuid=listener.listener_uuid),
-            meta=AgentResponseMeta(requestUuid=request.meta.requestUuid)
+            payload=AddContextListenerResponsePayload(
+                listenerUuid=listener.listener_uuid
+            ),
+            meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
         )
         await self._send_model(websocket, response)
 
-    async def _handle_add_intent_listener(self, message: Dict[str, Any], session_id: str,
-                                          wcp_sessions: Dict[str, Any], websocket: WebSocket):
+    async def _handle_add_intent_listener(
+        self,
+        message: Dict[str, Any],
+        session_id: str,
+        wcp_sessions: Dict[str, Any],
+        websocket: WebSocket,
+    ):
         """Handle add intent listener request"""
         request = AddIntentListenerRequest(**message)
         source_instance_uuid = wcp_sessions[session_id]["identity"]["instanceUuid"]
 
         from ..api import ListenerUuid
+
         listener = core_services.listener_store.add_intent_listener(
             ListenerUuid(), source_instance_uuid, request.payload.intent
         )
 
         response = AddIntentListenerResponse(
             type="addIntentListenerResponse",
-            payload=AddIntentListenerResponsePayload(listenerUuid=listener.listener_uuid),
-            meta=AgentResponseMeta(requestUuid=request.meta.requestUuid)
+            payload=AddIntentListenerResponsePayload(
+                listenerUuid=listener.listener_uuid
+            ),
+            meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
         )
         await self._send_model(websocket, response)
 
-    async def _handle_intent_listener_unsubscribe(self, message: Dict[str, Any], websocket: WebSocket):
+    async def _handle_intent_listener_unsubscribe(
+        self, message: Dict[str, Any], websocket: WebSocket
+    ):
         """Handle intent listener unsubscribe"""
         request = IntentListenerUnsubscribeRequest(**message)
         core_services.listener_store.remove_listener(request.payload.listenerUuid.root)
@@ -256,7 +323,7 @@ class DACPHandler:
         response = IntentListenerUnsubscribeResponse(
             type="intentListenerUnsubscribeResponse",
             payload=IntentListenerUnsubscribeResponsePayload(),
-            meta=AgentResponseMeta(requestUuid=request.meta.requestUuid)
+            meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
         )
         await self._send_model(websocket, response)
 
@@ -271,7 +338,7 @@ class DACPHandler:
                 request.payload.context,
                 request.payload.target,
                 websocket,
-                request.meta.requestUuid
+                request.meta.requestUuid,
             )
             if response:
                 await self._send_model(websocket, response)
@@ -285,8 +352,10 @@ class DACPHandler:
         if resolution:
             response = RaiseIntentResponse(
                 type="raiseIntentResponse",
-                payload=RaiseIntentResponsePayload(intentResolution=resolution.model_dump()),
-                meta=AgentResponseMeta(requestUuid=request.meta.requestUuid)
+                payload=RaiseIntentResponsePayload(
+                    intentResolution=resolution.model_dump()
+                ),
+                meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
             )
             await self._send_model(websocket, response)
 
@@ -301,20 +370,24 @@ class DACPHandler:
                     payload=IntentEventPayload(
                         intent=request.payload.intent,
                         context=request.payload.context,
-                        originatingApp=request.meta.source
+                        originatingApp=request.meta.source,
                     ),
-                    meta=AgentEventMeta()
+                    meta=AgentEventMeta(),
                 )
-                await self.connection_manager.send_to_instance(target_uuid, event.model_dump_json())
+                await self.connection_manager.send_to_instance(
+                    target_uuid, event.model_dump_json()
+                )
         else:
             response = AgentResponse(
                 type="raiseIntentResponse",
                 payload=ErrorResponsePayload(error="NoAppsFound"),
-                meta=AgentResponseMeta(requestUuid=request.meta.requestUuid)
+                meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
             )
             await self._send_model(websocket, response)
 
-    async def _handle_raise_intent_for_context(self, message: Dict[str, Any], websocket: WebSocket):
+    async def _handle_raise_intent_for_context(
+        self, message: Dict[str, Any], websocket: WebSocket
+    ):
         """Handle raise intent for context request"""
         request = RaiseIntentForContextRequest(**message)
 
@@ -322,11 +395,13 @@ class DACPHandler:
         response = AgentResponse(
             type="raiseIntentForContextResponse",
             payload=ErrorResponsePayload(error="NotImplemented"),
-            meta=AgentResponseMeta(requestUuid=request.meta.requestUuid)
+            meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
         )
         await self._send_model(websocket, response)
 
-    async def _handle_intent_result_request(self, message: Dict[str, Any], websocket: WebSocket):
+    async def _handle_intent_result_request(
+        self, message: Dict[str, Any], websocket: WebSocket
+    ):
         """Handle intent result request"""
         request = IntentResultRequest(**message)
 
@@ -335,7 +410,7 @@ class DACPHandler:
         response = IntentResultResponse(
             type="intentResultResponse",
             payload=IntentResultResponsePayload(),
-            meta=AgentResponseMeta(requestUuid=request.meta.requestUuid)
+            meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
         )
         await self._send_model(websocket, response)
 
@@ -344,7 +419,9 @@ class DACPHandler:
         request = RaiseIntentResultResponse(**message)
         logger.debug(f"Intent result acknowledged: {request.meta.requestUuid}")
 
-    async def _handle_context_listener_unsubscribe(self, message: Dict[str, Any], websocket: WebSocket):
+    async def _handle_context_listener_unsubscribe(
+        self, message: Dict[str, Any], websocket: WebSocket
+    ):
         """Handle context listener unsubscribe"""
         request = ContextListenerUnsubscribeRequest(**message)
         core_services.listener_store.remove_listener(request.payload.listenerUuid.root)
@@ -352,11 +429,13 @@ class DACPHandler:
         response = ContextListenerUnsubscribeResponse(
             type="contextListenerUnsubscribeResponse",
             payload=ContextListenerUnsubscribeResponsePayload(),
-            meta=AgentResponseMeta(requestUuid=request.meta.requestUuid)
+            meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
         )
         await self._send_model(websocket, response)
 
     async def _handle_heartbeat_acknowledgment(self, message: Dict[str, Any]):
         """Handle heartbeat acknowledgment"""
         request = HeartbeatAcknowledgmentRequest(**message)
-        logger.debug(f"Received heartbeat acknowledgment for event {request.payload.heartbeatEventUuid}")
+        logger.debug(
+            f"Received heartbeat acknowledgment for event {request.payload.heartbeatEventUuid}"
+        )

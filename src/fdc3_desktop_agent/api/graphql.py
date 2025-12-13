@@ -10,10 +10,12 @@ from ..core import core_services
 # Global storage instance - will be set by the server
 _storage: Optional[StorageInterface] = None
 
+
 def set_graphql_storage(storage_instance: StorageInterface):
     """Set the storage instance for GraphQL queries"""
     global _storage
     _storage = storage_instance
+
 
 # Simple GraphQL types for admin/observability
 @strawberry.type
@@ -22,10 +24,12 @@ class IconType:
     size: Optional[str]
     type: Optional[str]
 
+
 @strawberry.type
 class EnvVarType:
     key: str
     value: str
+
 
 @strawberry.type
 class AppMetadataType:
@@ -36,6 +40,7 @@ class AppMetadataType:
     icons: List[IconType]  # List of icon objects
     intents: List[str]
 
+
 @strawberry.type
 class LaunchConfigType:
     app_id: str
@@ -45,10 +50,12 @@ class LaunchConfigType:
     cwd: str
     timeout: int
 
+
 @strawberry.input
 class EnvVarInput:
     key: str
     value: str
+
 
 @strawberry.input
 class LaunchConfigInput:
@@ -59,6 +66,7 @@ class LaunchConfigInput:
     cwd: str
     timeout: int
 
+
 @strawberry.type
 class AppInstanceType:
     app_id: str
@@ -66,6 +74,7 @@ class AppInstanceType:
     instance_uuid: str
     connected: bool
     channels: List[str]
+
 
 @strawberry.type
 class ChannelEventType:
@@ -75,6 +84,7 @@ class ChannelEventType:
     context: Optional[str]  # JSON string of context data
     timestamp: str
 
+
 @strawberry.type
 class ChannelType:
     id: str
@@ -82,6 +92,7 @@ class ChannelType:
     display_name: Optional[str]
     color: Optional[str]
     member_count: int
+
 
 # Define the GraphQL schema
 @strawberry.type
@@ -103,11 +114,11 @@ class Query:
                         IconType(
                             src=icon.get("src", ""),
                             size=icon.get("size"),
-                            type=icon.get("type")
+                            type=icon.get("type"),
                         )
                         for icon in app.icons
                     ],
-                    intents=app.intents
+                    intents=app.intents,
                 )
                 for app in apps
             ]
@@ -126,12 +137,9 @@ class Query:
                     app_id=config.app_id,
                     command=config.command,
                     args=config.args,
-                    env=[
-                        EnvVarType(key=k, value=v)
-                        for k, v in config.env.items()
-                    ],
+                    env=[EnvVarType(key=k, value=v) for k, v in config.env.items()],
                     cwd=config.cwd,
-                    timeout=config.timeout
+                    timeout=config.timeout,
                 )
                 for config in configs
             ]
@@ -148,7 +156,7 @@ class Query:
                 instance_id=instance.instance_id,
                 instance_uuid=instance.instance_uuid,
                 connected=instance.connected,
-                channels=instance.channels
+                channels=instance.channels,
             )
             for instance in instances
         ]
@@ -156,7 +164,7 @@ class Query:
     @strawberry.field
     def channels(self) -> List[ChannelType]:
         """List all channels"""
-        if not hasattr(core_services, 'channel_manager'):
+        if not hasattr(core_services, "channel_manager"):
             return []
 
         channels = core_services.channel_manager.list_channels()
@@ -164,9 +172,15 @@ class Query:
             ChannelType(
                 id=channel.id,
                 type=channel.type,
-                display_name=channel.display_metadata.name if channel.display_metadata else None,
-                color=getattr(channel.display_metadata, 'color', None) if channel.display_metadata else None,
-                member_count=len(channel.members)
+                display_name=(
+                    channel.display_metadata.name if channel.display_metadata else None
+                ),
+                color=(
+                    getattr(channel.display_metadata, "color", None)
+                    if channel.display_metadata
+                    else None
+                ),
+                member_count=len(channel.members),
             )
             for channel in channels
         ]
@@ -176,6 +190,7 @@ class Query:
         """Version information"""
         return "0.1.0"
 
+
 @strawberry.type
 class Mutation:
     @strawberry.mutation
@@ -183,28 +198,32 @@ class Mutation:
         """Create or update a launch configuration"""
         if _storage is None:
             raise Exception("Storage not initialized")
-        
+
         # Convert input to LaunchConfig
         from ..storage.interfaces import LaunchConfig
+
         launch_config = LaunchConfig(
             app_id=config.app_id,
             command=config.command,
             args=config.args,
             env={env_var.key: env_var.value for env_var in config.env},
             cwd=config.cwd,
-            timeout=config.timeout
+            timeout=config.timeout,
         )
-        
+
         await _storage.launch_configs.set_launch_config(launch_config)
-        
+
         # Return the created config
         return LaunchConfigType(
             app_id=config.app_id,
             command=config.command,
             args=config.args,
-            env=[EnvVarType(key=env_var.key, value=env_var.value) for env_var in config.env],
+            env=[
+                EnvVarType(key=env_var.key, value=env_var.value)
+                for env_var in config.env
+            ],
             cwd=config.cwd,
-            timeout=config.timeout
+            timeout=config.timeout,
         )
 
     @strawberry.mutation
@@ -212,14 +231,17 @@ class Mutation:
         """Delete a launch configuration"""
         if _storage is None:
             raise Exception("Storage not initialized")
-        
+
         await _storage.launch_configs.remove_launch_config(app_id)
         return True
+
 
 @strawberry.type
 class Subscription:
     @strawberry.subscription
-    async def channel_events(self, channel_id: Optional[str] = None) -> AsyncGenerator[ChannelEventType, None]:
+    async def channel_events(
+        self, channel_id: Optional[str] = None
+    ) -> AsyncGenerator[ChannelEventType, None]:
         """Subscribe to channel events. If channel_id is provided, only events for that channel."""
         # Create a queue for this subscription
         queue = asyncio.Queue()
@@ -232,8 +254,12 @@ class Subscription:
                 logging.warning("Channel event queue full, dropping event")
 
         # Register the callback with the channel manager
-        if hasattr(core_services, 'channel_manager') and hasattr(core_services.channel_manager, 'subscribe_to_events'):
-            subscription_id = core_services.channel_manager.subscribe_to_events(event_callback, channel_id)
+        if hasattr(core_services, "channel_manager") and hasattr(
+            core_services.channel_manager, "subscribe_to_events"
+        ):
+            subscription_id = core_services.channel_manager.subscribe_to_events(
+                event_callback, channel_id
+            )
 
             try:
                 while True:
@@ -242,8 +268,10 @@ class Subscription:
                     yield ChannelEventType(**event_data)
             finally:
                 # Unsubscribe when the subscription ends
-                if hasattr(core_services.channel_manager, 'unsubscribe_from_events'):
-                    core_services.channel_manager.unsubscribe_from_events(subscription_id)
+                if hasattr(core_services.channel_manager, "unsubscribe_from_events"):
+                    core_services.channel_manager.unsubscribe_from_events(
+                        subscription_id
+                    )
         else:
             # If channel manager doesn't support subscriptions yet, yield a placeholder
             logging.warning("Channel manager does not support event subscriptions")
@@ -252,7 +280,8 @@ class Subscription:
                 channel_id="system",
                 instance_uuid=None,
                 context='{"message": "Channel event subscriptions not yet implemented"}',
-                timestamp=str(asyncio.get_event_loop().time())
+                timestamp=str(asyncio.get_event_loop().time()),
             )
+
 
 schema = strawberry.Schema(query=Query, mutation=Mutation, subscription=Subscription)

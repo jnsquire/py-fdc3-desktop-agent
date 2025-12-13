@@ -22,7 +22,9 @@ class TestServerIntegration:
 
         from fastapi import FastAPI
 
-        test_app = FastAPI(title="Test FDC3 Desktop Agent", version="0.9.0", lifespan=_lifespan)
+        test_app = FastAPI(
+            title="Test FDC3 Desktop Agent", version="0.9.0", lifespan=_lifespan
+        )
 
         @test_app.get("/health")
         async def health():

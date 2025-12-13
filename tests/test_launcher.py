@@ -13,6 +13,7 @@ def _mock_subprocess(monkeypatch):
     The fake adapts to the invoked command to simulate immediate-exit
     commands (e.g., echo) and long-running commands (e.g., sleep).
     """
+
     class FakeProcess:
         def __init__(self, long_running: bool = False):
             self.returncode = None if long_running else 0
@@ -39,17 +40,17 @@ def _mock_subprocess(monkeypatch):
 
     async def _fake_create_subprocess_exec(*cmd, **kwargs):
         # simulate command-not-found for specific invalid command used in tests
-        if any('nonexistent_command_12345' in str(c) for c in cmd):
+        if any("nonexistent_command_12345" in str(c) for c in cmd):
             raise FileNotFoundError("No such file or directory")
         # determine if command should be long-running by inspecting args
-        cmdline = ' '.join(str(x) for x in cmd)
+        cmdline = " ".join(str(x) for x in cmd)
         long_running = False
-        if 'sleep' in cmdline or 'time.sleep' in cmdline:
+        if "sleep" in cmdline or "time.sleep" in cmdline:
             long_running = True
         proc = FakeProcess(long_running=long_running)
         return proc
 
-    monkeypatch.setattr(asyncio, 'create_subprocess_exec', _fake_create_subprocess_exec)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_create_subprocess_exec)
     yield
 
 
@@ -66,7 +67,7 @@ class TestSubprocessLauncher:
             args=["hello"],
             env={"TEST_VAR": "test_value"},
             cwd="",
-            timeout=30
+            timeout=30,
         )
 
         result = await launcher.launch_app("test-app", config)
@@ -78,7 +79,9 @@ class TestSubprocessLauncher:
 
         # Check that process is tracked
         await launcher.wait_for_app_exit(result.instance_uuid, timeout=1.0)
-        assert await launcher.is_app_running(result.instance_uuid) is False  # echo exits immediately
+        assert (
+            await launcher.is_app_running(result.instance_uuid) is False
+        )  # echo exits immediately
 
         # Clean up
         await launcher.terminate_app(result.instance_uuid)
@@ -93,7 +96,7 @@ class TestSubprocessLauncher:
             args=["-c", "import os; print(os.environ.get('FDC3_APP_ID', 'NOT_SET'))"],
             env={},
             cwd="",
-            timeout=30
+            timeout=30,
         )
 
         result = await launcher.launch_app("test-app", config)
@@ -112,7 +115,7 @@ class TestSubprocessLauncher:
             args=[],
             env={},
             cwd="",
-            timeout=30
+            timeout=30,
         )
 
         result = await launcher.launch_app("test-app", config)
@@ -130,7 +133,7 @@ class TestSubprocessLauncher:
             args=["-c", "import time; time.sleep(10)"],  # Long-running command
             env={},
             cwd="",
-            timeout=30
+            timeout=30,
         )
 
         result = await launcher.launch_app("test-app", config)
@@ -153,12 +156,7 @@ class TestSubprocessLauncher:
         """Test checking if app is running"""
         launcher = SubprocessLauncher()
         config = LaunchConfig(
-            app_id="test-app",
-            command="echo",
-            args=["done"],
-            env={},
-            cwd="",
-            timeout=30
+            app_id="test-app", command="echo", args=["done"], env={}, cwd="", timeout=30
         )
 
         result = await launcher.launch_app("test-app", config)
@@ -189,15 +187,18 @@ class TestSubprocessLauncher:
     async def test_argv_env_expansion_from_config(self):
         """Test that argv and env are properly expanded from stored config"""
         launcher = SubprocessLauncher()
-        
+
         # Test with environment variable expansion in args
         config = LaunchConfig(
             app_id="test-app",
             command="python",
-            args=["-c", "import os, sys; print(f'Args: {sys.argv}'); print(f'Env TEST_VAR: {os.environ.get(\"TEST_VAR\", \"NOT_SET\")}'); print(f'FDC3_APP_ID: {os.environ.get(\"FDC3_APP_ID\", \"NOT_SET\")}')"],
+            args=[
+                "-c",
+                'import os, sys; print(f\'Args: {sys.argv}\'); print(f\'Env TEST_VAR: {os.environ.get("TEST_VAR", "NOT_SET")}\'); print(f\'FDC3_APP_ID: {os.environ.get("FDC3_APP_ID", "NOT_SET")}\')',
+            ],
             env={"TEST_VAR": "expanded_value", "ANOTHER_VAR": "another_value"},
             cwd="",
-            timeout=30
+            timeout=30,
         )
 
         result = await launcher.launch_app("test-app", config)
