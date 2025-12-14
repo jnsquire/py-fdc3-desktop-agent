@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  fdc3-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - FDC3_HOST=0.0.0.0
+      - FDC3_PORT=8000
+      - FDC3_DB_PATH=/data/fdc3_agent.db
+      - FDC3_LOG_LEVEL=INFO
+      - FDC3_ALLOWED_ORIGINS=*
+    volumes:
+      - fdc3-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/admin').read()"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  fdc3-data:
+    driver: local

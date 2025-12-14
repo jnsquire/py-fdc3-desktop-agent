@@ -64,3 +64,31 @@ jobs:
           files: coverage.xml
           # token is optional for public repos; set CODECOV_TOKEN in repo secrets if needed
           token: ${{ secrets.CODECOV_TOKEN }}
+
+  docker:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: fdc3-desktop-agent:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Test Docker image
+        run: |
+          docker run -d --name fdc3-test -p 8000:8000 fdc3-desktop-agent:latest
+          sleep 10
+          curl -f http://localhost:8000/admin || exit 1
+          docker logs fdc3-test
+          docker stop fdc3-test
+          docker rm fdc3-test
