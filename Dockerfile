@@ -16,18 +16,14 @@ COPY fdc3_desktop_agent ./fdc3_desktop_agent
 COPY README.md ./
 
 # Install dependencies and the package in one layer
-# Using specific versions from pyproject.toml
+# Using pyproject.toml to avoid version drift
 RUN pip install --upgrade pip && \
-    pip install \
-    "fastapi>=0.115" \
-    "uvicorn[standard]>=0.30" \
-    "pydantic>=2.7" \
-    "strawberry-graphql>=0.250" \
-    "aiosqlite>=0.20" \
-    "hatchling" && \
-    pip install --no-deps -e .
+    pip install "hatchling" && \
+    pip install -e .
 
 # Pre-configure the agent with sensible defaults
+# NOTE: FDC3_ALLOWED_ORIGINS=* allows all origins for convenience
+# Override with specific domains for production deployments
 ENV FDC3_HOST=0.0.0.0 \
     FDC3_PORT=8000 \
     FDC3_DB_PATH=/data/fdc3_agent.db \

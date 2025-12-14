@@ -12,6 +12,8 @@ services:
       - FDC3_PORT=8000
       - FDC3_DB_PATH=/data/fdc3_agent.db
       - FDC3_LOG_LEVEL=INFO
+      # WARNING: Allowing all origins (*) is convenient for development but
+      # NOT RECOMMENDED for production. Override with specific domains.
       - FDC3_ALLOWED_ORIGINS=*
     volumes:
       - fdc3-data:/data

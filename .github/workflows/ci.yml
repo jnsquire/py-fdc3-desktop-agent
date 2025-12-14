@@ -87,8 +87,26 @@ jobs:
       - name: Test Docker image
         run: |
           docker run -d --name fdc3-test -p 8000:8000 fdc3-desktop-agent:latest
-          sleep 10
+          
+          # Wait for container to be healthy (up to 60 seconds)
+          for i in {1..60}; do
+            if docker ps --filter "name=fdc3-test" --filter "health=healthy" | grep -q fdc3-test; then
+              echo "Container is healthy"
+              break
+            fi
+            if [ $i -eq 60 ]; then
+              echo "Container failed to become healthy"
+              docker logs fdc3-test
+              exit 1
+            fi
+            echo "Waiting for container to be healthy... ($i/60)"
+            sleep 1
+          done
+          
+          # Test the endpoint
           curl -f http://localhost:8000/admin || exit 1
+          
+          # Show logs and cleanup
           docker logs fdc3-test
           docker stop fdc3-test
           docker rm fdc3-test
