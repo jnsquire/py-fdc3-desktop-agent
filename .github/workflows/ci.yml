@@ -92,16 +92,17 @@ jobs:
           
           # Wait for container to be healthy (up to 60 seconds)
           for i in {1..60}; do
-            if docker ps --filter "name=fdc3-test" --filter "health=healthy" | grep -q fdc3-test; then
+            HEALTH_STATUS=$(docker inspect --format='{{.State.Health.Status}}' fdc3-test 2>/dev/null || echo "starting")
+            if [ "$HEALTH_STATUS" = "healthy" ]; then
               echo "Container is healthy"
               break
             fi
             if [ $i -eq 60 ]; then
-              echo "Container failed to become healthy"
+              echo "Container failed to become healthy (status: $HEALTH_STATUS)"
               docker logs fdc3-test
               exit 1
             fi
-            echo "Waiting for container to be healthy... ($i/60)"
+            echo "Waiting for container to be healthy... ($i/60, current: $HEALTH_STATUS)"
             sleep 1
           done
           
