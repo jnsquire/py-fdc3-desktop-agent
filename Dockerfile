@@ -17,8 +17,7 @@ COPY README.md ./
 
 # Install dependencies and the package in one layer
 # Using pyproject.toml to avoid version drift
-RUN pip install --upgrade pip && \
-    pip install "hatchling" && \
+RUN pip install --upgrade pip "hatchling" && \
     pip install -e .
 
 # Pre-configure the agent with sensible defaults
