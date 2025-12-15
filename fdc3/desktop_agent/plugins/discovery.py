@@ -24,8 +24,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Entry point group name for FDC3 Desktop Agent plugins
+# Entry point group name for FDC3 Desktop Agent plugins (legacy)
 PLUGIN_ENTRY_POINT_GROUP = "fdc3_desktop_agent.plugins"
+# New entry point group name for the unified `fdc3` package (recommended)
+NEW_PLUGIN_ENTRY_POINT_GROUP = "fdc3.desktop_agent.plugins"
 
 
 def discover_plugins() -> List["IntentHandlerPlugin"]:
@@ -51,16 +53,26 @@ def discover_plugins() -> List["IntentHandlerPlugin"]:
     """
     from .interfaces import IntentHandlerPlugin
 
-    # Use importlib.metadata (Python 3.9+)
+    # Use importlib.metadata (Python 3.9+). Look for both legacy and new
+    # entry point group names to support a gradual migration.
+    groups = [PLUGIN_ENTRY_POINT_GROUP, NEW_PLUGIN_ENTRY_POINT_GROUP]
+
+    eps = []
     if sys.version_info >= (3, 10):
         from importlib.metadata import entry_points
 
-        eps = entry_points(group=PLUGIN_ENTRY_POINT_GROUP)
+        for g in groups:
+            try:
+                eps.extend(entry_points(group=g))
+            except Exception:
+                # Some environments may raise if group is unknown; ignore
+                continue
     else:
         from importlib.metadata import entry_points
 
         all_eps = entry_points()
-        eps = all_eps.get(PLUGIN_ENTRY_POINT_GROUP, [])
+        for g in groups:
+            eps.extend(all_eps.get(g, []))
 
     plugins: List[IntentHandlerPlugin] = []
 
@@ -114,21 +126,28 @@ def list_plugin_entry_points() -> List[dict]:
     Returns:
         List of dicts with 'name', 'value', and 'group' keys.
     """
+    groups = [PLUGIN_ENTRY_POINT_GROUP, NEW_PLUGIN_ENTRY_POINT_GROUP]
+    eps = []
     if sys.version_info >= (3, 10):
         from importlib.metadata import entry_points
 
-        eps = entry_points(group=PLUGIN_ENTRY_POINT_GROUP)
+        for g in groups:
+            try:
+                eps.extend(entry_points(group=g))
+            except Exception:
+                continue
     else:
         from importlib.metadata import entry_points
 
         all_eps = entry_points()
-        eps = all_eps.get(PLUGIN_ENTRY_POINT_GROUP, [])
+        for g in groups:
+            eps.extend(all_eps.get(g, []))
 
     return [
         {
             "name": ep.name,
             "value": ep.value,
-            "group": PLUGIN_ENTRY_POINT_GROUP,
+            "group": getattr(ep, "group", None) or PLUGIN_ENTRY_POINT_GROUP,
         }
         for ep in eps
     ]

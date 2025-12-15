@@ -41,7 +41,7 @@
             "request": "launch",
             "module": "uvicorn",
             "args": [
-                "fdc3_desktop_agent.server:app",
+                "fdc3.desktop_agent.server:app",
                 "--reload",
                 "--host",
                 "0.0.0.0",

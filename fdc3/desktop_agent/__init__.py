@@ -9,21 +9,7 @@ emit a DeprecationWarning and re-export symbols from `fdc3.desktop_agent`.
 Otherwise it falls back to the existing local module exports.
 """
 
-import importlib
-import pkgutil
-import sys
 import warnings
-
-
-# Warn that the project is migrating; keep this top-level for visibility.
-warnings.warn(
-    "fdc3_desktop_agent package has been migrated to the `fdc3.desktop_agent` "
-    "namespace; import from `fdc3.desktop_agent` instead. This shim re-exports "
-    "the new package for backwards compatibility and will be removed in a "
-    "future release.",
-    DeprecationWarning,
-)
-
 
 try:
     # Prefer new unified package layout when available.
@@ -71,52 +57,6 @@ try:
         "PLUGIN_ENTRY_POINT_GROUP",
     ]
 
-    # Also map subpackages from the new namespace into the legacy package name so
-    # imports like `fdc3_desktop_agent.transport.wcp` continue to work during
-    # the migration period. Best-effort only.
-    try:
-        base_pkg = importlib.import_module("fdc3.desktop_agent")
-        for _finder, subname, ispkg in pkgutil.iter_modules(base_pkg.__path__):
-            full_new = f"fdc3.desktop_agent.{subname}"
-            full_legacy = f"fdc3_desktop_agent.{subname}"
-            try:
-                submod = importlib.import_module(full_new)
-                sys.modules[full_legacy] = submod
-            except Exception:
-                continue
-
-        # Some nested subpackages may not be discoverable via pkgutil; map a
-        # small set explicitly and attempt to map nested children as well.
-        for subname in ("transport", "protocol", "schemas", "distributed"):
-            try:
-                full_new = f"fdc3.desktop_agent.{subname}"
-                full_legacy = f"fdc3_desktop_agent.{subname}"
-                submod = importlib.import_module(full_new)
-                sys.modules[full_legacy] = submod
-            except Exception:
-                continue
-
-        try:
-            for top in list(sys.modules.keys()):
-                if not top.startswith("fdc3_desktop_agent."):
-                    continue
-                new_top = top.replace("fdc3_desktop_agent", "fdc3.desktop_agent", 1)
-                mod = sys.modules.get(new_top)
-                if mod is None or not hasattr(mod, "__path__"):
-                    continue
-                for _f, child, ispkg in pkgutil.iter_modules(mod.__path__):
-                    new_child = f"{new_top}.{child}"
-                    legacy_child = f"{top}.{child}"
-                    try:
-                        child_mod = importlib.import_module(new_child)
-                        sys.modules[legacy_child] = child_mod
-                    except Exception:
-                        continue
-        except Exception:
-            pass
-    except Exception:
-        # Best-effort mapping only; fall back silently if something goes wrong.
-        pass
 except Exception:
     # Fall back to the current internal implementation when the new layout is
     # not present yet.

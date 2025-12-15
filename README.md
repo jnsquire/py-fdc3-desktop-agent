@@ -48,19 +48,19 @@ The agent can be started in different modes using uv run:
 ### Development Mode (with auto-reload)
 
 ```bash
-uv run uvicorn fdc3_desktop_agent.server:app --host localhost --port 8000 --reload --log-level info
+uv run uvicorn fdc3.desktop_agent.server:app --host localhost --port 8000 --reload --log-level info
 ```
 
 ### Production Mode (multi-worker)
 
 ```bash
-uv run uvicorn fdc3_desktop_agent.server:app --host 0.0.0.0 --port 8000 --workers 4 --log-level warning
+uv run uvicorn fdc3.desktop_agent.server:app --host 0.0.0.0 --port 8000 --workers 4 --log-level warning
 ```
 
 ### Debug Mode (verbose logging)
 
 ```bash
-uv run uvicorn fdc3_desktop_agent.server:app --host localhost --port 8000 --reload --log-level debug
+uv run uvicorn fdc3.desktop_agent.server:app --host localhost --port 8000 --reload --log-level debug
 ```
 
 ### Running Tests
@@ -72,7 +72,7 @@ uv run python -m pytest tests/ -v
 ### Quick Development Start
 
 ```bash
-uv run uvicorn fdc3_desktop_agent.server:app --reload
+uv run uvicorn fdc3.desktop_agent.server:app --reload
 ```
 
 ## Distributed Adapters (optional)
@@ -116,7 +116,7 @@ The FDC3 Desktop Agent can be embedded in other Python applications using the `c
 ### Basic Usage
 
 ```python
-from fdc3_desktop_agent import create_app, DesktopAgentConfig
+from fdc3.desktop_agent import create_app, DesktopAgentConfig
 
 # Create with default configuration (reads from environment variables)
 app = create_app()
@@ -135,7 +135,7 @@ app = create_app(config)
 
 ```python
 from fastapi import FastAPI
-from fdc3_desktop_agent import create_app, DesktopAgentConfig
+from fdc3.desktop_agent import create_app, DesktopAgentConfig
 
 # Your main application
 main_app = FastAPI(title="My Application")
@@ -200,7 +200,7 @@ app = create_app(config)
 The package exports these interfaces for custom implementations:
 
 ```python
-from fdc3_desktop_agent import (
+from fdc3.desktop_agent import (
     # Main API
     create_app,
     app,  # Default app instance
@@ -431,10 +431,10 @@ External handlers:
 
 ### Using the Client Library
 
-The `fdc3_client` package provides a simple client for building external handlers:
+The `fdc3_client` package provides a simple client for building external handlers (now available as `fdc3.client`):
 
 ```python
-from fdc3_client import FDC3Client
+from fdc3.client import FDC3Client
 
 async with FDC3Client("ws://localhost:8000/ws", handler_id="my-handler") as client:
     # Wait for WCP handshake to complete
