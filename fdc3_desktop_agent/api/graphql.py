@@ -262,6 +262,14 @@ class Mutation:
         """Create a new channel (user, app, or private)"""
         from ..api import DisplayMetadata
 
+        # Validate channel_id format based on type
+        if input.channel_type == "user" and not input.channel_id.startswith("user:"):
+            raise ValueError("User channel IDs must start with 'user:' prefix")
+        elif input.channel_type == "app" and not input.channel_id.startswith("app:"):
+            raise ValueError("App channel IDs must start with 'app:' prefix")
+        elif input.channel_type == "private" and not input.channel_id.startswith("private:"):
+            raise ValueError("Private channel IDs must start with 'private:' prefix")
+
         display_metadata = None
         if input.display_metadata:
             display_metadata = DisplayMetadata(
@@ -317,8 +325,12 @@ class Mutation:
                 channel_id, context_data, "system"
             )
             return True
-        except Exception:
-            return False
+        except json.JSONDecodeError as e:
+            logging.error(f"Invalid JSON context for broadcast: {e}")
+            raise ValueError(f"Invalid JSON context: {str(e)}")
+        except Exception as e:
+            logging.error(f"Error broadcasting to channel {channel_id}: {e}")
+            raise
 
 
 @strawberry.type

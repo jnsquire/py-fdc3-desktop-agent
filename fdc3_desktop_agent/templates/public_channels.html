@@ -233,7 +233,7 @@
             <div class="form-group">
                 <label for="channelId">Channel ID:</label>
                 <input type="text" id="channelId" required placeholder="e.g., user:red, user:blue">
-                <small>Prefix with "user:" for public channels</small>
+                <small>Channel IDs must be prefixed: "user:" for public channels, "app:" for app channels, "private:" for private channels</small>
             </div>
 
             <div class="form-group">
@@ -279,8 +279,12 @@
     </div>
 
     <script>
+        // Configuration constants
+        const MAX_EVENT_HISTORY = 50;
+        const WEBSOCKET_SUBID = '1';
+        
         let socket = null;
-        let subId = '1';
+        let subId = WEBSOCKET_SUBID;
 
         // Load channels on page load
         document.addEventListener('DOMContentLoaded', () => {
@@ -648,8 +652,8 @@
             // Add to top of list
             monitor.insertBefore(eventDiv, monitor.firstChild);
             
-            // Limit to 50 events
-            while (monitor.children.length > 50) {
+            // Limit event history
+            while (monitor.children.length > MAX_EVENT_HISTORY) {
                 monitor.removeChild(monitor.lastChild);
             }
         }
