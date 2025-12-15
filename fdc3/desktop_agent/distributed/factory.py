@@ -36,12 +36,9 @@ def get_adapter() -> DistributedLogAdapter:
     if mode == "etcd":
         import importlib
 
-        # Try new and legacy module paths so tests and external code that
-        # reference the old package name continue to work during migration.
-        candidates = [
-            "fdc3.desktop_agent.distributed.etcd_adapter",
-            "fdc3_desktop_agent.distributed.etcd_adapter",
-        ]
+        # Try the canonical module path for the adapter; fall back to a
+        # relative import within this package.
+        candidates = ["fdc3.desktop_agent.distributed.etcd_adapter"]
         for mod_name in candidates:
             try:
                 mod = importlib.import_module(mod_name)
@@ -59,10 +56,7 @@ def get_adapter() -> DistributedLogAdapter:
     if mode == "consul":
         import importlib
 
-        candidates = [
-            "fdc3.desktop_agent.distributed.consul_adapter",
-            "fdc3_desktop_agent.distributed.consul_adapter",
-        ]
+        candidates = ["fdc3.desktop_agent.distributed.consul_adapter"]
         for mod_name in candidates:
             try:
                 mod = importlib.import_module(mod_name)

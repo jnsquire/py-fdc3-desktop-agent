@@ -1,7 +1,7 @@
 """Async client for connecting external intent handlers to the desktop agent.
 
-This is the implementation moved from `fdc3_client.client` into the
-`fdc3.client` package as part of the migration to the `fdc3` namespace.
+This module implements the `FDC3Client` used to connect external handlers
+to the desktop agent.
 """
 
 from __future__ import annotations

@@ -15,6 +15,7 @@ class AppMetadata:
         description: str = "",
         icons: List[Dict[str, Any]] = None,
         intents: List[str] = None,
+        allowed_origins: List[str] = None,
     ):
         self.app_id = app_id
         self.name = name
@@ -22,6 +23,7 @@ class AppMetadata:
         self.description = description
         self.icons = icons or []
         self.intents = intents or []
+        self.allowed_origins = allowed_origins or []
 
 
 class LaunchConfig:
@@ -92,18 +94,7 @@ class LaunchConfigRepository(ABC):
         pass
 
 
-class OriginRepository(ABC):
-    """Repository for allowed origins per app"""
 
-    @abstractmethod
-    async def get_allowed_origins(self, app_id: str) -> List[str]:
-        """Get allowed origins for app"""
-        pass
-
-    @abstractmethod
-    async def set_allowed_origins(self, app_id: str, origins: List[str]) -> None:
-        """Set allowed origins for app"""
-        pass
 
 
 class Storage(ABC):
@@ -119,12 +110,6 @@ class Storage(ABC):
     @abstractmethod
     def launch_configs(self) -> LaunchConfigRepository:
         """Launch config repository"""
-        pass
-
-    @property
-    @abstractmethod
-    def origins(self) -> OriginRepository:
-        """Origin repository"""
         pass
 
     @abstractmethod

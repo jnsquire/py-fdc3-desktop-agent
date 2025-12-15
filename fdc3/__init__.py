@@ -1,11 +1,8 @@
-import warnings
+"""Top-level package for FDC3 Python libraries.
 
-warnings.warn(
-    "The `fdc3` package is a migration shim that re-exports the existing"
-    " packages `fdc3_client` and `fdc3_desktop_agent`. Import from the new"
-    " `fdc3` namespace when available. This shim will be removed in a"
-    " future release.",
-    DeprecationWarning,
-)
+This package contains the current implementations of the desktop agent
+and client libraries under the `fdc3.desktop_agent` and `fdc3.client`
+namespaces. It is the canonical import location for this repository.
+"""
 
-__all__ = []
+__all__ = ["desktop_agent", "client"]

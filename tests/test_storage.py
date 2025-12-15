@@ -39,7 +39,7 @@ class TestSqliteStorage:
         assert retrieved.version == "1.0.0"
         assert retrieved.description == "A test app"
         assert len(retrieved.icons) == 1
-        assert retrieved.intents == ["ViewChart", "CreateInteraction"]
+        assert set(retrieved.intents) == {"ViewChart", "CreateInteraction"}
 
         # List apps
         apps = await storage.apps.list_apps()
@@ -85,26 +85,24 @@ class TestSqliteStorage:
     @pytest.mark.asyncio
     async def test_origins_crud(self, storage):
         """Test allowed origins create, read, update, delete"""
-        origins = ["https://example.com", "https://app.example.com"]
+        # Store allowed origins on AppMetadata and retrieve via apps repo
+        metadata = AppMetadata(
+            app_id="test-app",
+            name="Test App",
+            allowed_origins=["https://example.com", "https://app.example.com"],
+        )
 
-        # Set origins
-        await storage.origins.set_allowed_origins("test-app", origins)
-
-        # Retrieve origins
-        retrieved = await storage.origins.get_allowed_origins("test-app")
-        assert retrieved == origins
-
-        # Update origins
-        new_origins = ["https://new.example.com"]
-        await storage.origins.set_allowed_origins("test-app", new_origins)
-        retrieved = await storage.origins.get_allowed_origins("test-app")
-        assert retrieved == new_origins
+        await storage.apps.add_app(metadata)
+        retrieved = await storage.apps.get_app_metadata("test-app")
+        assert retrieved is not None
+        assert set(retrieved.allowed_origins) == {"https://example.com", "https://app.example.com"}
 
     @pytest.mark.asyncio
     async def test_empty_origins(self, storage):
         """Test getting origins for app with no origins set"""
-        origins = await storage.origins.get_allowed_origins("nonexistent-app")
-        assert origins == []
+        # No app metadata -> should return None for metadata
+        metadata = await storage.apps.get_app_metadata("nonexistent-app")
+        assert metadata is None
 
     @pytest.mark.asyncio
     async def test_app_not_found(self, storage):

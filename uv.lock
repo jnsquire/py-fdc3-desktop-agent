@@ -401,6 +401,7 @@ source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
     { name = "fastapi" },
+    { name = "jinja2" },
     { name = "pydantic" },
     { name = "strawberry-graphql" },
     { name = "uvicorn", extra = ["standard"] },
@@ -436,6 +437,7 @@ requires-dist = [
     { name = "etcd3", marker = "extra == 'etcd'", specifier = ">=0.12" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
+    { name = "jinja2", specifier = ">=3.0" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },

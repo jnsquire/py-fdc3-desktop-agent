@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 # Explicit package list to ensure editable builds succeed in current Hatchling
 # versions. Include both existing top-level packages so editable installs
 # continue to work during the migration window.
-packages = ["fdc3_desktop_agent", "fdc3_client", "fdc3"]
+packages = ["fdc3"]
 
 [project]
 name = "fdc3-desktop-agent"
@@ -20,6 +20,7 @@ dependencies = [
   "uvicorn[standard]>=0.38",
   "pydantic>=2.7",
   "strawberry-graphql>=0.250",
+  "jinja2>=3.0",
   "aiosqlite>=0.20",
 ]
 
@@ -55,8 +56,6 @@ check-style = "fdc3.desktop_agent.tools:prepush"
 [tool.uvx.scripts]
 # run `uvx run install-git-hooks` to install the package (editable) and register hooks
 install-git-hooks = "python -m pip install -e . && install-git-hooks"
-# run `uvx run check-style` to run the ruff check
-check-style = "python -m fdc3.desktop_agent.tools"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

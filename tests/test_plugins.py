@@ -266,7 +266,7 @@ class TestPluginDiscovery:
         """Test the entry point group constant is correct."""
         from fdc3.desktop_agent.plugins import PLUGIN_ENTRY_POINT_GROUP
 
-        assert PLUGIN_ENTRY_POINT_GROUP == "fdc3.desktop_agent.plugins"
+        assert PLUGIN_ENTRY_POINT_GROUP == "fdc3.plugins"
 
     def test_exports_from_main_package(self):
         """Test discovery functions are exported from main package."""

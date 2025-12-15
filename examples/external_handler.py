@@ -1,4 +1,4 @@
-"""Example external intent handler using the minimal `fdc3_client`.
+"""Example external intent handler using the `fdc3.client` library.
 
 Usage:
 

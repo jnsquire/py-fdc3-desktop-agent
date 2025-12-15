@@ -178,7 +178,7 @@ main_app.mount("/fdc3", create_app(fdc3_config))
 You can provide custom implementations of the core interfaces:
 
 ```python
-from fdc3_desktop_agent import create_app, DesktopAgentConfig, Storage, ProcessLauncher
+from fdc3.desktop_agent import create_app, DesktopAgentConfig, Storage, ProcessLauncher
 
 class MyCustomStorage(Storage):
     # Implement Storage interface methods
@@ -233,7 +233,7 @@ The Plugin API allows you to extend the desktop agent with custom intent handler
 Create a plugin by subclassing `IntentHandlerPlugin`:
 
 ```python
-from fdc3_desktop_agent import IntentHandlerPlugin, IntentHandlerResult
+from fdc3.desktop_agent import IntentHandlerPlugin, IntentHandlerResult
 
 class MyCustomIntentHandler(IntentHandlerPlugin):
     """Handle custom intents for my application."""
@@ -296,7 +296,7 @@ class MyCustomIntentHandler(IntentHandlerPlugin):
 Pass plugins when creating the app:
 
 ```python
-from fdc3_desktop_agent import create_app, DesktopAgentConfig
+from fdc3.desktop_agent import create_app, DesktopAgentConfig
 
 config = DesktopAgentConfig(
     plugins=[
@@ -314,7 +314,7 @@ External packages can register plugins using Python's entry points system. This 
 Add an entry point in your package's `pyproject.toml`:
 
 ```toml
-[project.entry-points."fdc3_desktop_agent.plugins"]
+[project.entry-points."fdc3.plugins"]
 my-handler = "my_package.plugins:MyCustomIntentHandler"
 analytics = "my_package.plugins:AnalyticsPlugin"
 ```
@@ -336,7 +336,7 @@ config = DesktopAgentConfig(auto_discover_plugins=False)
 **Listing Available Plugins:**
 
 ```python
-from fdc3_desktop_agent import list_plugin_entry_points, discover_plugins
+from fdc3.desktop_agent import list_plugin_entry_points, discover_plugins
 
 # List entry points without loading
 entry_points = list_plugin_entry_points()
@@ -431,7 +431,7 @@ External handlers:
 
 ### Using the Client Library
 
-The `fdc3_client` package provides a simple client for building external handlers (now available as `fdc3.client`):
+The `fdc3.client` package provides a simple client for building external handlers:
 
 ```python
 from fdc3.client import FDC3Client
@@ -571,7 +571,7 @@ my-fdc3-handler = "my_handler.main:main"
 ```python
 # my_handler/main.py
 import asyncio
-from fdc3_client import FDC3Client
+from fdc3.client import FDC3Client
 
 async def run():
     async with FDC3Client("ws://localhost:8000/ws", handler_id="my-handler") as client:

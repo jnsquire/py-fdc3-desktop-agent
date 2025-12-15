@@ -109,14 +109,16 @@ async def test_system_intent_handler(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_wcp_handler_send_and_hello(monkeypatch):
-    # minimal fake storage with origins attribute
-    class FakeOrigins:
-        async def get_allowed_origins(self, app_id):
-            return ["example.com"]
+    # minimal fake storage with apps repository
+    class AppsStub:
+        async def get_app_metadata(self, app_id):
+            from fdc3.desktop_agent.storage import AppMetadata
+
+            return AppMetadata(app_id=app_id, name="x", allowed_origins=["example.com"])
 
     class FakeStorage:
         def __init__(self):
-            self.origins = FakeOrigins()
+            self.apps = AppsStub()
 
     storage = FakeStorage()
     handler = WCPHandler(cast(Storage, storage))
@@ -153,9 +155,13 @@ async def test_wcp_validate_identity_cases():
         async def get_allowed_origins(self, app_id):
             return []
 
+    class AppsStubEmpty:
+        async def get_app_metadata(self, app_id):
+            return None
+
     class FakeStorage:
         def __init__(self):
-            self.origins = FakeOrigins()
+            self.apps = AppsStubEmpty()
 
     storage = FakeStorage()
     handler = WCPHandler(cast(Storage, storage))
