@@ -5,7 +5,7 @@ custom intent handlers that run in-process with the desktop agent.
 
 Example usage::
 
-    from fdc3_desktop_agent.plugins import IntentHandlerPlugin, IntentHandlerResult
+    from fdc3.desktop_agent.plugins import IntentHandlerPlugin, IntentHandlerResult
 
     class MyIntentPlugin(IntentHandlerPlugin):
         @property

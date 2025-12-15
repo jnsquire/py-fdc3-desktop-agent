@@ -58,7 +58,7 @@ def main(argv: List[str] | None = None) -> int:
         argv = [
             "run",
             "uvicorn",
-            "fdc3_desktop_agent.server:app",
+            "fdc3.desktop_agent.server:app",
             "--reload",
             "--host",
             "localhost",

@@ -75,7 +75,7 @@ class DesktopAgentConfig:
     plugins: List["IntentHandlerPlugin"] = field(default_factory=list)
 
     # Automatically discover and load plugins from installed packages
-    # via the 'fdc3_desktop_agent.plugins' entry point group
+    # via the 'fdc3.desktop_agent.plugins' entry point group
     auto_discover_plugins: bool = field(
         default_factory=lambda: os.getenv("FDC3_AUTO_DISCOVER_PLUGINS", "true").lower()
         in ("true", "1", "yes")

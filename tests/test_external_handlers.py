@@ -3,14 +3,14 @@ import json
 import pytest
 from typing import cast
 from fastapi import WebSocket
-from fdc3_desktop_agent.protocol.dacp.external_models import (
+from fdc3.desktop_agent.protocol.dacp.external_models import (
     RegisterExternalHandlerRequest,
     UnregisterExternalHandlerRequest,
     ExternalIntentResultRequest,
 )
 
-from fdc3_desktop_agent.core.external_registry import ExternalHandlerRegistry
-from fdc3_desktop_agent.core import core_services
+from fdc3.desktop_agent.core.external_registry import ExternalHandlerRegistry
+from fdc3.desktop_agent.core import core_services
 
 
 def test_external_registry_basic():
@@ -60,16 +60,16 @@ class DummyLauncher:
 
 @pytest.mark.asyncio
 async def test_dacp_register_and_forward(tmp_path):
-    from fdc3_desktop_agent.handlers.dacp import DACPHandler
+    from fdc3.desktop_agent.handlers.dacp import DACPHandler
 
     storage = DummyStorage()
     launcher = DummyLauncher()
     conn_mgr = DummyConnectionManager()
-    from fdc3_desktop_agent.storage.interfaces import Storage as _Storage
-    from fdc3_desktop_agent.launcher.interfaces import (
+    from fdc3.desktop_agent.storage.interfaces import Storage as _Storage
+    from fdc3.desktop_agent.launcher.interfaces import (
         ProcessLauncher as _ProcessLauncher,
     )
-    from fdc3_desktop_agent.handlers.connection_manager import (
+    from fdc3.desktop_agent.handlers.connection_manager import (
         WebSocketConnectionManager as _WCM,
     )
 
@@ -110,7 +110,7 @@ async def test_dacp_register_and_forward(tmp_path):
     assert any(h.handler_uuid == handler_uuid for h in all_handlers)
 
     # Now raise an intent and test forwarding+response correlation
-    from fdc3_desktop_agent.protocol.dacp.dacp import (
+    from fdc3.desktop_agent.protocol.dacp.dacp import (
         RaiseIntentRequest,
     )
 
@@ -170,8 +170,8 @@ async def test_dacp_register_and_forward(tmp_path):
 
 @pytest.mark.asyncio
 async def test_register_invalid_payload_and_forward_failure():
-    from fdc3_desktop_agent.handlers.dacp import DACPHandler
-    from fdc3_desktop_agent.protocol.dacp.message_parser import (
+    from fdc3.desktop_agent.handlers.dacp import DACPHandler
+    from fdc3.desktop_agent.protocol.dacp.message_parser import (
         parse_message,
         MessageParseError,
     )
@@ -185,11 +185,11 @@ async def test_register_invalid_payload_and_forward_failure():
             raise RuntimeError("send failed")
 
     conn_mgr = FailingConnMgr()
-    from fdc3_desktop_agent.storage.interfaces import Storage as _Storage
-    from fdc3_desktop_agent.launcher.interfaces import (
+    from fdc3.desktop_agent.storage.interfaces import Storage as _Storage
+    from fdc3.desktop_agent.launcher.interfaces import (
         ProcessLauncher as _ProcessLauncher,
     )
-    from fdc3_desktop_agent.handlers.connection_manager import (
+    from fdc3.desktop_agent.handlers.connection_manager import (
         WebSocketConnectionManager as _WCM,
     )
 
@@ -228,7 +228,7 @@ async def test_register_invalid_payload_and_forward_failure():
     assert "handler_uuid" in resp.get("payload", {})
 
     # Raise intent that will be forwarded but sending will fail
-    from fdc3_desktop_agent.protocol.dacp.dacp import RaiseIntentRequest
+    from fdc3.desktop_agent.protocol.dacp.dacp import RaiseIntentRequest
 
     message = {
         "type": "raiseIntent",

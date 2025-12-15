@@ -32,8 +32,8 @@ pytest_plugins = ["pytest_asyncio"]
 async def test_external_handler_registration_e2e():
     """End-to-end test: connect via WebSocket, do WCP handshake, register handler."""
     from websockets.asyncio.client import connect
-    from fdc3_desktop_agent.server import create_app
-    from fdc3_desktop_agent.config import DesktopAgentConfig
+    from fdc3.desktop_agent.server import create_app
+    from fdc3.desktop_agent.config import DesktopAgentConfig
     import uvicorn
     import threading
 

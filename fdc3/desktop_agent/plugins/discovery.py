@@ -24,10 +24,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Entry point group name for FDC3 Desktop Agent plugins (legacy)
-PLUGIN_ENTRY_POINT_GROUP = "fdc3_desktop_agent.plugins"
-# New entry point group name for the unified `fdc3` package (recommended)
-NEW_PLUGIN_ENTRY_POINT_GROUP = "fdc3.desktop_agent.plugins"
+# Primary entry point group name for the unified `fdc3` package (recommended)
+PLUGIN_ENTRY_POINT_GROUP = "fdc3.desktop_agent.plugins"
+# Legacy group name retained for discovery during migration
+LEGACY_PLUGIN_ENTRY_POINT_GROUP = "fdc3_desktop_agent.plugins"
 
 
 def discover_plugins() -> List["IntentHandlerPlugin"]:
@@ -53,9 +53,9 @@ def discover_plugins() -> List["IntentHandlerPlugin"]:
     """
     from .interfaces import IntentHandlerPlugin
 
-    # Use importlib.metadata (Python 3.9+). Look for both legacy and new
+    # Use importlib.metadata (Python 3.9+). Look for both new and legacy
     # entry point group names to support a gradual migration.
-    groups = [PLUGIN_ENTRY_POINT_GROUP, NEW_PLUGIN_ENTRY_POINT_GROUP]
+    groups = [PLUGIN_ENTRY_POINT_GROUP, LEGACY_PLUGIN_ENTRY_POINT_GROUP]
 
     eps = []
     if sys.version_info >= (3, 10):
@@ -126,7 +126,7 @@ def list_plugin_entry_points() -> List[dict]:
     Returns:
         List of dicts with 'name', 'value', and 'group' keys.
     """
-    groups = [PLUGIN_ENTRY_POINT_GROUP, NEW_PLUGIN_ENTRY_POINT_GROUP]
+    groups = [PLUGIN_ENTRY_POINT_GROUP, LEGACY_PLUGIN_ENTRY_POINT_GROUP]
     eps = []
     if sys.version_info >= (3, 10):
         from importlib.metadata import entry_points

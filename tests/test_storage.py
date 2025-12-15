@@ -1,7 +1,7 @@
 # Storage tests
 
 import pytest
-from fdc3_desktop_agent.storage import SqliteStorage, AppMetadata, LaunchConfig
+from fdc3.desktop_agent.storage import SqliteStorage, AppMetadata, LaunchConfig
 
 
 class TestSqliteStorage:

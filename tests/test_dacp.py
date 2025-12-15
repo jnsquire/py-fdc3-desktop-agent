@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime
-from fdc3_desktop_agent.protocol.dacp.dacp import (
+from fdc3.desktop_agent.protocol.dacp.dacp import (
     AgentResponseMeta,
     AgentEventMeta,
     OpenRequest,
@@ -15,7 +15,7 @@ from fdc3_desktop_agent.protocol.dacp.dacp import (
     ErrorResponsePayload,
     BroadcastEventPayload,
 )
-from fdc3_desktop_agent.api import OpenError
+from fdc3.desktop_agent.api import OpenError
 
 
 class TestDACPEnvelopes:

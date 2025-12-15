@@ -1,6 +1,6 @@
 import pytest
 
-from fdc3_desktop_agent.access_control import (
+from fdc3.desktop_agent.access_control import (
     AccessControlManager,
     AccessControlPolicy,
     AccessRequest,

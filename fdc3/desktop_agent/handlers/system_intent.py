@@ -55,7 +55,7 @@ class SystemIntentHandler:
         "fdc3.systemAlert": "system_alert",
     }
 
-    def __init__(self, templates_dir: str = "src/fdc3_desktop_agent/templates"):
+    def __init__(self, templates_dir: str = "src/fdc3/desktop_agent/templates"):
         self.templates_dir = Path(templates_dir)
         self.system_app_id = "fdc3-desktop-agent"
         self.system_app_name = "FDC3 Desktop Agent"
