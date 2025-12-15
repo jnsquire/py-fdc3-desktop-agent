@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FDC3 Desktop Agent - Public Channels</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .header {
+            background: #2c3e50;
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .header h1 {
+            margin: 0 0 10px 0;
+        }
+        .nav {
+            margin-top: 10px;
+        }
+        .nav a {
+            color: #3498db;
+            text-decoration: none;
+            margin-right: 15px;
+        }
+        .nav a:hover {
+            text-decoration: underline;
+        }
+        .section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .section h2 {
+            margin-top: 0;
+            color: #2c3e50;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, textarea, select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+        button {
+            background: #3498db;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background: #2980b9;
+        }
+        button:disabled {
+            background: #95a5a6;
+            cursor: not-allowed;
+        }
+        button.danger {
+            background: #e74c3c;
+        }
+        button.danger:hover {
+            background: #c0392b;
+        }
+        button.success {
+            background: #27ae60;
+        }
+        button.success:hover {
+            background: #229954;
+        }
+        .channel-card {
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 4px;
+            background: #fafafa;
+        }
+        .channel-card h3 {
+            margin: 0 0 10px 0;
+            color: #2c3e50;
+            display: flex;
+            align-items: center;
+        }
+        .channel-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 10px;
+            border: 2px solid #ddd;
+        }
+        .channel-info {
+            margin: 10px 0;
+            color: #555;
+        }
+        .channel-info p {
+            margin: 5px 0;
+        }
+        .channel-actions {
+            margin-top: 10px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            display: none;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        .members-list {
+            background: #f9f9f9;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+        .member-item {
+            padding: 5px;
+            border-bottom: 1px solid #eee;
+            font-size: 12px;
+            font-family: monospace;
+        }
+        .broadcast-form {
+            background: #f0f8ff;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 10px;
+            display: none;
+        }
+        .events-monitor {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 4px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .event-item {
+            border-bottom: 1px solid #ddd;
+            padding: 10px 0;
+        }
+        .event-item:last-child {
+            border-bottom: none;
+        }
+        .event-meta {
+            color: #666;
+            font-size: 12px;
+            margin-top: 5px;
+        }
+        .event-context {
+            background: #fff;
+            padding: 8px;
+            border-radius: 4px;
+            margin-top: 5px;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+        }
+        .badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+        .badge.user {
+            background: #3498db;
+            color: white;
+        }
+        .badge.app {
+            background: #9b59b6;
+            color: white;
+        }
+        .badge.private {
+            background: #95a5a6;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>FDC3 Desktop Agent - Public Channels</h1>
+        <p>Manage and monitor public (user) channels for FDC3 applications</p>
+        <div class="nav">
+            <a href="/admin">← Back to Admin</a>
+            <a href="/channel-monitor">Channel Monitor</a>
+            <a href="/diagnostics">Diagnostics</a>
+        </div>
+    </div>
+
+    <div id="status" class="status"></div>
+
+    <div class="section">
+        <h2>Create New Channel</h2>
+        <form id="createChannelForm">
+            <div class="form-group">
+                <label for="channelId">Channel ID:</label>
+                <input type="text" id="channelId" required placeholder="e.g., user:red, user:blue">
+                <small>Prefix with "user:" for public channels</small>
+            </div>
+
+            <div class="form-group">
+                <label for="channelType">Channel Type:</label>
+                <select id="channelType" required>
+                    <option value="user">User (Public)</option>
+                    <option value="app">App</option>
+                    <option value="private">Private</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="displayName">Display Name:</label>
+                <input type="text" id="displayName" placeholder="e.g., Red Channel">
+            </div>
+
+            <div class="form-group">
+                <label for="color">Color:</label>
+                <input type="color" id="color" value="#FF0000">
+            </div>
+
+            <button type="submit">Create Channel</button>
+        </form>
+    </div>
+
+    <div class="section">
+        <h2>Existing Channels</h2>
+        <div id="channelsList">
+            <p style="color: #666;">Loading channels...</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Live Channel Events</h2>
+        <div style="margin-bottom: 10px;">
+            <button id="startMonitor" class="success">Start Monitoring</button>
+            <button id="stopMonitor" disabled>Stop Monitoring</button>
+            <button id="clearEvents">Clear Events</button>
+        </div>
+        <div id="eventsMonitor" class="events-monitor">
+            <p style="color: #666; text-align: center;">Not monitoring. Click "Start Monitoring" to see live events.</p>
+        </div>
+    </div>
+
+    <script>
+        let socket = null;
+        let subId = '1';
+
+        // Load channels on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            loadChannels();
+        });
+
+        // Handle form submission
+        document.getElementById('createChannelForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await createChannel();
+        });
+
+        async function loadChannels() {
+            try {
+                const response = await fetch('/graphql', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        query: `
+                            query {
+                                channels {
+                                    id
+                                    type
+                                    displayName
+                                    color
+                                    memberCount
+                                }
+                            }
+                        `
+                    })
+                });
+
+                const result = await response.json();
+                if (result.errors) {
+                    showStatus('Error loading channels: ' + result.errors[0].message, 'error');
+                    return;
+                }
+
+                displayChannels(result.data.channels);
+            } catch (error) {
+                showStatus('Error loading channels: ' + error.message, 'error');
+            }
+        }
+
+        function displayChannels(channels) {
+            const container = document.getElementById('channelsList');
+            container.innerHTML = '';
+
+            if (channels.length === 0) {
+                container.innerHTML = '<p style="color: #666;">No channels found. Create one above!</p>';
+                return;
+            }
+
+            channels.forEach(channel => {
+                const div = document.createElement('div');
+                div.className = 'channel-card';
+                
+                const colorStyle = channel.color ? `background-color: ${channel.color}` : 'background-color: #ccc';
+                const displayName = channel.displayName || channel.id;
+                
+                div.innerHTML = `
+                    <h3>
+                        <span class="channel-color" style="${colorStyle}"></span>
+                        ${displayName}
+                        <span class="badge ${channel.type}">${channel.type}</span>
+                    </h3>
+                    <div class="channel-info">
+                        <p><strong>ID:</strong> ${channel.id}</p>
+                        <p><strong>Members:</strong> ${channel.memberCount}</p>
+                    </div>
+                    <div class="channel-actions">
+                        <button onclick="viewMembers('${channel.id}')">View Members</button>
+                        <button onclick="showBroadcastForm('${channel.id}')">Broadcast Context</button>
+                        <button class="danger" onclick="deleteChannel('${channel.id}')">Delete</button>
+                    </div>
+                    <div id="members-${channel.id}" class="members-list" style="display: none;"></div>
+                    <div id="broadcast-${channel.id}" class="broadcast-form"></div>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        async function createChannel() {
+            const channelId = document.getElementById('channelId').value.trim();
+            const channelType = document.getElementById('channelType').value;
+            const displayName = document.getElementById('displayName').value.trim();
+            const color = document.getElementById('color').value;
+
+            const input = {
+                channelId: channelId,
+                channelType: channelType,
+                displayMetadata: displayName || color ? {
+                    name: displayName || null,
+                    color: color || null,
+                    glyph: null
+                } : null
+            };
+
+            try {
+                const response = await fetch('/graphql', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        query: `
+                            mutation CreateChannel($input: CreateChannelInput!) {
+                                createChannel(input: $input) {
+                                    id
+                                    type
+                                    displayName
+                                    color
+                                }
+                            }
+                        `,
+                        variables: { input }
+                    })
+                });
+
+                const result = await response.json();
+                if (result.errors) {
+                    showStatus('Error creating channel: ' + result.errors[0].message, 'error');
+                    return;
+                }
+
+                showStatus('Channel created successfully!', 'success');
+                document.getElementById('createChannelForm').reset();
+                document.getElementById('color').value = '#FF0000';
+                loadChannels();
+            } catch (error) {
+                showStatus('Error creating channel: ' + error.message, 'error');
+            }
+        }
+
+        async function deleteChannel(channelId) {
+            if (!confirm(`Are you sure you want to delete channel "${channelId}"?`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/graphql', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        query: `
+                            mutation DeleteChannel($channelId: String!) {
+                                deleteChannel(channelId: $channelId)
+                            }
+                        `,
+                        variables: { channelId }
+                    })
+                });
+
+                const result = await response.json();
+                if (result.errors) {
+                    showStatus('Error deleting channel: ' + result.errors[0].message, 'error');
+                    return;
+                }
+
+                if (result.data.deleteChannel) {
+                    showStatus('Channel deleted successfully!', 'success');
+                    loadChannels();
+                } else {
+                    showStatus('Channel not found or could not be deleted', 'error');
+                }
+            } catch (error) {
+                showStatus('Error deleting channel: ' + error.message, 'error');
+            }
+        }
+
+        async function viewMembers(channelId) {
+            const membersDiv = document.getElementById(`members-${channelId}`);
+            
+            if (membersDiv.style.display === 'block') {
+                membersDiv.style.display = 'none';
+                return;
+            }
+
+            try {
+                const response = await fetch('/graphql', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        query: `
+                            query GetChannelMembers($channelId: String!) {
+                                channelMembers(channelId: $channelId)
+                            }
+                        `,
+                        variables: { channelId }
+                    })
+                });
+
+                const result = await response.json();
+                if (result.errors) {
+                    showStatus('Error loading members: ' + result.errors[0].message, 'error');
+                    return;
+                }
+
+                const members = result.data.channelMembers;
+                if (members.length === 0) {
+                    membersDiv.innerHTML = '<p style="color: #666; padding: 10px;">No members in this channel</p>';
+                } else {
+                    membersDiv.innerHTML = '<strong>Channel Members:</strong><br>' +
+                        members.map(m => `<div class="member-item">${m}</div>`).join('');
+                }
+                
+                membersDiv.style.display = 'block';
+            } catch (error) {
+                showStatus('Error loading members: ' + error.message, 'error');
+            }
+        }
+
+        function showBroadcastForm(channelId) {
+            const formDiv = document.getElementById(`broadcast-${channelId}`);
+            
+            if (formDiv.style.display === 'block') {
+                formDiv.style.display = 'none';
+                return;
+            }
+
+            formDiv.innerHTML = `
+                <h4>Broadcast Context to ${channelId}</h4>
+                <div class="form-group">
+                    <label>Context (JSON):</label>
+                    <textarea id="context-${channelId}" rows="5" placeholder='{"type": "fdc3.instrument", "id": {"ticker": "AAPL"}}'></textarea>
+                </div>
+                <button onclick="broadcastContext('${channelId}')">Send Broadcast</button>
+                <button onclick="closeBroadcastForm('${channelId}')">Cancel</button>
+            `;
+            formDiv.style.display = 'block';
+        }
+
+        function closeBroadcastForm(channelId) {
+            const formDiv = document.getElementById(`broadcast-${channelId}`);
+            formDiv.style.display = 'none';
+            formDiv.innerHTML = '';
+        }
+
+        async function broadcastContext(channelId) {
+            const contextText = document.getElementById(`context-${channelId}`).value.trim();
+            
+            if (!contextText) {
+                showStatus('Please enter a context JSON', 'error');
+                return;
+            }
+
+            try {
+                // Validate JSON
+                JSON.parse(contextText);
+
+                const response = await fetch('/graphql', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        query: `
+                            mutation BroadcastToChannel($channelId: String!, $context: String!) {
+                                broadcastToChannel(channelId: $channelId, context: $context)
+                            }
+                        `,
+                        variables: { channelId, context: contextText }
+                    })
+                });
+
+                const result = await response.json();
+                if (result.errors) {
+                    showStatus('Error broadcasting: ' + result.errors[0].message, 'error');
+                    return;
+                }
+
+                if (result.data.broadcastToChannel) {
+                    showStatus('Context broadcast successfully!', 'success');
+                    closeBroadcastForm(channelId);
+                } else {
+                    showStatus('Failed to broadcast context', 'error');
+                }
+            } catch (error) {
+                showStatus('Invalid JSON or broadcast error: ' + error.message, 'error');
+            }
+        }
+
+        // Event monitoring
+        document.getElementById('startMonitor').addEventListener('click', startEventMonitor);
+        document.getElementById('stopMonitor').addEventListener('click', stopEventMonitor);
+        document.getElementById('clearEvents').addEventListener('click', () => {
+            document.getElementById('eventsMonitor').innerHTML = '<p style="color: #666; text-align: center;">Events cleared.</p>';
+        });
+
+        function startEventMonitor() {
+            const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
+            const host = location.host;
+            const url = `${wsProto}://${host}/graphql`;
+
+            socket = new WebSocket(url, 'graphql-ws');
+            
+            socket.onopen = () => {
+                socket.send(JSON.stringify({ type: 'connection_init', payload: {} }));
+                
+                setTimeout(() => {
+                    const query = `subscription { channelEvents { eventType channelId instanceUuid context timestamp } }`;
+                    const payload = { query, variables: {} };
+                    socket.send(JSON.stringify({ id: subId, type: 'start', payload }));
+                }, 50);
+                
+                document.getElementById('startMonitor').disabled = true;
+                document.getElementById('stopMonitor').disabled = false;
+                document.getElementById('eventsMonitor').innerHTML = '<p style="color: #666; text-align: center;">Monitoring active. Waiting for events...</p>';
+            };
+
+            socket.onmessage = (msg) => {
+                try {
+                    const data = JSON.parse(msg.data);
+                    if (data.type === 'data' && data.id === subId) {
+                        const event = data.payload.data.channelEvents;
+                        // Convert camelCase to snake_case for display
+                        appendEvent({
+                            event_type: event.eventType,
+                            channel_id: event.channelId,
+                            instance_uuid: event.instanceUuid,
+                            context: event.context,
+                            timestamp: event.timestamp
+                        });
+                    }
+                } catch (e) {
+                    console.warn('Invalid WS message', e);
+                }
+            };
+
+            socket.onclose = () => {
+                document.getElementById('startMonitor').disabled = false;
+                document.getElementById('stopMonitor').disabled = true;
+            };
+
+            socket.onerror = (error) => {
+                showStatus('WebSocket error: ' + error.message, 'error');
+            };
+        }
+
+        function stopEventMonitor() {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ id: subId, type: 'stop' }));
+                socket.close();
+            }
+            document.getElementById('startMonitor').disabled = false;
+            document.getElementById('stopMonitor').disabled = true;
+        }
+
+        function appendEvent(event) {
+            const monitor = document.getElementById('eventsMonitor');
+            
+            // Remove placeholder text if present
+            if (monitor.querySelector('p')) {
+                monitor.innerHTML = '';
+            }
+
+            const eventDiv = document.createElement('div');
+            eventDiv.className = 'event-item';
+            
+            const contextHtml = event.context ? 
+                `<div class="event-context">${JSON.stringify(JSON.parse(event.context), null, 2)}</div>` : '';
+            
+            eventDiv.innerHTML = `
+                <div><strong>${event.event_type.toUpperCase()}</strong> — ${event.channel_id}</div>
+                <div class="event-meta">Instance: ${event.instance_uuid || 'system'} — ${new Date(event.timestamp).toLocaleString()}</div>
+                ${contextHtml}
+            `;
+            
+            // Add to top of list
+            monitor.insertBefore(eventDiv, monitor.firstChild);
+            
+            // Limit to 50 events
+            while (monitor.children.length > 50) {
+                monitor.removeChild(monitor.lastChild);
+            }
+        }
+
+        function showStatus(message, type) {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.className = `status ${type}`;
+            status.style.display = 'block';
+            setTimeout(() => {
+                status.style.display = 'none';
+            }, 5000);
+        }
+    </script>
+</body>
+</html>
