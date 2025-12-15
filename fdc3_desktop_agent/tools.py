@@ -22,10 +22,7 @@ def prepush() -> None:
 
     Exits with non-zero status if any check fails.
     """
-    cmds = [
-        [sys.executable, "-m", "ruff", "check", "."],
-        [sys.executable, "-m", "black", "--check", "."],
-    ]
+    cmds = [[sys.executable, "-m", "ruff", "check", "."]]
 
     failures = 0
     for cmd in cmds:
@@ -40,3 +37,30 @@ def prepush() -> None:
 
 if __name__ == "__main__":
     prepush()
+
+
+def install_git_hooks() -> None:
+    """Install `pre-commit` and register git hooks.
+
+    Installs into the active Python environment (venv) when detected,
+    otherwise falls back to a user install.
+    """
+    python = sys.executable
+    print(f"Using Python executable: {python}")
+
+    inside_venv = sys.prefix != getattr(sys, "base_prefix", sys.prefix)
+    if inside_venv:
+        rc = _run([python, "-m", "pip", "install", "pre-commit"])
+    else:
+        rc = _run([python, "-m", "pip", "install", "--user", "pre-commit"])
+
+    if rc != 0:
+        print("Failed to install pre-commit; aborting.")
+        raise SystemExit(1)
+
+    rc = _run([python, "-m", "pre_commit", "install"])
+    if rc != 0:
+        print("pre-commit install failed. You may need to run 'pre-commit install' manually.")
+        raise SystemExit(1)
+
+    print("pre-commit hooks installed. Run: pre-commit run --all-files")
