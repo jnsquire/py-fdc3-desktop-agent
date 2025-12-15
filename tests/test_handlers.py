@@ -4,16 +4,16 @@ from typing import cast, Any
 
 from fastapi import WebSocket
 
-from fdc3_desktop_agent.handlers.connection_manager import WebSocketConnectionManager
-from fdc3_desktop_agent.handlers.access_control import AccessControlHandler
-from fdc3_desktop_agent.access_control.interfaces import (
+from fdc3.desktop_agent.handlers.connection_manager import WebSocketConnectionManager
+from fdc3.desktop_agent.handlers.access_control import AccessControlHandler
+from fdc3.desktop_agent.access_control.interfaces import (
     AllowlistAccessPolicy,
     AccessControlManager,
 )
-from fdc3_desktop_agent.handlers.system_intent import SystemIntentHandler
-from fdc3_desktop_agent.handlers.wcp import WCPHandler
-from fdc3_desktop_agent.storage import Storage
-from fdc3_desktop_agent.launcher.interfaces import ProcessLauncher
+from fdc3.desktop_agent.handlers.system_intent import SystemIntentHandler
+from fdc3.desktop_agent.handlers.wcp import WCPHandler
+from fdc3.desktop_agent.storage import Storage
+from fdc3.desktop_agent.launcher.interfaces import ProcessLauncher
 
 
 class FakeWebSocket:
@@ -160,7 +160,7 @@ async def test_wcp_validate_identity_cases():
     storage = FakeStorage()
     handler = WCPHandler(cast(Storage, storage))
 
-    from fdc3_desktop_agent.transport.wcp.wcp import (
+    from fdc3.desktop_agent.transport.wcp.wcp import (
         WCP4ValidateAppIdentity,
         WCP4ValidateAppIdentityPayload,
     )
@@ -190,7 +190,7 @@ async def test_dacp_handler_send_and_unknown_message():
     class FakeLauncher:
         pass
 
-    from fdc3_desktop_agent.handlers.dacp import DACPHandler
+    from fdc3.desktop_agent.handlers.dacp import DACPHandler
 
     handler = DACPHandler(
         cast(Storage, FakeStorage()),

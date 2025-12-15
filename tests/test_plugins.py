@@ -3,12 +3,12 @@
 import pytest
 from typing import Dict, Any, List, Optional
 
-from fdc3_desktop_agent.plugins import (
+from fdc3.desktop_agent.plugins import (
     IntentHandlerPlugin,
     IntentHandlerResult,
     PluginRegistry,
 )
-from fdc3_desktop_agent.core import CoreServices
+from fdc3.desktop_agent.core import CoreServices
 
 
 class SimpleTestPlugin(IntentHandlerPlugin):
@@ -242,7 +242,7 @@ class TestPluginDiscovery:
 
     def test_discover_plugins_returns_list(self):
         """Test that discover_plugins returns a list (possibly empty)."""
-        from fdc3_desktop_agent.plugins import discover_plugins
+        from fdc3.desktop_agent.plugins import discover_plugins
 
         plugins = discover_plugins()
         assert isinstance(plugins, list)
@@ -252,7 +252,7 @@ class TestPluginDiscovery:
 
     def test_list_plugin_entry_points_returns_list(self):
         """Test that list_plugin_entry_points returns a list of dicts."""
-        from fdc3_desktop_agent.plugins import list_plugin_entry_points
+        from fdc3.desktop_agent.plugins import list_plugin_entry_points
 
         entry_points = list_plugin_entry_points()
         assert isinstance(entry_points, list)
@@ -264,13 +264,13 @@ class TestPluginDiscovery:
 
     def test_plugin_entry_point_group_constant(self):
         """Test the entry point group constant is correct."""
-        from fdc3_desktop_agent.plugins import PLUGIN_ENTRY_POINT_GROUP
+        from fdc3.desktop_agent.plugins import PLUGIN_ENTRY_POINT_GROUP
 
-        assert PLUGIN_ENTRY_POINT_GROUP == "fdc3_desktop_agent.plugins"
+        assert PLUGIN_ENTRY_POINT_GROUP == "fdc3.desktop_agent.plugins"
 
     def test_exports_from_main_package(self):
         """Test discovery functions are exported from main package."""
-        from fdc3_desktop_agent import (
+        from fdc3.desktop_agent import (
             discover_plugins,
             list_plugin_entry_points,
             PLUGIN_ENTRY_POINT_GROUP,

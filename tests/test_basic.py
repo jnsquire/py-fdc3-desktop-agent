@@ -1,5 +1,5 @@
-from fdc3_desktop_agent import __version__, create_app, DesktopAgentConfig
-from fdc3_desktop_agent.version import __version__ as package_version
+from fdc3.desktop_agent import __version__, create_app, DesktopAgentConfig
+from fdc3.desktop_agent.version import __version__ as package_version
 
 
 def test_version():

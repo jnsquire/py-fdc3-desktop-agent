@@ -2,8 +2,8 @@
 
 import pytest
 import asyncio
-from fdc3_desktop_agent.launcher.subprocess_launcher import SubprocessLauncher
-from fdc3_desktop_agent.storage import LaunchConfig
+from fdc3.desktop_agent.launcher.subprocess_launcher import SubprocessLauncher
+from fdc3.desktop_agent.storage import LaunchConfig
 
 
 @pytest.fixture(autouse=True)

@@ -1,6 +1,6 @@
 # WCP schema-level tests
 
-from fdc3_desktop_agent.transport.wcp.wcp import (
+from fdc3.desktop_agent.transport.wcp.wcp import (
     WCP1Hello,
     WCP3Handshake,
     WCP4ValidateAppIdentity,

@@ -2,9 +2,9 @@
 
 import pytest
 from fastapi.testclient import TestClient
-from fdc3_desktop_agent.storage import SqliteStorage
+from fdc3.desktop_agent.storage import SqliteStorage
 from contextlib import asynccontextmanager
-from fdc3_desktop_agent.version import __version__ as package_version
+from fdc3.desktop_agent.version import __version__ as package_version
 
 
 class TestServerIntegration:
