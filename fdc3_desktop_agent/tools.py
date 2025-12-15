@@ -3,6 +3,7 @@
 Provide a `prepush`/`check_style` entry point that runs the same style
 and lint checks used by CI so contributors can run them locally.
 """
+
 from __future__ import annotations
 
 import subprocess
