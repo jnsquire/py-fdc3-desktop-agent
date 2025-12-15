@@ -36,7 +36,6 @@ async def test_external_handler_registration_e2e():
     from fdc3_desktop_agent.config import DesktopAgentConfig
     import uvicorn
     import threading
-    import time
 
     # Create app with permissive config
     config = DesktopAgentConfig(
