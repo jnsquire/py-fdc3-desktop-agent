@@ -13,7 +13,7 @@ import asyncio
 import sys
 import logging
 
-from fdc3_client import FDC3Client
+from fdc3.client import FDC3Client
 
 logger = logging.getLogger(__name__)
 
