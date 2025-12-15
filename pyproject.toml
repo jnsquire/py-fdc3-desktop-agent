@@ -47,6 +47,7 @@ distributed = [
 
 [project.scripts]
 fdc3-agent = "fdc3_desktop_agent.cli:main"
+check-style = "tools_prepush:prepush"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
