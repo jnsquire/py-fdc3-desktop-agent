@@ -3,8 +3,8 @@ import types
 
 import pytest
 
-from fdc3_desktop_agent.distributed import factory
-from fdc3_desktop_agent.distributed.adapter import DistributedLogAdapter
+from fdc3.desktop_agent.distributed import factory
+from fdc3.desktop_agent.distributed.adapter import DistributedLogAdapter
 
 
 @pytest.mark.asyncio
@@ -24,7 +24,7 @@ async def test_get_adapter_default_noop(monkeypatch):
 @pytest.mark.asyncio
 async def test_get_adapter_etcd_success(monkeypatch):
     # Create a fake etcd_adapter module with EtcdAdapter
-    mod_name = "fdc3_desktop_agent.distributed.etcd_adapter"
+    mod_name = "fdc3.desktop_agent.distributed.etcd_adapter"
     mod = types.ModuleType(mod_name)
 
     class FakeEtcd(DistributedLogAdapter):
@@ -56,7 +56,7 @@ async def test_get_adapter_etcd_success(monkeypatch):
 @pytest.mark.asyncio
 async def test_get_adapter_consul_success(monkeypatch):
     # Create a fake consul_adapter module with ConsulAdapter
-    mod_name = "fdc3_desktop_agent.distributed.consul_adapter"
+    mod_name = "fdc3.desktop_agent.distributed.consul_adapter"
     mod = types.ModuleType(mod_name)
 
     class FakeConsul(DistributedLogAdapter):

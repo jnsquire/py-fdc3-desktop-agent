@@ -1,6 +1,6 @@
 # WCP schema-level tests
 
-from fdc3_desktop_agent.transport.wcp.wcp import (
+from fdc3.desktop_agent.transport.wcp.wcp import (
     WCP1Hello,
     WCP3Handshake,
     WCP4ValidateAppIdentity,
@@ -209,9 +209,9 @@ class TestOriginValidation:
                     allowed = True
                     break
 
-        assert (
-            allowed
-        ), f"Origin {identity_origin} should match wildcard {allowed_origins[0]}"
+        assert allowed, (
+            f"Origin {identity_origin} should match wildcard {allowed_origins[0]}"
+        )
 
         allowed = False
         for allowed_origin in allowed_origins:
@@ -221,6 +221,6 @@ class TestOriginValidation:
                     allowed = True
                     break
 
-        assert (
-            allowed
-        ), f"Origin {actual_origin} should match wildcard {allowed_origins[0]}"
+        assert allowed, (
+            f"Origin {actual_origin} should match wildcard {allowed_origins[0]}"
+        )

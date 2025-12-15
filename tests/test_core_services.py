@@ -1,12 +1,12 @@
 # Core service tests
 
 import pytest
-from fdc3_desktop_agent.core.app_registry import AppRegistry
-from fdc3_desktop_agent.core.listener_store import ListenerStore
-from fdc3_desktop_agent.core.context_router import ContextRouter
-from fdc3_desktop_agent.core.intent_resolver import IntentResolver
-from fdc3_desktop_agent.core.channel_manager import ChannelManager
-from fdc3_desktop_agent.api import ListenerUuid, AppIdentifier
+from fdc3.desktop_agent.core.app_registry import AppRegistry
+from fdc3.desktop_agent.core.listener_store import ListenerStore
+from fdc3.desktop_agent.core.context_router import ContextRouter
+from fdc3.desktop_agent.core.intent_resolver import IntentResolver
+from fdc3.desktop_agent.core.channel_manager import ChannelManager
+from fdc3.desktop_agent.api import ListenerUuid, AppIdentifier
 
 
 class TestAppRegistry:
