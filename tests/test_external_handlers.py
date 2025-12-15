@@ -171,7 +171,10 @@ async def test_dacp_register_and_forward(tmp_path):
 @pytest.mark.asyncio
 async def test_register_invalid_payload_and_forward_failure():
     from fdc3_desktop_agent.handlers.dacp import DACPHandler
-    from fdc3_desktop_agent.protocol.dacp.message_parser import parse_message, MessageParseError
+    from fdc3_desktop_agent.protocol.dacp.message_parser import (
+        parse_message,
+        MessageParseError,
+    )
 
     storage = DummyStorage()
     launcher = DummyLauncher()

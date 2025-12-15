@@ -110,9 +110,9 @@ class DACPHandler:
                 type=response_type,
                 payload=ErrorResponsePayload(error=str(e)),
                 meta=AgentResponseMeta(
-                    requestUuid=RequestUuid(e.request_uuid)
-                    if e.request_uuid
-                    else RequestUuid()
+                    requestUuid=(
+                        RequestUuid(e.request_uuid) if e.request_uuid else RequestUuid()
+                    )
                 ),
             )
             await self._send_model(websocket, err)

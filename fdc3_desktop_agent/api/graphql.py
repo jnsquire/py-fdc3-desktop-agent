@@ -68,6 +68,20 @@ class LaunchConfigInput:
     timeout: int
 
 
+@strawberry.input
+class DisplayMetadataInput:
+    name: Optional[str] = None
+    color: Optional[str] = None
+    glyph: Optional[str] = None
+
+
+@strawberry.input
+class CreateChannelInput:
+    channel_id: str
+    channel_type: str  # "user", "app", "private"
+    display_metadata: Optional[DisplayMetadataInput] = None
+
+
 @strawberry.type
 class AppInstanceType:
     app_id: str
@@ -191,6 +205,13 @@ class Query:
         """Version information"""
         return __version__
 
+    @strawberry.field
+    def channel_members(self, channel_id: str) -> List[str]:
+        """Get list of instance UUIDs that are members of a channel"""
+        if not hasattr(core_services, "channel_manager"):
+            return []
+        return core_services.channel_manager.get_channel_members(channel_id)
+
 
 @strawberry.type
 class Mutation:
@@ -235,6 +256,83 @@ class Mutation:
 
         await _storage.launch_configs.remove_launch_config(app_id)
         return True
+
+    @strawberry.mutation
+    def create_channel(self, input: CreateChannelInput) -> ChannelType:
+        """Create a new channel (user, app, or private)"""
+        from ..api import DisplayMetadata
+
+        # Validate channel_id format based on type
+        if input.channel_type == "user" and not input.channel_id.startswith("user:"):
+            raise ValueError("User channel IDs must start with 'user:' prefix")
+        elif input.channel_type == "app" and not input.channel_id.startswith("app:"):
+            raise ValueError("App channel IDs must start with 'app:' prefix")
+        elif input.channel_type == "private" and not input.channel_id.startswith(
+            "private:"
+        ):
+            raise ValueError("Private channel IDs must start with 'private:' prefix")
+
+        display_metadata = None
+        if input.display_metadata:
+            display_metadata = DisplayMetadata(
+                name=input.display_metadata.name,
+                color=input.display_metadata.color,
+                glyph=input.display_metadata.glyph,
+            )
+
+        channel = core_services.channel_manager.create_channel(
+            input.channel_id, input.channel_type, display_metadata
+        )
+
+        return ChannelType(
+            id=channel.id,
+            type=channel.type,
+            display_name=(
+                channel.display_metadata.name if channel.display_metadata else None
+            ),
+            color=(
+                getattr(channel.display_metadata, "color", None)
+                if channel.display_metadata
+                else None
+            ),
+            member_count=len(channel.members),
+        )
+
+    @strawberry.mutation
+    def delete_channel(self, channel_id: str) -> bool:
+        """Delete a channel"""
+        if channel_id in core_services.channel_manager.channels:
+            # Emit deleted event before removing
+            core_services.channel_manager._emit_event("deleted", channel_id)
+            del core_services.channel_manager.channels[channel_id]
+            # Remove any instance associations with this channel
+            instances_to_remove = [
+                inst_uuid
+                for inst_uuid, ch_id in core_services.channel_manager.instance_channels.items()
+                if ch_id == channel_id
+            ]
+            for inst_uuid in instances_to_remove:
+                del core_services.channel_manager.instance_channels[inst_uuid]
+            return True
+        return False
+
+    @strawberry.mutation
+    def broadcast_to_channel(self, channel_id: str, context: str) -> bool:
+        """Broadcast a context to a channel (context as JSON string)"""
+        import json
+
+        try:
+            context_data = json.loads(context)
+            core_services.channel_manager.broadcast_to_channel(
+                channel_id, context_data, "system"
+            )
+            return True
+        except json.JSONDecodeError as e:
+            logging.error(f"Invalid JSON context for broadcast: {e}")
+            raise ValueError(f"Invalid JSON context: {str(e)}")
+        except Exception as e:
+            logging.error(f"Error broadcasting to channel {channel_id}: {e}")
+            raise
 
 
 @strawberry.type

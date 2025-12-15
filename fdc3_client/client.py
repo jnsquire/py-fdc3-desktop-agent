@@ -156,7 +156,9 @@ class FDC3Client:
         # WCP handshake messages
         if t == "WCP3Handshake":
             # Received handshake, now send WCP4ValidateAppIdentity
-            await self._send_wcp4_validate(meta.get("connectionAttemptUuid") or str(uuid.uuid4()))
+            await self._send_wcp4_validate(
+                meta.get("connectionAttemptUuid") or str(uuid.uuid4())
+            )
 
         elif t == "WCP5ValidateAppIdentityResponse":
             # Handshake complete

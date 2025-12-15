@@ -21,9 +21,15 @@ class ForwardedIntentPayload(BaseModel):
 
     request_uuid: str = Field(..., description="Correlation UUID for response matching")
     intent: str = Field(..., description="The intent name being raised")
-    context: dict[str, Any] = Field(default_factory=dict, description="Intent context data")
-    source: dict[str, Any] = Field(default_factory=dict, description="Source app identifier")
-    timeout: Optional[int] = Field(default=None, description="Optional timeout in seconds")
+    context: dict[str, Any] = Field(
+        default_factory=dict, description="Intent context data"
+    )
+    source: dict[str, Any] = Field(
+        default_factory=dict, description="Source app identifier"
+    )
+    timeout: Optional[int] = Field(
+        default=None, description="Optional timeout in seconds"
+    )
 
 
 class ForwardedIntentMessage(BaseModel):
@@ -36,7 +42,9 @@ class ForwardedIntentMessage(BaseModel):
 class RegisterExternalHandlerResponsePayload(BaseModel):
     """Payload for registration response."""
 
-    handler_uuid: str = Field(..., description="Assigned UUID for the registered handler")
+    handler_uuid: str = Field(
+        ..., description="Assigned UUID for the registered handler"
+    )
 
 
 class RegisterExternalHandlerResponseMeta(BaseModel):
@@ -62,8 +70,12 @@ class UnregisterExternalHandlerResponsePayload(BaseModel):
 class UnregisterExternalHandlerResponse(BaseModel):
     """Response sent after unregistering an external handler."""
 
-    type: Literal["unregisterExternalHandlerResponse"] = "unregisterExternalHandlerResponse"
-    payload: UnregisterExternalHandlerResponsePayload = Field(default_factory=UnregisterExternalHandlerResponsePayload)
+    type: Literal["unregisterExternalHandlerResponse"] = (
+        "unregisterExternalHandlerResponse"
+    )
+    payload: UnregisterExternalHandlerResponsePayload = Field(
+        default_factory=UnregisterExternalHandlerResponsePayload
+    )
     meta: RegisterExternalHandlerResponseMeta  # Reuse same meta structure
 
 
@@ -71,8 +83,12 @@ class IntentResultMessagePayload(BaseModel):
     """Payload for intent result message (client-side use)."""
 
     request_uuid: str = Field(..., description="Correlation UUID from forwarded intent")
-    result: Optional[dict[str, Any]] = Field(default=None, description="Intent result data")
-    error: Optional[str] = Field(default=None, description="Error message if intent failed")
+    result: Optional[dict[str, Any]] = Field(
+        default=None, description="Intent result data"
+    )
+    error: Optional[str] = Field(
+        default=None, description="Error message if intent failed"
+    )
 
 
 class IntentResultMessage(BaseModel):

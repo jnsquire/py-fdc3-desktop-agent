@@ -59,7 +59,9 @@ class CoreServices:
         self._pending_intents[request_uuid] = fut
         return fut
 
-    def resolve_pending_intent(self, request_uuid: str, result: dict | None = None, error: str | None = None) -> None:
+    def resolve_pending_intent(
+        self, request_uuid: str, result: dict | None = None, error: str | None = None
+    ) -> None:
         fut = self._pending_intents.pop(request_uuid, None)
         if not fut:
             return

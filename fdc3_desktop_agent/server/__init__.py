@@ -350,6 +350,11 @@ def create_app(config: Optional[DesktopAgentConfig] = None) -> FastAPI:
         """Channel monitor UI for subscribing to channel events"""
         return templates.TemplateResponse("channel_monitor.html", {"request": request})
 
+    @app.get("/public-channels", response_class=HTMLResponse)
+    async def public_channels_page(request: Request):
+        """Public channels management interface"""
+        return templates.TemplateResponse("public_channels.html", {"request": request})
+
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket):
         """WebSocket endpoint for FDC3 WCP and DACP communication"""
