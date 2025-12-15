@@ -12,7 +12,7 @@ ENV PYTHONUNBUFFERED=1 \
 
 # Copy all necessary files
 COPY pyproject.toml ./
-COPY fdc3_desktop_agent ./fdc3_desktop_agent
+COPY fdc3 ./fdc3
 COPY README.md ./
 
 # Install dependencies and the package in one layer
@@ -40,4 +40,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/admin').read()" || exit 1
 
 # Run the agent using environment variables
-CMD sh -c "uvicorn fdc3_desktop_agent.server:app --host ${FDC3_HOST} --port ${FDC3_PORT}"
+CMD sh -c "uvicorn fdc3.desktop_agent.server:app --host ${FDC3_HOST} --port ${FDC3_PORT}"
