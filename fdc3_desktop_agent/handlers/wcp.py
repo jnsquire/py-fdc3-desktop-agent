@@ -171,7 +171,7 @@ class WCPHandler:
             try:
                 agent_url = (
                     os.getenv("FDC3_DESKTOP_AGENT_URL")
-                    or f"ws://{os.getenv('FDC3_HOST','localhost')}:{os.getenv('FDC3_PORT','8000')}/ws"
+                    or f"ws://{os.getenv('FDC3_HOST', 'localhost')}:{os.getenv('FDC3_PORT', '8000')}/ws"
                 )
                 runtime_info = {
                     "launcher": {
@@ -193,7 +193,9 @@ class WCPHandler:
             except Exception:
                 pass
 
-            connection_attempt = getattr(getattr(wcp4, "meta", None), "connectionAttemptUuid", None)
+            connection_attempt = getattr(
+                getattr(wcp4, "meta", None), "connectionAttemptUuid", None
+            )
             wcp5 = WCP5ValidateAppIdentityResponse(
                 payload=WCP5ValidateAppIdentityResponsePayload(
                     appId=identity["appId"],
@@ -216,7 +218,9 @@ class WCPHandler:
             return True  # Transition to DACP
         else:
             # Send failure response
-            connection_attempt = getattr(getattr(wcp4, "meta", None), "connectionAttemptUuid", None)
+            connection_attempt = getattr(
+                getattr(wcp4, "meta", None), "connectionAttemptUuid", None
+            )
             wcp5_failed = WCP5ValidateAppIdentityFailedResponse(
                 payload=WCP5ValidateAppIdentityFailedResponsePayload(
                     message=validation_result["error"]
