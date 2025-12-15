@@ -46,6 +46,14 @@ distributed = [
 
 [project.scripts]
 fdc3-agent = "fdc3_desktop_agent.cli:main"
+install-git-hooks = "fdc3_desktop_agent.tools:install_git_hooks"
+check-style = "fdc3_desktop_agent.tools:prepush"
+
+[tool.uvx.scripts]
+# run `uvx run install-git-hooks` to install the package (editable) and register hooks
+install-git-hooks = "python -m pip install -e . && install-git-hooks"
+# run `uvx run check-style` to run the ruff check
+check-style = "python -m fdc3_desktop_agent.tools"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

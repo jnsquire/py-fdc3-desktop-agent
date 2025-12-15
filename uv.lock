@@ -411,7 +411,6 @@ consul = [
     { name = "aiohttp" },
 ]
 dev = [
-    { name = "black" },
     { name = "datamodel-code-generator" },
     { name = "httpx" },
     { name = "pytest" },
@@ -432,7 +431,6 @@ requires-dist = [
     { name = "aiohttp", marker = "extra == 'consul'", specifier = ">=3.8" },
     { name = "aiohttp", marker = "extra == 'distributed'", specifier = ">=3.8" },
     { name = "aiosqlite", specifier = ">=0.20" },
-    { name = "black", marker = "extra == 'dev'", specifier = ">=24.0" },
     { name = "datamodel-code-generator", marker = "extra == 'dev'", specifier = ">=0.26" },
     { name = "etcd3", marker = "extra == 'distributed'", specifier = ">=0.12" },
     { name = "etcd3", marker = "extra == 'etcd'", specifier = ">=0.12" },
