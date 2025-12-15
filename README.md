@@ -75,47 +75,7 @@ uv run python -m pytest tests/ -v
 uv run uvicorn fdc3.desktop_agent.server:app --reload
 ```
 
-## Developer setup
-
-This repository includes helper scripts to bootstrap a developer environment and install git hooks.
-
-- Windows (PowerShell): `scripts/bootstrap-dev.ps1`
-- POSIX (macOS / Linux): `scripts/bootstrap-dev.sh`
-
-Each script will (when run from the repository root):
-
-- install or upgrade `pip` in the `.venv` virtualenv
-- install the project's development extras (`.[dev]`) into the `.venv`
-- install `pre-commit` hooks into `.git/hooks`
-- run `pre-commit` once across the repository to auto-fix style issues
-
-Examples:
-
-PowerShell
-
-```powershell
-./scripts/bootstrap-dev.ps1
-```
-
-POSIX
-
-```bash
-./scripts/bootstrap-dev.sh
-```
-
-If you prefer manual steps, the equivalent commands are:
-
-```bash
-# install dev deps
-./.venv/bin/python -m pip install --upgrade pip
-./.venv/bin/python -m pip install -e '.[dev]'
-
-# install pre-commit hooks
-./.venv/bin/pre-commit install --install-hooks
-
-# run pre-commit once
-./.venv/bin/pre-commit run --all-files
-```
+<!-- Developer setup moved to CONTRIBUTING.md -->
 
 ## Distributed Adapters (optional)
 
