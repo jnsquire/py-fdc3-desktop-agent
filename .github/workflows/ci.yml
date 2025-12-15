@@ -82,6 +82,7 @@ jobs:
         with:
           context: .
           push: false
+          load: true
           tags: fdc3-desktop-agent:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
