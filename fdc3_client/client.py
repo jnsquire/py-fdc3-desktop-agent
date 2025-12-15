@@ -16,8 +16,7 @@ from datetime import datetime
 from types import SimpleNamespace
 from typing import Any, Awaitable, Callable, Dict, List, Optional, TypedDict
 
-import websockets
-from websockets.asyncio.client import ClientConnection
+from websockets.asyncio.client import connect, ClientConnection
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +79,7 @@ class FDC3Client:
     async def connect(self) -> None:
         """Connect to the agent and complete WCP handshake."""
         logger.info(f"Connecting to agent at {self.agent_url}")
-        self._ws = await websockets.connect(self.agent_url)
+        self._ws = await connect(self.agent_url)
         self._running = True
         self._recv_task = asyncio.create_task(self._recv_loop())
         self._ping_task = asyncio.create_task(self._ping_loop())
@@ -99,8 +98,8 @@ class FDC3Client:
         wcp1 = {
             "type": "WCP1Hello",
             "payload": {
-                "identityUrl": f"external-handler:{self.handler_id}",
-                "actualUrl": f"external-handler:{self.handler_id}",
+                "identityUrl": f"http://external-handler.local/{self.handler_id}",
+                "actualUrl": f"http://external-handler.local/{self.handler_id}",
                 "fdc3Version": "2.0",
             },
             "meta": {
@@ -135,7 +134,14 @@ class FDC3Client:
     async def _recv_loop(self) -> None:
         assert self._ws is not None
         try:
-            async for raw in self._ws:
+            while True:
+                try:
+                    raw = await self._ws.recv()
+                except Exception as exc:
+                    # Connection closed or recv error
+                    logger.debug("WebSocket recv error or closed: %s", exc)
+                    break
+
                 try:
                     msg = json.loads(raw)
                 except Exception:
@@ -152,6 +158,7 @@ class FDC3Client:
         t = msg.get("type")
         payload = msg.get("payload") or {}
         meta = msg.get("meta") or {}
+        logger.debug(f"Received message type={t} meta={meta}")
 
         # WCP handshake messages
         if t == "WCP3Handshake":
@@ -175,6 +182,10 @@ class FDC3Client:
             # Resolve pending register future by requestUuid
             request_uuid = meta.get("requestUuid", "")
             handler_uuid = payload.get("handler_uuid")
+            logger.debug(
+                f"Received registerExternalHandlerResponse: requestUuid={request_uuid} "
+                f"handler_uuid={handler_uuid} pending_keys={list(self._pending_responses.keys())}"
+            )
             if request_uuid:
                 fut = self._pending_responses.pop(request_uuid, None)
                 if fut and not fut.done():
@@ -182,6 +193,8 @@ class FDC3Client:
                         fut.set_exception(Exception(payload.get("error")))
                     else:
                         fut.set_result(handler_uuid)
+                else:
+                    logger.warning(f"No pending future for requestUuid={request_uuid}")
 
         elif t == "unregisterExternalHandlerResponse":
             request_uuid = meta.get("requestUuid", "")
@@ -281,6 +294,7 @@ class FDC3Client:
                 "timestamp": datetime.now().isoformat(),
             },
         }
+        logger.debug(f"Sending registerExternalHandler: requestUuid={request_uuid}")
         await self._ws.send(json.dumps(msg))
 
         # Create a future to be resolved when response arrives

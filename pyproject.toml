@@ -14,7 +14,7 @@ requires-python = ">=3.11"
 authors = [ { name = "Joel Squire", email = "joel@squire.org" } ]
 dependencies = [
   "fastapi>=0.115",
-  "uvicorn[standard]>=0.30",
+  "uvicorn[standard]>=0.38",
   "pydantic>=2.7",
   "strawberry-graphql>=0.250",
   "aiosqlite>=0.20",

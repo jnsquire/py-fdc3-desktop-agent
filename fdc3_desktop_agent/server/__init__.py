@@ -389,6 +389,12 @@ def create_app(config: Optional[DesktopAgentConfig] = None) -> FastAPI:
                 data = await websocket.receive_text()
                 message = json.loads(data)
 
+                # Extract session_id from WCP1Hello if not yet set
+                if session_id is None and message.get("type") == "WCP1Hello":
+                    session_id = (message.get("meta") or {}).get(
+                        "connectionAttemptUuid"
+                    )
+
                 if not dacp_active:
                     transition = await wcp_handler.handle_message(
                         message, session_id or "", wcp_sessions, websocket
