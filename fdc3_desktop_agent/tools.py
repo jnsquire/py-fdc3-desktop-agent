@@ -60,7 +60,9 @@ def install_git_hooks() -> None:
 
     rc = _run([python, "-m", "pre_commit", "install"])
     if rc != 0:
-        print("pre-commit install failed. You may need to run 'pre-commit install' manually.")
+        print(
+            "pre-commit install failed. You may need to run 'pre-commit install' manually."
+        )
         raise SystemExit(1)
 
     print("pre-commit hooks installed. Run: pre-commit run --all-files")
