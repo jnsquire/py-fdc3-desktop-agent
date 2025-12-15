@@ -5,6 +5,7 @@ WebSocket connection manager for handling instance connections.
 import logging
 from typing import Dict
 from fastapi import WebSocket
+from ..core import core_services
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,11 @@ class WebSocketConnectionManager:
         if instance_uuid in self.connections:
             del self.connections[instance_uuid]
             logger.debug(f"Removed connection for instance {instance_uuid}")
+            try:
+                # Unregister any external handlers registered by this instance
+                core_services.external_registry.unregister_by_instance(instance_uuid)
+            except Exception:
+                logger.exception(f"Failed to unregister handlers for instance {instance_uuid}")
 
     async def send_to_instance(self, instance_uuid: str, message: str):
         """Send a message to a specific instance"""
@@ -50,4 +56,11 @@ class WebSocketConnectionManager:
                 await ws.close()
             except Exception:
                 pass
+        # Unregister handlers for all instances
+        try:
+            for instance_uuid, _ in conns:
+                core_services.external_registry.unregister_by_instance(instance_uuid)
+        except Exception:
+            logger.exception("Failed to unregister handlers during close_all")
+
         self.connections.clear()

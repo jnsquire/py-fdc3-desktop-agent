@@ -210,8 +210,14 @@ class WCPHandler:
         session_id: str,
         wcp_sessions: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """Validate WCP4 app identity request"""
+        """Validate WCP4 app identity request.
+
+        Supports two flows:
+        1. Agent-launched apps: Have a pre-registered pending instance UUID
+        2. Self-registering external handlers: Use appId pattern 'external-handler:*'
+        """
         from urllib.parse import urlparse
+        import uuid as uuid_mod
 
         wcp1_identity = wcp_sessions[session_id].get("wcp1_identity")
         if not wcp1_identity:
@@ -221,6 +227,29 @@ class WCPHandler:
         actual_url = wcp1_identity.get("actualUrl")
 
         instance_uuid = wcp4.payload.instanceUuid
+
+        # Check for self-registering external handler pattern
+        # External handlers can provide their own appId like "external-handler:my-handler"
+        app_id = wcp4.payload.appId
+        if app_id and app_id.startswith("external-handler:"):
+            # Self-registration flow for external handlers
+            # Generate a new instance UUID if not provided
+            if not instance_uuid:
+                instance_uuid = str(uuid_mod.uuid4())
+
+            instance_id = wcp4.payload.instanceId or str(uuid_mod.uuid4())
+
+            logger.info(f"External handler self-registering: {app_id}")
+            return {
+                "valid": True,
+                "identity": {
+                    "appId": app_id,
+                    "instanceId": instance_id,
+                    "instanceUuid": instance_uuid,
+                },
+            }
+
+        # Standard flow: require pre-registered pending instance
         if instance_uuid:
             pending_instance = core_services.app_registry.get_instance(instance_uuid)
             if pending_instance and not pending_instance.connected:

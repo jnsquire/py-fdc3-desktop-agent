@@ -4,6 +4,8 @@ Handles FDC3 operations like app launching, context broadcasting, and listener m
 """
 
 import logging
+import uuid
+import asyncio
 from typing import Dict, Any
 
 from fastapi import WebSocket
@@ -44,8 +46,22 @@ from ..protocol.dacp.dacp import (
     RaiseIntentResultResponse,
 )
 from ..core import core_services
+from ..protocol.dacp.message_parser import parse_message, MessageParseError
+from ..protocol.dacp.external_models import (
+    RegisterExternalHandlerRequest,
+    RegisterExternalHandlerResponse,
+    RegisterExternalHandlerResponsePayload,
+    RegisterExternalHandlerResponseMeta,
+    UnregisterExternalHandlerRequest,
+    UnregisterExternalHandlerResponse,
+    ExternalIntentResultRequest,
+    ForwardedIntentMessage,
+    ForwardedIntentPayload,
+)
 from ..storage import Storage
 from ..launcher.interfaces import ProcessLauncher
+from ..api import IntentResolution, AppIdentifier
+from ..api import RequestUuid
 from .connection_manager import WebSocketConnectionManager
 from .system_intent import SystemIntentHandler
 
@@ -80,42 +96,71 @@ class DACPHandler:
         wcp_sessions: Dict[str, Any],
         websocket: WebSocket,
     ):
-        """Handle DACP message"""
+        """Handle DACP message with centralized Pydantic validation."""
         msg_type = message.get("type")
 
-        if msg_type == "open":
-            await self._handle_open(message, websocket)
-        elif msg_type == "broadcast":
-            await self._handle_broadcast(message, session_id, wcp_sessions)
-        elif msg_type == "addContextListener":
+        # Parse and validate message using Pydantic
+        try:
+            parsed = parse_message(message)
+        except MessageParseError as e:
+            logger.warning(f"Failed to parse DACP message: {e}")
+            # Send error response if we can determine the response type
+            response_type = f"{msg_type}Response" if msg_type else "errorResponse"
+            err = AgentResponse(
+                type=response_type,
+                payload=ErrorResponsePayload(error=str(e)),
+                meta=AgentResponseMeta(
+                    requestUuid=RequestUuid(e.request_uuid)
+                    if e.request_uuid
+                    else RequestUuid()
+                ),
+            )
+            await self._send_model(websocket, err)
+            return
+
+        # Dispatch to typed handlers based on parsed model type
+        if isinstance(parsed, OpenRequest):
+            await self._handle_open(parsed, websocket)
+        elif isinstance(parsed, BroadcastRequest):
+            await self._handle_broadcast(parsed, session_id, wcp_sessions)
+        elif isinstance(parsed, AddContextListenerRequest):
             await self._handle_add_context_listener(
-                message, session_id, wcp_sessions, websocket
+                parsed, session_id, wcp_sessions, websocket
             )
-        elif msg_type == "addIntentListener":
+        elif isinstance(parsed, AddIntentListenerRequest):
             await self._handle_add_intent_listener(
-                message, session_id, wcp_sessions, websocket
+                parsed, session_id, wcp_sessions, websocket
             )
-        elif msg_type == "intentListenerUnsubscribe":
-            await self._handle_intent_listener_unsubscribe(message, websocket)
-        elif msg_type == "raiseIntent":
-            await self._handle_raise_intent(message, websocket)
-        elif msg_type == "raiseIntentForContext":
-            await self._handle_raise_intent_for_context(message, websocket)
-        elif msg_type == "intentResultRequest":
-            await self._handle_intent_result_request(message, websocket)
-        elif msg_type == "raiseIntentResultResponse":
-            await self._handle_raise_intent_result_response(message)
-        elif msg_type == "contextListenerUnsubscribe":
-            await self._handle_context_listener_unsubscribe(message, websocket)
-        elif msg_type == "heartbeatAcknowledgmentRequest":
-            await self._handle_heartbeat_acknowledgment(message)
+        elif isinstance(parsed, IntentListenerUnsubscribeRequest):
+            await self._handle_intent_listener_unsubscribe(parsed, websocket)
+        elif isinstance(parsed, RegisterExternalHandlerRequest):
+            await self._handle_register_external_handler(
+                parsed, session_id, wcp_sessions, websocket
+            )
+        elif isinstance(parsed, UnregisterExternalHandlerRequest):
+            await self._handle_unregister_external_handler(
+                parsed, session_id, wcp_sessions, websocket
+            )
+        elif isinstance(parsed, ExternalIntentResultRequest):
+            await self._handle_external_intent_result(parsed)
+        elif isinstance(parsed, RaiseIntentRequest):
+            await self._handle_raise_intent(parsed, websocket)
+        elif isinstance(parsed, RaiseIntentForContextRequest):
+            await self._handle_raise_intent_for_context(parsed, websocket)
+        elif isinstance(parsed, IntentResultRequest):
+            await self._handle_intent_result_request(parsed, websocket)
+        elif isinstance(parsed, RaiseIntentResultResponse):
+            await self._handle_raise_intent_result_response(parsed)
+        elif isinstance(parsed, ContextListenerUnsubscribeRequest):
+            await self._handle_context_listener_unsubscribe(parsed, websocket)
+        elif isinstance(parsed, HeartbeatAcknowledgmentRequest):
+            await self._handle_heartbeat_acknowledgment(parsed)
         else:
             logger.warning(f"Unknown DACP message type: {msg_type}")
 
-    async def _handle_open(self, message: Dict[str, Any], websocket: WebSocket):
+    async def _handle_open(self, request: OpenRequest, websocket: WebSocket):
         """Handle open request - launch the specified app"""
         try:
-            request = OpenRequest(**message)
             app_id = request.payload.app.appId
 
             # Check if app exists in directory
@@ -231,19 +276,16 @@ class DACPHandler:
                 response = AgentResponse(
                     type="openResponse",
                     payload=ErrorResponsePayload(error="AppLaunchFailed"),
-                    meta=AgentResponseMeta(
-                        requestUuid=message.get("meta", {}).get("requestUuid")
-                    ),
+                    meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
                 )
                 await self._send_model(websocket, response)
             except Exception:
                 pass
 
     async def _handle_broadcast(
-        self, message: Dict[str, Any], session_id: str, wcp_sessions: Dict[str, Any]
+        self, request: BroadcastRequest, session_id: str, wcp_sessions: Dict[str, Any]
     ):
         """Handle broadcast request"""
-        request = BroadcastRequest(**message)
         source_instance_uuid = wcp_sessions[session_id]["identity"]["instanceUuid"]
 
         targets = core_services.context_router.broadcast_context(
@@ -263,13 +305,12 @@ class DACPHandler:
 
     async def _handle_add_context_listener(
         self,
-        message: Dict[str, Any],
+        request: AddContextListenerRequest,
         session_id: str,
         wcp_sessions: Dict[str, Any],
         websocket: WebSocket,
     ):
         """Handle add context listener request"""
-        request = AddContextListenerRequest(**message)
         source_instance_uuid = wcp_sessions[session_id]["identity"]["instanceUuid"]
 
         from ..api import ListenerUuid
@@ -289,13 +330,12 @@ class DACPHandler:
 
     async def _handle_add_intent_listener(
         self,
-        message: Dict[str, Any],
+        request: AddIntentListenerRequest,
         session_id: str,
         wcp_sessions: Dict[str, Any],
         websocket: WebSocket,
     ):
         """Handle add intent listener request"""
-        request = AddIntentListenerRequest(**message)
         source_instance_uuid = wcp_sessions[session_id]["identity"]["instanceUuid"]
 
         from ..api import ListenerUuid
@@ -314,10 +354,9 @@ class DACPHandler:
         await self._send_model(websocket, response)
 
     async def _handle_intent_listener_unsubscribe(
-        self, message: Dict[str, Any], websocket: WebSocket
+        self, request: IntentListenerUnsubscribeRequest, websocket: WebSocket
     ):
         """Handle intent listener unsubscribe"""
-        request = IntentListenerUnsubscribeRequest(**message)
         core_services.listener_store.remove_listener(request.payload.listenerUuid.root)
 
         response = IntentListenerUnsubscribeResponse(
@@ -327,10 +366,10 @@ class DACPHandler:
         )
         await self._send_model(websocket, response)
 
-    async def _handle_raise_intent(self, message: Dict[str, Any], websocket: WebSocket):
+    async def _handle_raise_intent(
+        self, request: RaiseIntentRequest, websocket: WebSocket
+    ):
         """Handle raise intent request"""
-        request = RaiseIntentRequest(**message)
-
         # Check if this is a system intent first
         if self.system_intent_handler.is_system_intent(request.payload.intent):
             response = await self.system_intent_handler.handle_system_intent(
@@ -344,7 +383,20 @@ class DACPHandler:
                 await self._send_model(websocket, response)
                 return
 
-        # Not a system intent or system intent handler failed, try normal resolution
+        # Check if a plugin handles this intent
+        plugin_result = await self._try_plugin_handler(request)
+        if plugin_result is not None:
+            await self._send_model(websocket, plugin_result)
+            return
+
+        # Check if an external handler can handle this intent
+        external_result = await self._try_external_handler(request, websocket)
+        if external_result is not None:
+            # external_result is either an AgentResponse or RaiseIntentResponse
+            await self._send_model(websocket, external_result)
+            return
+
+        # Not a system intent or plugin, try normal resolution
         resolution = core_services.intent_resolver.resolve_intent(
             request.payload.intent, request.payload.context, request.payload.target
         )
@@ -386,11 +438,9 @@ class DACPHandler:
             await self._send_model(websocket, response)
 
     async def _handle_raise_intent_for_context(
-        self, message: Dict[str, Any], websocket: WebSocket
+        self, request: RaiseIntentForContextRequest, websocket: WebSocket
     ):
         """Handle raise intent for context request"""
-        request = RaiseIntentForContextRequest(**message)
-
         # Not implemented - return error
         response = AgentResponse(
             type="raiseIntentForContextResponse",
@@ -400,11 +450,9 @@ class DACPHandler:
         await self._send_model(websocket, response)
 
     async def _handle_intent_result_request(
-        self, message: Dict[str, Any], websocket: WebSocket
+        self, request: IntentResultRequest, websocket: WebSocket
     ):
         """Handle intent result request"""
-        request = IntentResultRequest(**message)
-
         logger.debug(f"Received intent result: {request.payload.intentResult}")
 
         response = IntentResultResponse(
@@ -414,16 +462,16 @@ class DACPHandler:
         )
         await self._send_model(websocket, response)
 
-    async def _handle_raise_intent_result_response(self, message: Dict[str, Any]):
+    async def _handle_raise_intent_result_response(
+        self, request: RaiseIntentResultResponse
+    ):
         """Handle raise intent result response"""
-        request = RaiseIntentResultResponse(**message)
         logger.debug(f"Intent result acknowledged: {request.meta.requestUuid}")
 
     async def _handle_context_listener_unsubscribe(
-        self, message: Dict[str, Any], websocket: WebSocket
+        self, request: ContextListenerUnsubscribeRequest, websocket: WebSocket
     ):
         """Handle context listener unsubscribe"""
-        request = ContextListenerUnsubscribeRequest(**message)
         core_services.listener_store.remove_listener(request.payload.listenerUuid.root)
 
         response = ContextListenerUnsubscribeResponse(
@@ -433,9 +481,227 @@ class DACPHandler:
         )
         await self._send_model(websocket, response)
 
-    async def _handle_heartbeat_acknowledgment(self, message: Dict[str, Any]):
+    async def _handle_heartbeat_acknowledgment(
+        self, request: HeartbeatAcknowledgmentRequest
+    ):
         """Handle heartbeat acknowledgment"""
-        request = HeartbeatAcknowledgmentRequest(**message)
         logger.debug(
             f"Received heartbeat acknowledgment for event {request.payload.heartbeatEventUuid}"
+        )
+
+    async def _try_plugin_handler(
+        self, request: RaiseIntentRequest
+    ) -> AgentResponse | RaiseIntentResponse | None:
+        """Try to handle intent via registered plugins.
+
+        Args:
+            request: The RaiseIntentRequest from the client.
+
+        Returns:
+            Response model if a plugin handled the intent, None otherwise.
+        """
+        plugins = core_services.plugin_registry.get_plugins_for_intent(
+            request.payload.intent
+        )
+
+        for plugin in plugins:
+            try:
+                result = await plugin.handle_intent(
+                    request.payload.intent,
+                    request.payload.context,
+                    request.meta.source.model_dump() if request.meta.source else None,
+                )
+
+                if result.handled:
+                    if result.error:
+                        # Plugin handled but returned an error
+                        return AgentResponse(
+                            type="raiseIntentResponse",
+                            payload=ErrorResponsePayload(error=result.error),
+                            meta=AgentResponseMeta(
+                                requestUuid=request.meta.requestUuid
+                            ),
+                        )
+
+                    # Plugin handled successfully
+                    resolution = IntentResolution(
+                        source=AppIdentifier(
+                            appId=f"plugin:{plugin.name}",
+                            instanceId=None,
+                            desktopAgent=None,
+                        ),
+                        intent=request.payload.intent,
+                    )
+                    return RaiseIntentResponse(
+                        type="raiseIntentResponse",
+                        payload=RaiseIntentResponsePayload(
+                            intentResolution=resolution.model_dump()
+                        ),
+                        meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                    )
+
+            except Exception as e:
+                logger.error(
+                    f"Plugin {plugin.name} raised exception handling "
+                    f"{request.payload.intent}: {e}"
+                )
+                # Continue to next plugin
+
+        return None
+
+    async def _handle_register_external_handler(
+        self,
+        request: RegisterExternalHandlerRequest,
+        session_id: str,
+        wcp_sessions: Dict[str, Any],
+        websocket: WebSocket,
+    ) -> None:
+        """Handle external handler registration - message already validated by parser."""
+        try:
+            instance_uuid = wcp_sessions[session_id]["identity"]["instanceUuid"]
+            handler_uuid = await core_services.register_external_handler(
+                instance_uuid,
+                request.payload.handler_id,
+                request.payload.intents,
+                request.payload.priority,
+                request.payload.metadata,
+            )
+
+            # send success response
+            response = RegisterExternalHandlerResponse(
+                payload=RegisterExternalHandlerResponsePayload(
+                    handler_uuid=handler_uuid
+                ),
+                meta=RegisterExternalHandlerResponseMeta(
+                    requestUuid=str(request.meta.requestUuid)
+                ),
+            )
+            await websocket.send_text(response.model_dump_json())
+        except Exception:
+            logger.exception("Failed to register external handler")
+            err = AgentResponse(
+                type="registerExternalHandlerResponse",
+                payload=ErrorResponsePayload(error="InternalError"),
+                meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+            )
+            await self._send_model(websocket, err)
+
+    async def _handle_unregister_external_handler(
+        self,
+        request: UnregisterExternalHandlerRequest,
+        session_id: str,
+        wcp_sessions: Dict[str, Any],
+        websocket: WebSocket,
+    ):
+        """Handle external handler unregistration - message already validated by parser."""
+        try:
+            await core_services.unregister_external_handler(
+                request.payload.handler_uuid
+            )
+
+            # Send success response using Pydantic model
+            response = UnregisterExternalHandlerResponse(
+                meta=RegisterExternalHandlerResponseMeta(
+                    requestUuid=str(request.meta.requestUuid)
+                ),
+            )
+            await websocket.send_text(response.model_dump_json())
+        except Exception:
+            logger.exception("Failed to unregister external handler")
+            err = AgentResponse(
+                type="unregisterExternalHandlerResponse",
+                payload=ErrorResponsePayload(error="InternalError"),
+                meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+            )
+            await self._send_model(websocket, err)
+
+    async def _handle_external_intent_result(
+        self, request: ExternalIntentResultRequest
+    ) -> None:
+        """Handle intent result from external handler - message already validated by parser."""
+        try:
+            core_services.resolve_pending_intent(
+                request.payload.request_uuid,
+                result=request.payload.result,
+                error=request.payload.error,
+            )
+        except Exception:
+            logger.exception("Failed to handle external intent result")
+
+    async def _try_external_handler(
+        self, request: RaiseIntentRequest, websocket: WebSocket
+    ) -> RaiseIntentResponse | AgentResponse | None:
+        """Try to handle intent via registered external handlers.
+
+        Args:
+            request: The validated RaiseIntentRequest from the client.
+            websocket: The WebSocket connection to respond on.
+
+        Returns:
+            Response model if an external handler processed the intent, None otherwise.
+        """
+        # Find registered external handlers for this intent
+        handlers = core_services.external_registry.get_handlers_for_intent(
+            request.payload.intent
+        )
+        if not handlers:
+            return None
+
+        # Choose first handler (highest priority)
+        handler = handlers[0]
+
+        # Build forwarded intent message using Pydantic model
+        request_uuid = str(uuid.uuid4())
+        forwarded = ForwardedIntentMessage(
+            payload=ForwardedIntentPayload(
+                request_uuid=request_uuid,
+                intent=request.payload.intent,
+                context=request.payload.context or {},
+                source=request.meta.source.model_dump() if request.meta.source else {},
+            )
+        )
+
+        # Create pending future for response correlation
+        fut = core_services.create_pending_intent(request_uuid)
+
+        try:
+            # Send forwarded intent message using Pydantic serialization
+            await self.connection_manager.send_to_instance(
+                handler.instance_uuid, forwarded.model_dump_json()
+            )
+        except Exception as e:
+            logger.exception(
+                f"Failed to forward intent to external handler {handler.handler_id}: {e}"
+            )
+            core_services.resolve_pending_intent(request_uuid, error=str(e))
+            return None
+
+        try:
+            # Wait for result with a reasonable timeout
+            result = await asyncio.wait_for(fut, timeout=30.0)
+        except asyncio.TimeoutError:
+            logger.debug(f"External handler {handler.handler_id} timed out")
+            return None
+        except Exception as e:
+            logger.debug(f"External handler failed: {e}")
+            return None
+
+        if result is None:
+            return None
+
+        # Build response using the result
+        resolution = IntentResolution(
+            source=AppIdentifier(
+                appId=f"external:{handler.handler_id}",
+                instanceId=None,
+                desktopAgent=None,
+            ),
+            intent=request.payload.intent,
+        )
+        return RaiseIntentResponse(
+            type="raiseIntentResponse",
+            payload=RaiseIntentResponsePayload(
+                intentResolution=resolution.model_dump()
+            ),
+            meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
         )

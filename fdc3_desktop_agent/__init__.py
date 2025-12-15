@@ -39,6 +39,14 @@ from .server import create_app, app
 from .storage.interfaces import Storage, AppMetadata, LaunchConfig
 from .launcher.interfaces import ProcessLauncher, LaunchResult
 from .distributed.adapter import DistributedLogAdapter
+from .plugins import (
+    IntentHandlerPlugin,
+    IntentHandlerResult,
+    PluginRegistry,
+    discover_plugins,
+    list_plugin_entry_points,
+    PLUGIN_ENTRY_POINT_GROUP,
+)
 
 __all__ = [
     # Version
@@ -54,4 +62,11 @@ __all__ = [
     "ProcessLauncher",
     "LaunchResult",
     "DistributedLogAdapter",
+    # Plugin API
+    "IntentHandlerPlugin",
+    "IntentHandlerResult",
+    "PluginRegistry",
+    "discover_plugins",
+    "list_plugin_entry_points",
+    "PLUGIN_ENTRY_POINT_GROUP",
 ]

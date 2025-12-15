@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from .distributed.adapter import DistributedLogAdapter
     from .launcher.interfaces import ProcessLauncher
     from .storage.interfaces import Storage
+    from .plugins.interfaces import IntentHandlerPlugin
 
 
 def _default_allowed_origins() -> List[str]:
@@ -69,6 +70,16 @@ class DesktopAgentConfig:
     storage: Optional["Storage"] = None
     launcher: Optional["ProcessLauncher"] = None
     distributed_adapter: Optional["DistributedLogAdapter"] = None
+
+    # Intent handler plugins (registered during app creation)
+    plugins: List["IntentHandlerPlugin"] = field(default_factory=list)
+
+    # Automatically discover and load plugins from installed packages
+    # via the 'fdc3_desktop_agent.plugins' entry point group
+    auto_discover_plugins: bool = field(
+        default_factory=lambda: os.getenv("FDC3_AUTO_DISCOVER_PLUGINS", "true").lower()
+        in ("true", "1", "yes")
+    )
 
     # Agent WebSocket URL (used by launched apps to connect back)
     # If None, computed from host/port

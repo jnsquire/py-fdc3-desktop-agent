@@ -204,6 +204,19 @@ def create_app(config: Optional[DesktopAgentConfig] = None) -> FastAPI:
         logger.info(f"WebSocket endpoint at: {config.computed_agent_url}")
         logger.info(f"Admin interface at: http://{config.host}:{config.port}/admin")
 
+        # Register intent handler plugins
+        # First, discover plugins from entry points if enabled
+        all_plugins = list(config.plugins)  # Copy to avoid modifying config
+        if config.auto_discover_plugins:
+            from ..plugins import discover_plugins
+
+            discovered = discover_plugins()
+            all_plugins.extend(discovered)
+
+        for plugin in all_plugins:
+            await core_services.register_plugin(plugin)
+            logger.info(f"Registered plugin: {plugin.name}")
+
         # Initialize distributed adapter
         adapter = config.distributed_adapter
         sub_id = None
@@ -287,6 +300,13 @@ def create_app(config: Optional[DesktopAgentConfig] = None) -> FastAPI:
                 await instance_connection_manager.close_all()
             except Exception:
                 pass
+
+            # Unregister plugins
+            for plugin in list(core_services.plugin_registry.list_plugins()):
+                try:
+                    await core_services.unregister_plugin(plugin)
+                except Exception:
+                    pass
 
             await storage.close()
             logger.info("FDC3 Desktop Agent storage closed")

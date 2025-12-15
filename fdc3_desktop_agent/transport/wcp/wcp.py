@@ -50,6 +50,8 @@ class WCP3Handshake(BaseModel):
 class WCP4ValidateAppIdentityPayload(BaseModel):
     instanceId: Optional[str] = None
     instanceUuid: Optional[str] = None
+    # For self-registering external handlers (e.g., "external-handler:my-handler")
+    appId: Optional[str] = None
 
 
 class WCP4ValidateAppIdentity(BaseModel):
