@@ -22,6 +22,7 @@ from ..transport.wcp.wcp import (
     WCP5ValidateAppIdentityFailedResponse,
     WCP5ValidateAppIdentityFailedResponsePayload,
 )
+from pydantic import ValidationError
 from ..core import core_services
 from ..storage import Storage
 
@@ -81,7 +82,11 @@ class WCPHandler:
         websocket: WebSocket,
     ):
         """Handle WCP1Hello message"""
-        wcp1 = WCP1Hello(**message)
+        try:
+            wcp1 = WCP1Hello(**message)
+        except ValidationError as exc:
+            logger.warning("Invalid WCP1Hello received: %s", exc)
+            return
 
         wcp_sessions[session_id] = {
             "wcp1_identity": {
@@ -110,7 +115,30 @@ class WCPHandler:
         websocket: WebSocket,
     ) -> bool:
         """Handle WCP4ValidateAppIdentity message. Returns True if transitioning to DACP."""
-        wcp4 = WCP4ValidateAppIdentity(**message)
+        try:
+            wcp4 = WCP4ValidateAppIdentity(**message)
+        except ValidationError as exc:
+            logger.warning("Invalid WCP4ValidateAppIdentity received: %s", exc)
+            # Attempt to notify client with a failure response if possible
+            conn_attempt = None
+            try:
+                conn_attempt = message.get("meta", {}).get("connectionAttemptUuid")
+            except Exception:
+                conn_attempt = None
+            failed = WCP5ValidateAppIdentityFailedResponse(
+                payload=WCP5ValidateAppIdentityFailedResponsePayload(
+                    message="Invalid WCP4ValidateAppIdentity payload"
+                ),
+                meta={
+                    "requestUuid": conn_attempt,
+                    "timestamp": datetime.now().isoformat(),
+                },
+            )
+            try:
+                await self._send_model(websocket, failed)
+            except Exception:
+                logger.debug("Failed to send validation error response")
+            return False
 
         validation_result = await self._validate_app_identity(
             wcp4, session_id, wcp_sessions
@@ -143,7 +171,7 @@ class WCPHandler:
             try:
                 agent_url = (
                     os.getenv("FDC3_DESKTOP_AGENT_URL")
-                    or f"ws://{os.getenv('FDC3_HOST','localhost')}:{os.getenv('FDC3_PORT','8000')}/ws"
+                    or f"ws://{os.getenv('FDC3_HOST', 'localhost')}:{os.getenv('FDC3_PORT', '8000')}/ws"
                 )
                 runtime_info = {
                     "launcher": {
@@ -165,6 +193,9 @@ class WCPHandler:
             except Exception:
                 pass
 
+            connection_attempt = getattr(
+                getattr(wcp4, "meta", None), "connectionAttemptUuid", None
+            )
             wcp5 = WCP5ValidateAppIdentityResponse(
                 payload=WCP5ValidateAppIdentityResponsePayload(
                     appId=identity["appId"],
@@ -173,7 +204,7 @@ class WCPHandler:
                     implementationMetadata=impl_meta,
                 ),
                 meta={
-                    "requestUuid": message["meta"]["connectionAttemptUuid"],
+                    "requestUuid": connection_attempt,
                     "timestamp": datetime.now().isoformat(),
                 },
             )
@@ -187,12 +218,15 @@ class WCPHandler:
             return True  # Transition to DACP
         else:
             # Send failure response
+            connection_attempt = getattr(
+                getattr(wcp4, "meta", None), "connectionAttemptUuid", None
+            )
             wcp5_failed = WCP5ValidateAppIdentityFailedResponse(
                 payload=WCP5ValidateAppIdentityFailedResponsePayload(
                     message=validation_result["error"]
                 ),
                 meta={
-                    "requestUuid": message["meta"]["connectionAttemptUuid"],
+                    "requestUuid": connection_attempt,
                     "timestamp": datetime.now().isoformat(),
                 },
             )

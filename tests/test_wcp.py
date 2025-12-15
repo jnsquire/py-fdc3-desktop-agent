@@ -209,9 +209,9 @@ class TestOriginValidation:
                     allowed = True
                     break
 
-        assert (
-            allowed
-        ), f"Origin {identity_origin} should match wildcard {allowed_origins[0]}"
+        assert allowed, (
+            f"Origin {identity_origin} should match wildcard {allowed_origins[0]}"
+        )
 
         allowed = False
         for allowed_origin in allowed_origins:
@@ -221,6 +221,6 @@ class TestOriginValidation:
                     allowed = True
                     break
 
-        assert (
-            allowed
-        ), f"Origin {actual_origin} should match wildcard {allowed_origins[0]}"
+        assert allowed, (
+            f"Origin {actual_origin} should match wildcard {allowed_origins[0]}"
+        )

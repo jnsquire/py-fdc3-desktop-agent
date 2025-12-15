@@ -18,9 +18,9 @@ class AppRegistry:
 
     def __init__(self):
         self.instances: Dict[str, AppInstance] = {}  # instance_uuid -> instance
-        self._connection_events: Dict[str, asyncio.Event] = (
-            {}
-        )  # instance_uuid -> connection event
+        self._connection_events: Dict[
+            str, asyncio.Event
+        ] = {}  # instance_uuid -> connection event
 
     def register_pending_instance(
         self, app_id: str, instance_id: str, instance_uuid: str

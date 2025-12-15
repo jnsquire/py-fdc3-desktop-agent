@@ -557,6 +557,13 @@ class DACPHandler:
         websocket: WebSocket,
     ) -> None:
         """Handle external handler registration - message already validated by parser."""
+        logger.debug(
+            "_handle_register_external_handler called: session_id=%s wcp_sessions_keys=%s meta=%s",
+            session_id,
+            list(wcp_sessions.keys()),
+            getattr(request, "meta", None),
+        )
+
         try:
             instance_uuid = wcp_sessions[session_id]["identity"]["instanceUuid"]
             handler_uuid = await core_services.register_external_handler(
@@ -573,8 +580,13 @@ class DACPHandler:
                     handler_uuid=handler_uuid
                 ),
                 meta=RegisterExternalHandlerResponseMeta(
-                    requestUuid=str(request.meta.requestUuid)
+                    requestUuid=request.meta.requestUuid.root
                 ),
+            )
+            logger.debug(
+                "Sending registerExternalHandlerResponse: handler_uuid=%s requestUuid=%s",
+                handler_uuid,
+                request.meta.requestUuid.root,
             )
             await websocket.send_text(response.model_dump_json())
         except Exception:
@@ -602,7 +614,7 @@ class DACPHandler:
             # Send success response using Pydantic model
             response = UnregisterExternalHandlerResponse(
                 meta=RegisterExternalHandlerResponseMeta(
-                    requestUuid=str(request.meta.requestUuid)
+                    requestUuid=request.meta.requestUuid.root
                 ),
             )
             await websocket.send_text(response.model_dump_json())

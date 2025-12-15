@@ -444,7 +444,7 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14" },
     { name = "strawberry-graphql", specifier = ">=0.250" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.38" },
 ]
 provides-extras = ["dev", "etcd", "consul", "distributed"]
 

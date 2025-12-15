@@ -41,12 +41,13 @@ class AllowlistAccessPolicy(AccessControlPolicy):
 
     def evaluate_access(self, request: AccessRequest) -> AccessDecision:
         """Evaluate access based on origin allowlist"""
-        if not request.origin:
-            return AccessDecision(allowed=False, reason="No origin provided")
-
-        # Skip validation if "*" is in allowed origins (allow all)
+        # Skip validation if "*" is in allowed origins (allow all),
+        # even when no Origin header is present (useful for dev/test clients).
         if "*" in self.allowed_origins:
             return AccessDecision(allowed=True, reason="Wildcard allowlist")
+
+        if not request.origin:
+            return AccessDecision(allowed=False, reason="No origin provided")
 
         from urllib.parse import urlparse
 

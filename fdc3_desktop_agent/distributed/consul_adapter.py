@@ -30,7 +30,7 @@ class ConsulAdapter(DistributedLogAdapter):
                 "aiohttp is required for ConsulAdapter - install via 'pip install aiohttp'"
             )
 
-        self.base = f"http://{host}:{port}/v1/kv/{prefix.rstrip('/') }"
+        self.base = f"http://{host}:{port}/v1/kv/{prefix.rstrip('/')}"
         self._session: Optional[aiohttp.ClientSession] = None
         self._watch_tasks: Dict[str, asyncio.Task] = {}
         self._subscription_counter = 0

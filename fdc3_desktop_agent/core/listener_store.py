@@ -27,9 +27,9 @@ class ListenerStore:
     def __init__(self):
         self.context_listeners: Dict[str, ContextListener] = {}
         self.intent_listeners: Dict[str, IntentListener] = {}
-        self.listeners_by_instance: Dict[str, Set[str]] = (
-            {}
-        )  # instance_uuid -> set of listener_uuids
+        self.listeners_by_instance: Dict[
+            str, Set[str]
+        ] = {}  # instance_uuid -> set of listener_uuids
 
     def add_context_listener(
         self,
