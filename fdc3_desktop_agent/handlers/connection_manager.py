@@ -30,7 +30,9 @@ class WebSocketConnectionManager:
                 # Unregister any external handlers registered by this instance
                 core_services.external_registry.unregister_by_instance(instance_uuid)
             except Exception:
-                logger.exception(f"Failed to unregister handlers for instance {instance_uuid}")
+                logger.exception(
+                    f"Failed to unregister handlers for instance {instance_uuid}"
+                )
 
     async def send_to_instance(self, instance_uuid: str, message: str):
         """Send a message to a specific instance"""

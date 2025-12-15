@@ -267,7 +267,9 @@ class Mutation:
             raise ValueError("User channel IDs must start with 'user:' prefix")
         elif input.channel_type == "app" and not input.channel_id.startswith("app:"):
             raise ValueError("App channel IDs must start with 'app:' prefix")
-        elif input.channel_type == "private" and not input.channel_id.startswith("private:"):
+        elif input.channel_type == "private" and not input.channel_id.startswith(
+            "private:"
+        ):
             raise ValueError("Private channel IDs must start with 'private:' prefix")
 
         display_metadata = None
@@ -285,7 +287,9 @@ class Mutation:
         return ChannelType(
             id=channel.id,
             type=channel.type,
-            display_name=channel.display_metadata.name if channel.display_metadata else None,
+            display_name=(
+                channel.display_metadata.name if channel.display_metadata else None
+            ),
             color=(
                 getattr(channel.display_metadata, "color", None)
                 if channel.display_metadata
@@ -313,9 +317,7 @@ class Mutation:
         return False
 
     @strawberry.mutation
-    def broadcast_to_channel(
-        self, channel_id: str, context: str
-    ) -> bool:
+    def broadcast_to_channel(self, channel_id: str, context: str) -> bool:
         """Broadcast a context to a channel (context as JSON string)"""
         import json
 

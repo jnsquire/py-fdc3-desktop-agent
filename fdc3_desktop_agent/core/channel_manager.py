@@ -24,12 +24,12 @@ class ChannelManager:
 
     def __init__(self):
         self.channels: Dict[str, ChannelInstance] = {}  # channel_id -> channel
-        self.instance_channels: Dict[
-            str, str
-        ] = {}  # instance_uuid -> current_channel_id
-        self.event_subscriptions: Dict[
-            str, Dict[str, Any]
-        ] = {}  # subscription_id -> subscription info
+        self.instance_channels: Dict[str, str] = (
+            {}
+        )  # instance_uuid -> current_channel_id
+        self.event_subscriptions: Dict[str, Dict[str, Any]] = (
+            {}
+        )  # subscription_id -> subscription info
         self.next_subscription_id = 1
         # Optional distributed adapter to relay events across workers
         self.distributed_adapter: Optional[DistributedLogAdapter] = None

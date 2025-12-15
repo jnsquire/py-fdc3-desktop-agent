@@ -85,7 +85,11 @@ if __name__ == "__main__":
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
     p = argparse.ArgumentParser(description="Example external intent handler")
-    p.add_argument("--agent-url", default="ws://localhost:8000/ws", help="Agent WebSocket URL")
-    p.add_argument("--handler-id", default="example-handler", help="Handler ID for registration")
+    p.add_argument(
+        "--agent-url", default="ws://localhost:8000/ws", help="Agent WebSocket URL"
+    )
+    p.add_argument(
+        "--handler-id", default="example-handler", help="Handler ID for registration"
+    )
     args = p.parse_args()
     asyncio.run(main(args.agent_url, args.handler_id))
