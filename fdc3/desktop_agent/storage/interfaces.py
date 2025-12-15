@@ -94,9 +94,6 @@ class LaunchConfigRepository(ABC):
         pass
 
 
-
-
-
 class Storage(ABC):
     """Main storage interface"""
 

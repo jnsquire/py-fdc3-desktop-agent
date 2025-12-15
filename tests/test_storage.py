@@ -95,7 +95,10 @@ class TestSqliteStorage:
         await storage.apps.add_app(metadata)
         retrieved = await storage.apps.get_app_metadata("test-app")
         assert retrieved is not None
-        assert set(retrieved.allowed_origins) == {"https://example.com", "https://app.example.com"}
+        assert set(retrieved.allowed_origins) == {
+            "https://example.com",
+            "https://app.example.com",
+        }
 
     @pytest.mark.asyncio
     async def test_empty_origins(self, storage):

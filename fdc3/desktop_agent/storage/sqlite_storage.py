@@ -60,13 +60,17 @@ class SqliteAppDirectoryRepository(AppDirectoryRepository):
                 (origin,) = r
                 allowed_origins.append(origin)
 
-        return AppMetadata(app_id, name, version, description, icons, intents, allowed_origins)
+        return AppMetadata(
+            app_id, name, version, description, icons, intents, allowed_origins
+        )
         return None
 
     async def list_apps(self) -> List[AppMetadata]:
         """List all apps in directory"""
         apps = []
-        async with self.db.execute("SELECT app_id, name, version, description FROM apps") as cursor:
+        async with self.db.execute(
+            "SELECT app_id, name, version, description FROM apps"
+        ) as cursor:
             async for row in cursor:
                 app_id, name, version, description = row
                 # reuse get_app_metadata to assemble lists
@@ -90,7 +94,9 @@ class SqliteAppDirectoryRepository(AppDirectoryRepository):
         )
 
         # Replace icons, intents, allowed_origins
-        await self.db.execute("DELETE FROM app_icons WHERE app_id = ?", (metadata.app_id,))
+        await self.db.execute(
+            "DELETE FROM app_icons WHERE app_id = ?", (metadata.app_id,)
+        )
         for icon in metadata.icons:
             src = icon.get("src")
             size = icon.get("size") if icon.get("size") is not None else None
@@ -99,14 +105,18 @@ class SqliteAppDirectoryRepository(AppDirectoryRepository):
                 (metadata.app_id, src, size),
             )
 
-        await self.db.execute("DELETE FROM app_intents WHERE app_id = ?", (metadata.app_id,))
+        await self.db.execute(
+            "DELETE FROM app_intents WHERE app_id = ?", (metadata.app_id,)
+        )
         for intent in metadata.intents:
             await self.db.execute(
                 "INSERT INTO app_intents (app_id, intent) VALUES (?, ?)",
                 (metadata.app_id, intent),
             )
 
-        await self.db.execute("DELETE FROM app_allowed_origins WHERE app_id = ?", (metadata.app_id,))
+        await self.db.execute(
+            "DELETE FROM app_allowed_origins WHERE app_id = ?", (metadata.app_id,)
+        )
         for origin in metadata.allowed_origins:
             await self.db.execute(
                 "INSERT INTO app_allowed_origins (app_id, origin) VALUES (?, ?)",
@@ -118,7 +128,9 @@ class SqliteAppDirectoryRepository(AppDirectoryRepository):
         """Remove app from directory"""
         await self.db.execute("DELETE FROM app_icons WHERE app_id = ?", (app_id,))
         await self.db.execute("DELETE FROM app_intents WHERE app_id = ?", (app_id,))
-        await self.db.execute("DELETE FROM app_allowed_origins WHERE app_id = ?", (app_id,))
+        await self.db.execute(
+            "DELETE FROM app_allowed_origins WHERE app_id = ?", (app_id,)
+        )
         await self.db.execute("DELETE FROM apps WHERE app_id = ?", (app_id,))
         await self.db.commit()
 
@@ -181,9 +193,6 @@ class SqliteLaunchConfigRepository(LaunchConfigRepository):
                 env = json.loads(env_json) if env_json else {}
                 configs.append(LaunchConfig(app_id, command, args, env, cwd, timeout))
             return configs
-
-
-
 
 
 class SqliteStorage(Storage):
