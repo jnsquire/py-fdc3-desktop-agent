@@ -40,7 +40,9 @@ class ListenerStore:
     ) -> ContextListener:
         listener = ContextListener(listener_uuid, instance_uuid, context_type)
         self.context_listeners[listener_uuid.root] = listener
-        self.listeners_by_instance.setdefault(instance_uuid, set()).add(listener_uuid.root)
+        self.listeners_by_instance.setdefault(instance_uuid, set()).add(
+            listener_uuid.root
+        )
         return listener
 
     def add_intent_listener(
@@ -48,7 +50,9 @@ class ListenerStore:
     ) -> IntentListener:
         listener = IntentListener(listener_uuid, instance_uuid, intent)
         self.intent_listeners[listener_uuid.root] = listener
-        self.listeners_by_instance.setdefault(instance_uuid, set()).add(listener_uuid.root)
+        self.listeners_by_instance.setdefault(instance_uuid, set()).add(
+            listener_uuid.root
+        )
         return listener
 
     def remove_listener(self, listener_uuid: str) -> None:

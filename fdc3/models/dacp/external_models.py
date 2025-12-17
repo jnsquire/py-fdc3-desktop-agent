@@ -1,4 +1,4 @@
-﻿"""External handler protocol Pydantic models (migrated)."""
+"""External handler protocol Pydantic models (migrated)."""
 
 from __future__ import annotations
 

@@ -24,7 +24,9 @@ mutation EmitEvent($channelId: String!, $eventType: String!, $instanceUuid: Stri
 """
 
 
-async def send_broadcast(client: FDC3Client, channel: str, instance: str, context: dict | None):
+async def send_broadcast(
+    client: FDC3Client, channel: str, instance: str, context: dict | None
+):
     # Include channel id and instance info inside the context so the
     # sequence diagram can show which channel/instance produced the broadcast.
     # DACP broadcast requires a `type` field on the context
@@ -34,14 +36,18 @@ async def send_broadcast(client: FDC3Client, channel: str, instance: str, contex
     await client.broadcast(ctx)
 
 
-async def client_worker(agent_url: str, channel: str, name: str, messages: int, delay: float):
+async def client_worker(
+    agent_url: str, channel: str, name: str, messages: int, delay: float
+):
     async with FDC3Client(agent_url, handler_id=name) as client:
         # wait for WCP handshake to complete
         await client.wait_for_handshake()
 
         # Emit a 'joined' event (dev helper mutation) so the sequence UI
         # receives a proper 'joined' event type.
-        await client.emit_channel_event("joined", channel, instance_uuid=name, context={"info": f"{name} joined"})
+        await client.emit_channel_event(
+            "joined", channel, instance_uuid=name, context={"info": f"{name} joined"}
+        )
 
         for i in range(messages):
             await asyncio.sleep(delay + random.random() * delay)
@@ -50,7 +56,9 @@ async def client_worker(agent_url: str, channel: str, name: str, messages: int, 
 
         # Emit a 'left' event
         await asyncio.sleep(0.1)
-        await client.emit_channel_event("left", channel, instance_uuid=name, context={"info": f"{name} left"})
+        await client.emit_channel_event(
+            "left", channel, instance_uuid=name, context={"info": f"{name} left"}
+        )
 
 
 async def main(args):

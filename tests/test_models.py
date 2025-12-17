@@ -20,7 +20,11 @@ def test_parse_broadcast_event():
 def test_parse_forwarded_intent():
     msg = {
         "type": "forwardedIntent",
-        "payload": {"request_uuid": "r1", "intent": "TestIntent", "context": {"type": "test"}},
+        "payload": {
+            "request_uuid": "r1",
+            "intent": "TestIntent",
+            "context": {"type": "test"},
+        },
         "meta": {"requestUuid": "r1", "timestamp": "2025-01-01T00:00:00Z"},
     }
 

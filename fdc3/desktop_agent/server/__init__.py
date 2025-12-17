@@ -201,8 +201,8 @@ def create_app(config: Optional[DesktopAgentConfig] = None) -> FastAPI:
 
         # For display purposes, prefer localhost when the server is bound to 0.0.0.0
         display_host = "127.0.0.1" if config.host == "0.0.0.0" else config.host
-        display_agent_url = (
-            config.computed_agent_url.replace(f"//{config.host}", f"//{display_host}", 1)
+        display_agent_url = config.computed_agent_url.replace(
+            f"//{config.host}", f"//{display_host}", 1
         )
 
         logger.info(f"HTTP API available at: http://{display_host}:{config.port}")

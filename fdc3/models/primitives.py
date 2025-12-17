@@ -1,4 +1,4 @@
-﻿"""Common primitive Pydantic types used across DACP models.
+"""Common primitive Pydantic types used across DACP models.
 
 This module hosts small RootModel wrappers for UUIDs and timestamps so
 that multiple model modules can import the same definitions without

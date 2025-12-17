@@ -72,7 +72,9 @@ class MessageDict(TypedDict, total=False):
     payload: Dict[str, Any]
 
 
-ForwardedIntentHandler = Callable[[models.ForwardedIntentMessage], Union[Awaitable[Any], Any]]
+ForwardedIntentHandler = Callable[
+    [models.ForwardedIntentMessage], Union[Awaitable[Any], Any]
+]
 
 BroadcastHandler = Callable[[models.BroadcastEvent], Union[Awaitable[Any], Any]]
 
@@ -260,7 +262,8 @@ class FDC3Client:
                 if request_uuid:
                     try:
                         await self.send_intent_result(
-                            request_uuid, error=f"Invalid forwardedIntent payload: {exc}"
+                            request_uuid,
+                            error=f"Invalid forwardedIntent payload: {exc}",
                         )
                     except Exception:
                         logger.exception(
