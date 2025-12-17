@@ -3,7 +3,7 @@ import json
 import pytest
 from typing import cast
 from fastapi import WebSocket
-from fdc3.desktop_agent.protocol.dacp.external_models import (
+from fdc3.models.dacp.external_models import (
     RegisterExternalHandlerRequest,
     UnregisterExternalHandlerRequest,
     ExternalIntentResultRequest,
@@ -110,7 +110,7 @@ async def test_dacp_register_and_forward(tmp_path):
     assert any(h.handler_uuid == handler_uuid for h in all_handlers)
 
     # Now raise an intent and test forwarding+response correlation
-    from fdc3.desktop_agent.protocol.dacp.dacp import (
+    from fdc3.models.dacp.dacp import (
         RaiseIntentRequest,
     )
 
@@ -120,7 +120,7 @@ async def test_dacp_register_and_forward(tmp_path):
         "meta": {"requestUuid": "caller-req", "source": None},
     }
 
-    req = RaiseIntentRequest(**message)
+    req = RaiseIntentRequest.model_validate(message)
 
     # run _try_external_handler in background
     task = asyncio.create_task(handler._try_external_handler(req, cast(WebSocket, ws)))
@@ -171,7 +171,7 @@ async def test_dacp_register_and_forward(tmp_path):
 @pytest.mark.asyncio
 async def test_register_invalid_payload_and_forward_failure():
     from fdc3.desktop_agent.handlers.dacp import DACPHandler
-    from fdc3.desktop_agent.protocol.dacp.message_parser import (
+    from fdc3.models.dacp.message_parser import (
         parse_message,
         MessageParseError,
     )
@@ -228,14 +228,14 @@ async def test_register_invalid_payload_and_forward_failure():
     assert "handler_uuid" in resp.get("payload", {})
 
     # Raise intent that will be forwarded but sending will fail
-    from fdc3.desktop_agent.protocol.dacp.dacp import RaiseIntentRequest
+    from fdc3.models.dacp.dacp import RaiseIntentRequest
 
     message = {
         "type": "raiseIntent",
         "payload": {"intent": "A.intent", "context": {}, "target": None},
         "meta": {"requestUuid": "r-intent", "source": None},
     }
-    req = RaiseIntentRequest(**message)
+    req = RaiseIntentRequest.model_validate(message)
 
     res = await handler._try_external_handler(req, cast(WebSocket, ws))
     # Forwarding failed; expect None result

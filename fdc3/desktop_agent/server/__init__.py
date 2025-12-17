@@ -11,7 +11,7 @@ from typing import Dict, Set, Optional
 from contextlib import asynccontextmanager
 
 from ..api.graphql import schema, set_graphql_storage
-from ..protocol.dacp.dacp import AgentEventMeta, AgentEvent, AgentEventPayload
+from fdc3.models.dacp.dacp import AgentEventMeta, AgentEvent, AgentEventPayload
 from ..core import CoreServices
 from ..distributed.factory import get_adapter
 from ..storage import SqliteStorage
@@ -350,6 +350,11 @@ def create_app(config: Optional[DesktopAgentConfig] = None) -> FastAPI:
         """Channel monitor UI for subscribing to channel events"""
         return templates.TemplateResponse("channel_monitor.html", {"request": request})
 
+    @app.get("/channel-sequence", response_class=HTMLResponse)
+    async def channel_sequence_page(request: Request):
+        """Sequence diagram view for channel traffic (uses GraphQL subscription)."""
+        return templates.TemplateResponse("sequence_diagram.html", {"request": request})
+
     @app.get("/public-channels", response_class=HTMLResponse)
     async def public_channels_page(request: Request):
         """Public channels management interface"""
@@ -372,7 +377,7 @@ def create_app(config: Optional[DesktopAgentConfig] = None) -> FastAPI:
             while True:
                 await asyncio.sleep(30)
                 if session_id and dacp_active:
-                    from ..protocol.dacp.dacp import (
+                    from fdc3.models.dacp.dacp import (
                         HeartbeatEvent,
                         AgentEventMeta as HBMeta,
                     )

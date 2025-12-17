@@ -12,28 +12,11 @@ from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, ConfigDict, Field, RootModel
 
 from . import context as context_1
+from fdc3.models.identifiers import AppIdentifier
 
 
 class Fdc3DesktopAgentApiSchemas(RootModel[Any]):
     root: Any = Field(..., title="FDC3 Desktop Agent API Schemas")
-
-
-class AppIdentifier(BaseModel):
-    appId: str = Field(
-        ...,
-        description="The unique application identifier located within a specific application directory instance. An example of an appId might be 'app@sub.root'.",
-        title="appId",
-    )
-    instanceId: Optional[str] = Field(
-        None,
-        description="An optional instance identifier, indicating that this object represents a specific instance of the application described.",
-        title="instanceId",
-    )
-    desktopAgent: Optional[str] = Field(
-        None,
-        description="The Desktop Agent that the app is available on. Used in Desktop Agent Bridging to identify the Desktop Agent to target.",
-        title="desktopAgent",
-    )
 
 
 class Icon(BaseModel):

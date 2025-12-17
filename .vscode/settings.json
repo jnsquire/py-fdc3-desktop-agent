@@ -5,7 +5,7 @@
     "python.testing.pytestEnabled": true,
     "python.testing.unittestEnabled": false,
     "python.testing.pytestArgs": ["tests"],
-    "python.testing.pytestPath": "${workspaceFolder}/.venv/Scripts/pytest.exe",
+    "python.testing.pytestPath": "${workspaceFolder}\\.venv\\Scripts\\fdc3-pytest.exe",
 
     "editor.formatOnSave": true,
     "python.linting.enabled": true,

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import shutil
 from typing import Sequence
 
 
@@ -49,14 +50,33 @@ def install_git_hooks() -> None:
     print(f"Using Python executable: {python}")
 
     inside_venv = sys.prefix != getattr(sys, "base_prefix", sys.prefix)
-    if inside_venv:
-        rc = _run([python, "-m", "pip", "install", "pre-commit"])
-    else:
-        rc = _run([python, "-m", "pip", "install", "--user", "pre-commit"])
 
-    if rc != 0:
-        print("Failed to install pre-commit; aborting.")
-        raise SystemExit(1)
+    # If pre-commit is already available (importable or on PATH), skip install.
+    have_pre_commit = False
+    try:
+        # pre-commit is an optional dev dependency; keep import local only when used
+
+        have_pre_commit = True
+    except Exception:
+        if shutil.which("pre-commit"):
+            have_pre_commit = True
+
+    if not have_pre_commit:
+        uv_path = shutil.which("uv")
+        if uv_path:
+            pip_cmd = ["uv", "pip", "install"]
+        else:
+            pip_cmd = [python, "-m", "pip", "install"]
+
+        if not inside_venv:
+            pip_cmd.append("--user")
+
+        pip_cmd.append("pre-commit")
+
+        rc = _run(pip_cmd)
+        if rc != 0:
+            print("Failed to install pre-commit; aborting.")
+            raise SystemExit(1)
 
     rc = _run([python, "-m", "pre_commit", "install"])
     if rc != 0:
@@ -66,3 +86,24 @@ def install_git_hooks() -> None:
         raise SystemExit(1)
 
     print("pre-commit hooks installed. Run: pre-commit run --all-files")
+
+
+def run_pytest() -> None:
+    """Run the test suite using the active Python interpreter.
+
+    This function is exposed as a console script so `uv run pytest` will
+    have an executable available after `uv sync` (editable install).
+    """
+    # Try importing pytest first; if missing, attempt to install dev extras
+    try:
+        rc = _run([sys.executable, "-m", "pytest"])
+        raise SystemExit(rc)
+    except Exception:
+        print("pytest not found in the active environment.")
+        print(
+            "Please install the project's development dependencies and hooks before running tests."
+        )
+        print("Recommended: run the appropriate bootstrap script in the repo root:")
+        print("  PowerShell: .\\scripts\\bootstrap-dev.ps1")
+        print("  POSIX:     ./scripts/bootstrap-dev.sh")
+        raise SystemExit(2)

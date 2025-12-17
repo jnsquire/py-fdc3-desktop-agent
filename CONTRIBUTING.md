@@ -23,6 +23,16 @@ This repository includes helper scripts to bootstrap a developer environment and
 - Windows (PowerShell): `scripts/bootstrap-dev.ps1`
 - POSIX (macOS / Linux): `scripts/bootstrap-dev.sh`
 
+`install-git-hooks` is provided as a console script entry (installed when you run an editable install). After installing dev deps you can run:
+
+```powershell
+# Windows
+install-git-hooks
+
+# or explicitly via the venv
+.venv\Scripts\install-git-hooks
+```
+
 Each script will (when run from the repository root):
 
 - install or upgrade `pip` in the `.venv` virtualenv

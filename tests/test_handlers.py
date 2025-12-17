@@ -6,14 +6,15 @@ from fastapi import WebSocket
 
 from fdc3.desktop_agent.handlers.connection_manager import WebSocketConnectionManager
 from fdc3.desktop_agent.handlers.access_control import AccessControlHandler
-from fdc3.desktop_agent.access_control.interfaces import (
+from fdc3.desktop_agent.access_control import (
     AllowlistAccessPolicy,
     AccessControlManager,
 )
 from fdc3.desktop_agent.handlers.system_intent import SystemIntentHandler
 from fdc3.desktop_agent.handlers.wcp import WCPHandler
 from fdc3.desktop_agent.storage import Storage
-from fdc3.desktop_agent.launcher.interfaces import ProcessLauncher
+from fdc3.desktop_agent.launcher import ProcessLauncher
+from fdc3.models.primitives import RequestUuid
 
 
 class FakeWebSocket:
@@ -98,7 +99,7 @@ async def test_system_intent_handler(monkeypatch):
         {"url": "http://example.com"},
         None,
         cast(WebSocket, ws),
-        "req-1",
+        RequestUuid(root="req-1"),
     )
     assert resp is not None
 

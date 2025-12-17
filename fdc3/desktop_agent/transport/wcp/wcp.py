@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field, AnyUrl
 from typing import Optional, Literal
-from fdc3.desktop_agent.api import ConnectionAttemptUuid, Timestamp
+from fdc3.models.primitives import ConnectionAttemptUuid, Timestamp
 
 
 class WCP1HelloPayload(BaseModel):

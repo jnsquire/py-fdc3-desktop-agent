@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime
-from fdc3.desktop_agent.protocol.dacp.dacp import (
+from fdc3.models.dacp.dacp import (
     AgentResponseMeta,
     AgentEventMeta,
     OpenRequest,

@@ -10,7 +10,7 @@ from typing import Dict, Any
 
 from fastapi import WebSocket
 
-from ..protocol.dacp.dacp import (
+from fdc3.models.dacp.dacp import (
     AgentEventMeta,
     OpenRequest,
     AgentResponse,
@@ -46,12 +46,11 @@ from ..protocol.dacp.dacp import (
     RaiseIntentResultResponse,
 )
 from ..core import core_services
-from ..protocol.dacp.message_parser import parse_message, MessageParseError
-from ..protocol.dacp.external_models import (
+from fdc3.models.dacp.message_parser import parse_message, MessageParseError
+from fdc3.models.dacp.external_models import (
     RegisterExternalHandlerRequest,
     RegisterExternalHandlerResponse,
     RegisterExternalHandlerResponsePayload,
-    RegisterExternalHandlerResponseMeta,
     UnregisterExternalHandlerRequest,
     UnregisterExternalHandlerResponse,
     ExternalIntentResultRequest,
@@ -60,8 +59,9 @@ from ..protocol.dacp.external_models import (
 )
 from ..storage import Storage
 from ..launcher.interfaces import ProcessLauncher
-from ..api import IntentResolution, AppIdentifier
-from ..api import RequestUuid
+from ..api import IntentResolution
+from fdc3.models.identifiers import AppIdentifier
+from fdc3.models.primitives import RequestUuid, ListenerUuid
 from .connection_manager import WebSocketConnectionManager
 from .system_intent import SystemIntentHandler
 
@@ -111,7 +111,9 @@ class DACPHandler:
                 payload=ErrorResponsePayload(error=str(e)),
                 meta=AgentResponseMeta(
                     requestUuid=(
-                        RequestUuid(e.request_uuid) if e.request_uuid else RequestUuid()
+                        RequestUuid(root=e.request_uuid)
+                        if e.request_uuid
+                        else RequestUuid()
                     )
                 ),
             )
@@ -313,8 +315,6 @@ class DACPHandler:
         """Handle add context listener request"""
         source_instance_uuid = wcp_sessions[session_id]["identity"]["instanceUuid"]
 
-        from ..api import ListenerUuid
-
         listener = core_services.listener_store.add_context_listener(
             ListenerUuid(), source_instance_uuid, request.payload.contextType
         )
@@ -337,8 +337,6 @@ class DACPHandler:
     ):
         """Handle add intent listener request"""
         source_instance_uuid = wcp_sessions[session_id]["identity"]["instanceUuid"]
-
-        from ..api import ListenerUuid
 
         listener = core_services.listener_store.add_intent_listener(
             ListenerUuid(), source_instance_uuid, request.payload.intent
@@ -579,9 +577,7 @@ class DACPHandler:
                 payload=RegisterExternalHandlerResponsePayload(
                     handler_uuid=handler_uuid
                 ),
-                meta=RegisterExternalHandlerResponseMeta(
-                    requestUuid=request.meta.requestUuid.root
-                ),
+                meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
             )
             logger.debug(
                 "Sending registerExternalHandlerResponse: handler_uuid=%s requestUuid=%s",
@@ -613,9 +609,7 @@ class DACPHandler:
 
             # Send success response using Pydantic model
             response = UnregisterExternalHandlerResponse(
-                meta=RegisterExternalHandlerResponseMeta(
-                    requestUuid=request.meta.requestUuid.root
-                ),
+                meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
             )
             await websocket.send_text(response.model_dump_json())
         except Exception:
@@ -707,7 +701,7 @@ class DACPHandler:
                 appId=f"external:{handler.handler_id}",
                 instanceId=None,
                 desktopAgent=None,
-            ),
+            ).model_dump(),
             intent=request.payload.intent,
         )
         return RaiseIntentResponse(

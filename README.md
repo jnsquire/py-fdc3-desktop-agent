@@ -75,8 +75,6 @@ uv run python -m pytest tests/ -v
 uv run uvicorn fdc3.desktop_agent.server:app --reload
 ```
 
-<!-- Developer setup moved to CONTRIBUTING.md -->
-
 ## Distributed Adapters (optional)
 
 This project supports optional distributed log adapters to relay channel events across multiple agent
@@ -456,7 +454,8 @@ async with FDC3Client("ws://localhost:8000/ws", handler_id="my-handler") as clie
         result = await process_intent(request.intent, request.context)
         await client.send_intent_result(request.request_uuid, result=result)
 
-    client.on_intent(on_intent)
+    # Register handler using the public EventEmitter
+    client.forwarded_intent_handlers.add(on_intent)
     await client.run_forever()
 ```
 
@@ -481,7 +480,7 @@ FDC3Client(
 | `register_handler(handler_id, intents, priority=0, metadata=None)` | Register as a handler for the specified intents; returns `handler_uuid` |
 | `unregister_handler(handler_uuid)`                                 | Unregister a previously registered handler                              |
 | `send_intent_result(request_uuid, result=None, error=None)`        | Send the result (or error) for a forwarded intent                       |
-| `on_intent(callback)`                                              | Set the callback for forwarded intent events                            |
+| `forwarded_intent_handlers`                                         | `EventEmitter` used to subscribe to forwarded intent events (use `add`/`remove`) |
 | `close()`                                                          | Close the WebSocket connection                                          |
 | `run_forever()`                                                    | Block until the connection is closed                                    |
 
@@ -584,7 +583,7 @@ async def run():
             # Handle the intent
             await client.send_intent_result(req.request_uuid, result={"handled": True})
 
-        client.on_intent(on_intent)
+        client.forwarded_intent_handlers.add(on_intent)
         await client.run_forever()
 
 def main():

@@ -42,8 +42,8 @@
             const div = document.createElement('div');
             div.className = 'event';
             const ctx = ev.context ? JSON.stringify(JSON.parse(ev.context), null, 2) : '';
-            div.innerHTML = `<div><strong>${ev.event_type}</strong> — <em>${ev.channel_id}</em></div>` +
-                             `<div class="meta">instance: ${ev.instance_uuid || 'system'} — ${ev.timestamp}</div>` +
+            div.innerHTML = `<div><strong>${ev.eventType}</strong> — <em>${ev.channelId}</em></div>` +
+                             `<div class="meta">instance: ${ev.instanceUuid || 'system'} — ${ev.timestamp}</div>` +
                              `<pre style="background:#f9f9f9;padding:8px;border-radius:4px">${ctx}</pre>`;
             out.prepend(div);
         }
@@ -60,7 +60,7 @@
                 socket.send(JSON.stringify({ type: 'connection_init', payload: {} }));
                 // wait briefly then start
                 setTimeout(() => {
-                    const query = `subscription ($channelId: String) { channelEvents(channelId: $channelId) { event_type channel_id instance_uuid context timestamp } }`;
+                    const query = `subscription ($channelId: String) { channelEvents(channelId: $channelId) { eventType channelId instanceUuid context timestamp } }`;
                     const payload = { query, variables: { channelId: channel || null } };
                     socket.send(JSON.stringify({ id: subId, type: 'start', payload }));
                 }, 50);
