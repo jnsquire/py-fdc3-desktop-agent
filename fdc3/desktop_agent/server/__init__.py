@@ -199,10 +199,16 @@ def create_app(config: Optional[DesktopAgentConfig] = None) -> FastAPI:
         logger.info(f"Server configured for {config.host}:{config.port}")
         logger.info(f"Allowed origins: {', '.join(config.allowed_origins)}")
 
-        logger.info(f"HTTP API available at: http://{config.host}:{config.port}")
-        logger.info(f"GraphQL endpoint at: http://{config.host}:{config.port}/graphql")
-        logger.info(f"WebSocket endpoint at: {config.computed_agent_url}")
-        logger.info(f"Admin interface at: http://{config.host}:{config.port}/admin")
+        # For display purposes, prefer localhost when the server is bound to 0.0.0.0
+        display_host = "127.0.0.1" if config.host == "0.0.0.0" else config.host
+        display_agent_url = (
+            config.computed_agent_url.replace(f"//{config.host}", f"//{display_host}", 1)
+        )
+
+        logger.info(f"HTTP API available at: http://{display_host}:{config.port}")
+        logger.info(f"GraphQL endpoint at: http://{display_host}:{config.port}/graphql")
+        logger.info(f"WebSocket endpoint at: {display_agent_url}")
+        logger.info(f"Admin interface at: http://{display_host}:{config.port}/admin")
 
         # Register intent handler plugins
         # First, discover plugins from entry points if enabled
