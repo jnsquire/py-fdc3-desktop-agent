@@ -25,6 +25,7 @@ dependencies = [
 ]
 
 # Optional dependencies for distributed adapters
+[project.optional-dependencies]
 etcd = [
   "etcd3>=0.12"
 ]
@@ -38,12 +39,6 @@ distributed = [
   "aiohttp>=3.8"
 ]
 
-[project.scripts]
-fdc3-agent = "fdc3.desktop_agent.cli:main"
-install-git-hooks = "fdc3.desktop_agent.devtools:install_git_hooks"
-check-style = "fdc3.desktop_agent.devtools:prepush"
-
-[dependency-groups]
 dev = [
     "pytest>=9.0.2",
     "pytest-asyncio>=1.2.8",
@@ -53,6 +48,11 @@ dev = [
     "httpx>=0.28",
     "pre-commit>=4.0"
 ]
+
+[project.scripts]
+fdc3-agent = "fdc3.desktop_agent.cli:main"
+install-git-hooks = "fdc3.desktop_agent.devtools:install_git_hooks"
+check-style = "fdc3.desktop_agent.devtools:prepush"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
