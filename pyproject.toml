@@ -21,6 +21,7 @@ dependencies = [
   "pydantic>=2.7",
   "strawberry-graphql>=0.250",
   "aiosqlite>=0.20",
+  "jinja2>=3.0",
 ]
 
 [project.optional-dependencies]
