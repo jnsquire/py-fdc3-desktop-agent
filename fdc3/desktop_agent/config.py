@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+import socket
 from typing import TYPE_CHECKING, List, Optional
 
 if TYPE_CHECKING:
@@ -84,6 +85,36 @@ class DesktopAgentConfig:
     # Agent WebSocket URL (used by launched apps to connect back)
     # If None, computed from host/port
     agent_url: Optional[str] = None
+
+    # Desktop Agent Bridging (experimental in FDC3 2.1+)
+    bridge_enabled: bool = field(
+        default_factory=lambda: os.getenv("FDC3_BRIDGE_ENABLED", "false").lower()
+        in ("true", "1", "yes")
+    )
+    bridge_host: str = field(
+        default_factory=lambda: os.getenv("FDC3_BRIDGE_HOST", "127.0.0.1")
+    )
+    bridge_port_start: int = field(
+        default_factory=lambda: int(os.getenv("FDC3_BRIDGE_PORT_START", "4475"))
+    )
+    bridge_port_end: int = field(
+        default_factory=lambda: int(os.getenv("FDC3_BRIDGE_PORT_END", "4575"))
+    )
+    bridge_requested_name: str = field(
+        default_factory=lambda: os.getenv(
+            "FDC3_BRIDGE_REQUESTED_NAME", socket.gethostname()
+        )
+    )
+    bridge_connect_retry_seconds: float = field(
+        default_factory=lambda: float(
+            os.getenv("FDC3_BRIDGE_CONNECT_RETRY_SECONDS", "5")
+        )
+    )
+    bridge_request_timeout_seconds: float = field(
+        default_factory=lambda: float(
+            os.getenv("FDC3_BRIDGE_REQUEST_TIMEOUT_SECONDS", "3")
+        )
+    )
 
     @property
     def computed_agent_url(self) -> str:

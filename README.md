@@ -38,6 +38,16 @@ The agent can be configured via environment variables:
 - `FDC3_LOG_LEVEL`: Logging level (default: `INFO`)
 - `FDC3_ALLOWED_ORIGINS`: Comma-separated list of allowed origins for WebSocket connections
 
+Desktop Agent Bridging (experimental) is also configurable via environment variables:
+
+- `FDC3_BRIDGE_ENABLED`: Enable bridging (default: `false`)
+- `FDC3_BRIDGE_HOST`: Bridge host (default: `127.0.0.1`)
+- `FDC3_BRIDGE_PORT_START`: Start of bridge discovery port range (default: `4475`)
+- `FDC3_BRIDGE_PORT_END`: End of bridge discovery port range (default: `4575`)
+- `FDC3_BRIDGE_REQUESTED_NAME`: Preferred Desktop Agent name to request from the bridge (default: machine hostname)
+- `FDC3_BRIDGE_CONNECT_RETRY_SECONDS`: Seconds to wait before retrying discovery after exhausting the port range (default: `5`)
+- `FDC3_BRIDGE_REQUEST_TIMEOUT_SECONDS`: Per-request timeout when awaiting a bridge response (default: `3`)
+
 ### Origin Whitelist
 
 By default, the agent allows connections from localhost origins:
@@ -123,6 +133,44 @@ pip install .[distributed]
   - `etcd` and `consul` adapters are prototypes; for production use validate adapter stability and
     run the corresponding backend (etcd or Consul) in your environment.
 
+## Desktop Agent Bridging (experimental)
+
+This agent supports the experimental FDC3 Desktop Agent Bridging protocols (BCP/BMP) to enable
+cross-desktop-agent discovery and request forwarding via a Desktop Agent Bridge.
+
+- When enabled, the agent will attempt to connect to a bridge at `ws://<FDC3_BRIDGE_HOST>:<port>`
+    by scanning ports in the configured range (`FDC3_BRIDGE_PORT_START`..`FDC3_BRIDGE_PORT_END`).
+- On connect it performs the BCP handshake (hello -> handshake -> connectedAgentsUpdate).
+- Once connected, the agent can:
+    - forward `broadcast` messages to the bridge (best-effort; still delivered locally);
+    - forward `raiseIntent` to a remote desktop agent when the request target includes `desktopAgent`.
+- The agent can also accept requests forwarded from the bridge and service them locally.
+
+Notes/limitations:
+
+- Bridging is best-effort: the agent still starts if the bridge is down; it will retry until it connects.
+- `channelsState` is currently reported as an empty map during handshake (no channel state sync yet).
+
+### Enabling bridging
+
+On macOS/Linux:
+
+```bash
+export FDC3_BRIDGE_ENABLED=true
+export FDC3_BRIDGE_HOST=127.0.0.1
+export FDC3_BRIDGE_PORT_START=4475
+export FDC3_BRIDGE_PORT_END=4575
+```
+
+On Windows PowerShell:
+
+```powershell
+$env:FDC3_BRIDGE_ENABLED = "true"
+$env:FDC3_BRIDGE_HOST = "127.0.0.1"
+$env:FDC3_BRIDGE_PORT_START = "4475"
+$env:FDC3_BRIDGE_PORT_END = "4575"
+```
+
 ## Embedding API
 
 The FDC3 Desktop Agent can be embedded in other Python applications using the `create_app()` factory function. This allows you to:
@@ -185,6 +233,13 @@ main_app.mount("/fdc3", create_app(fdc3_config))
 | `log_level`             | `str`                       | `"INFO"`             | Logging level (also from `FDC3_LOG_LEVEL` env var)                                      |
 | `allowed_origins`       | `List[str]`                 | `["localhost", ...]` | Origins allowed to connect via WebSocket                                                |
 | `agent_url`             | `str`                       | `None`               | WebSocket URL for launched apps; if `None`, computed from host/port                     |
+| `bridge_enabled`         | `bool`                      | `False`              | Enable Desktop Agent Bridging (also from `FDC3_BRIDGE_ENABLED`)                         |
+| `bridge_host`            | `str`                       | `"127.0.0.1"`        | Bridge host (also from `FDC3_BRIDGE_HOST`)                                              |
+| `bridge_port_start`      | `int`                       | `4475`               | Bridge discovery start port (also from `FDC3_BRIDGE_PORT_START`)                        |
+| `bridge_port_end`        | `int`                       | `4575`               | Bridge discovery end port (also from `FDC3_BRIDGE_PORT_END`)                            |
+| `bridge_requested_name`  | `str`                       | hostname             | Requested Desktop Agent name (also from `FDC3_BRIDGE_REQUESTED_NAME`)                   |
+| `bridge_connect_retry_seconds` | `float`              | `5`                  | Retry delay after discovery failure (also from `FDC3_BRIDGE_CONNECT_RETRY_SECONDS`)     |
+| `bridge_request_timeout_seconds` | `float`            | `3`                  | Request timeout (also from `FDC3_BRIDGE_REQUEST_TIMEOUT_SECONDS`)                       |
 | `storage`               | `Storage`                   | `None`               | Custom storage implementation; if `None`, uses `SqliteStorage`                          |
 | `launcher`              | `ProcessLauncher`           | `None`               | Custom process launcher; if `None`, uses `SubprocessLauncher`                           |
 | `distributed_adapter`   | `DistributedLogAdapter`     | `None`               | Custom distributed adapter; if `None`, uses factory based on env var                    |

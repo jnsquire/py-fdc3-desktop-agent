@@ -25,7 +25,7 @@ def _websocket() -> Any:
 
 def _handler() -> tuple[DACPHandler, Any, Any, Any]:
     storage: Any = SimpleNamespace(
-        apps=SimpleNamespace(get_app_metadata=AsyncMock()),
+        apps=SimpleNamespace(get_app_metadata=AsyncMock(), list_apps=AsyncMock()),
         launch_configs=SimpleNamespace(get_launch_config=AsyncMock()),
     )
     launcher: Any = SimpleNamespace(launch_app=AsyncMock())
@@ -116,8 +116,27 @@ class TestDACPHandlerParsingAndDispatch:
                 handler, "_handle_intent_listener_unsubscribe", new_callable=AsyncMock
             ) as h_ilu,
             patch.object(
-                handler, "_handle_raise_intent", new_callable=AsyncMock
-            ) as h_raise,
+                handler, "_handle_get_user_channels", new_callable=AsyncMock
+            ) as h_gucs,
+            patch.object(
+                handler, "_handle_get_current_channel", new_callable=AsyncMock
+            ) as h_gcc,
+            patch.object(
+                handler, "_handle_join_user_channel", new_callable=AsyncMock
+            ) as h_juc,
+            patch.object(
+                handler, "_handle_leave_current_channel", new_callable=AsyncMock
+            ) as h_lcc,
+            patch.object(
+                handler, "_handle_find_intent", new_callable=AsyncMock
+            ) as h_fi,
+            patch.object(
+                handler, "_handle_find_intents_by_context", new_callable=AsyncMock
+            ) as h_fibc,
+            patch.object(
+                handler, "_handle_find_instances", new_callable=AsyncMock
+            ) as h_finst,
+            patch.object(handler, "_handle_raise_intent", new_callable=AsyncMock),
             patch.object(
                 handler, "_handle_raise_intent_for_context", new_callable=AsyncMock
             ) as h_rifc,
@@ -135,7 +154,7 @@ class TestDACPHandlerParsingAndDispatch:
             ) as h_hb,
             patch.object(
                 handler, "_handle_external_intent_result", new_callable=AsyncMock
-            ) as h_eir,
+            ),
         ):
             # open
             await handler.handle_message(
@@ -176,6 +195,90 @@ class TestDACPHandlerParsingAndDispatch:
                     "type": "addIntentListener",
                     "payload": {"intent": "ViewChart"},
                     "meta": {"requestUuid": "r4"},
+                },
+                session_id,
+                sessions,
+                ws,
+            )
+
+            # findIntent
+            await handler.handle_message(
+                {
+                    "type": "findIntent",
+                    "payload": {"intent": "ViewChart"},
+                    "meta": {"requestUuid": "r4b"},
+                },
+                session_id,
+                sessions,
+                ws,
+            )
+
+            # findIntentsByContext
+            await handler.handle_message(
+                {
+                    "type": "findIntentsByContext",
+                    "payload": {"context": {"type": "fdc3.instrument"}},
+                    "meta": {"requestUuid": "r4c"},
+                },
+                session_id,
+                sessions,
+                ws,
+            )
+
+            # findInstances
+            await handler.handle_message(
+                {
+                    "type": "findInstances",
+                    "payload": {"app": {"appId": "app-1"}},
+                    "meta": {"requestUuid": "r4d"},
+                },
+                session_id,
+                sessions,
+                ws,
+            )
+
+            # getUserChannels
+            await handler.handle_message(
+                {
+                    "type": "getUserChannels",
+                    "payload": {},
+                    "meta": {"requestUuid": "r4e"},
+                },
+                session_id,
+                sessions,
+                ws,
+            )
+
+            # getCurrentChannel
+            await handler.handle_message(
+                {
+                    "type": "getCurrentChannel",
+                    "payload": {},
+                    "meta": {"requestUuid": "r4f"},
+                },
+                session_id,
+                sessions,
+                ws,
+            )
+
+            # joinUserChannel
+            await handler.handle_message(
+                {
+                    "type": "joinUserChannel",
+                    "payload": {"channelId": "user:red"},
+                    "meta": {"requestUuid": "r4g"},
+                },
+                session_id,
+                sessions,
+                ws,
+            )
+
+            # leaveCurrentChannel
+            await handler.handle_message(
+                {
+                    "type": "leaveCurrentChannel",
+                    "payload": {},
+                    "meta": {"requestUuid": "r4h"},
                 },
                 session_id,
                 sessions,
@@ -274,14 +377,334 @@ class TestDACPHandlerParsingAndDispatch:
         assert h_broadcast.await_count == 1
         assert h_acl.await_count == 1
         assert h_ail.await_count == 1
+        assert h_fi.await_count == 1
+        assert h_finst.await_count == 1
+        assert h_fibc.await_count == 1
+        assert h_gucs.await_count == 1
+        assert h_gcc.await_count == 1
+        assert h_juc.await_count == 1
+        assert h_lcc.await_count == 1
         assert h_ilu.await_count == 1
         assert h_rifc.await_count == 1
         assert h_irr.await_count == 1
         assert h_rirr.await_count == 1
         assert h_clu.await_count == 1
         assert h_hb.await_count == 1
-        assert h_raise.await_count == 1
-        assert h_eir.await_count == 1
+
+
+class TestDACPHandlerUserChannels:
+    @pytest.mark.asyncio
+    async def test_get_user_channels_creates_defaults(self):
+        handler, _, _, _ = _handler()
+        ws = _websocket()
+
+        from fdc3.desktop_agent.core import core_services
+
+        core_services.channel_manager.channels.clear()
+        core_services.channel_manager.instance_channels.clear()
+
+        await handler.handle_message(
+            {
+                "type": "getUserChannels",
+                "payload": {},
+                "meta": {"requestUuid": "r1"},
+            },
+            session_id="s1",
+            wcp_sessions={"s1": {"identity": {"instanceUuid": "i1"}}},
+            websocket=ws,
+        )
+
+        ws.send_text.assert_called_once()
+        payload = json.loads(ws.send_text.call_args.args[0])
+        assert payload["type"] == "getUserChannelsResponse"
+        assert payload["meta"]["requestUuid"] == "r1"
+        assert isinstance(payload["payload"]["channels"], list)
+        assert any(c["id"] == "user:red" for c in payload["payload"]["channels"])
+
+    @pytest.mark.asyncio
+    async def test_join_get_current_leave_roundtrip(self):
+        handler, _, _, _ = _handler()
+        ws = _websocket()
+        session_id, sessions = _wcp_sessions("inst-1")
+
+        from fdc3.desktop_agent.core import core_services
+
+        core_services.channel_manager.channels.clear()
+        core_services.channel_manager.instance_channels.clear()
+
+        # Join by unprefixed id should map to user:<id>
+        await handler.handle_message(
+            {
+                "type": "joinUserChannel",
+                "payload": {"channelId": "red"},
+                "meta": {"requestUuid": "r2"},
+            },
+            session_id,
+            sessions,
+            ws,
+        )
+        payload = json.loads(ws.send_text.call_args.args[0])
+        assert payload["type"] == "joinUserChannelResponse"
+        assert payload["payload"]["channel"]["id"] == "user:red"
+
+        ws.send_text.reset_mock()
+        await handler.handle_message(
+            {
+                "type": "getCurrentChannel",
+                "payload": {},
+                "meta": {"requestUuid": "r3"},
+            },
+            session_id,
+            sessions,
+            ws,
+        )
+        payload = json.loads(ws.send_text.call_args.args[0])
+        assert payload["type"] == "getCurrentChannelResponse"
+        assert payload["payload"]["channel"]["id"] == "user:red"
+
+        ws.send_text.reset_mock()
+        await handler.handle_message(
+            {
+                "type": "leaveCurrentChannel",
+                "payload": {},
+                "meta": {"requestUuid": "r4"},
+            },
+            session_id,
+            sessions,
+            ws,
+        )
+        payload = json.loads(ws.send_text.call_args.args[0])
+        assert payload["type"] == "leaveCurrentChannelResponse"
+
+        ws.send_text.reset_mock()
+        await handler.handle_message(
+            {
+                "type": "getCurrentChannel",
+                "payload": {},
+                "meta": {"requestUuid": "r5"},
+            },
+            session_id,
+            sessions,
+            ws,
+        )
+        payload = json.loads(ws.send_text.call_args.args[0])
+        assert payload["payload"]["channel"] is None
+
+    @pytest.mark.asyncio
+    async def test_join_user_channel_unknown_errors(self):
+        handler, _, _, _ = _handler()
+        ws = _websocket()
+        session_id, sessions = _wcp_sessions("inst-1")
+
+        from fdc3.desktop_agent.core import core_services
+
+        core_services.channel_manager.channels.clear()
+        core_services.channel_manager.instance_channels.clear()
+
+        # Ensure defaults exist then attempt a missing channel.
+        await handler.handle_message(
+            {
+                "type": "getUserChannels",
+                "payload": {},
+                "meta": {"requestUuid": "seed"},
+            },
+            session_id,
+            sessions,
+            ws,
+        )
+        ws.send_text.reset_mock()
+
+        await handler.handle_message(
+            {
+                "type": "joinUserChannel",
+                "payload": {"channelId": "user:not-a-channel"},
+                "meta": {"requestUuid": "r6"},
+            },
+            session_id,
+            sessions,
+            ws,
+        )
+        payload = json.loads(ws.send_text.call_args.args[0])
+        assert payload["type"] == "joinUserChannelResponse"
+        assert payload["payload"]["error"] == "NoChannelFound"
+
+
+class TestDACPHandlerFindInstances:
+    @pytest.mark.asyncio
+    async def test_find_instances_empty(self):
+        handler, _, _, _ = _handler()
+        ws = _websocket()
+
+        from fdc3.models.dacp.dacp import FindInstancesRequest
+
+        req = FindInstancesRequest.model_validate(
+            {
+                "type": "findInstances",
+                "payload": {"app": {"appId": "app-1"}},
+                "meta": {"requestUuid": "req-1"},
+            }
+        )
+
+        with (
+            patch("fdc3.desktop_agent.handlers.dacp.core_services") as cs,
+            patch.object(handler, "_send_model", new_callable=AsyncMock) as send,
+        ):
+            cs.app_registry.get_instances_for_app.return_value = []
+            await handler._handle_find_instances(req, ws)
+            sent = send.call_args.args[1]
+            assert sent.type == "findInstancesResponse"
+            assert sent.payload.instances == []
+
+    @pytest.mark.asyncio
+    async def test_find_instances_filters_instance_id(self):
+        handler, _, _, _ = _handler()
+        ws = _websocket()
+
+        from fdc3.models.dacp.dacp import FindInstancesRequest
+
+        req = FindInstancesRequest.model_validate(
+            {
+                "type": "findInstances",
+                "payload": {"app": {"appId": "app-1", "instanceId": "i2"}},
+                "meta": {"requestUuid": "req-1"},
+            }
+        )
+
+        with (
+            patch("fdc3.desktop_agent.handlers.dacp.core_services") as cs,
+            patch.object(handler, "_send_model", new_callable=AsyncMock) as send,
+        ):
+            cs.app_registry.get_instances_for_app.return_value = [
+                SimpleNamespace(instance_id="i1"),
+                SimpleNamespace(instance_id="i2"),
+            ]
+            await handler._handle_find_instances(req, ws)
+            sent = send.call_args.args[1]
+            assert sent.type == "findInstancesResponse"
+            assert len(sent.payload.instances) == 1
+            assert sent.payload.instances[0].appId == "app-1"
+            assert sent.payload.instances[0].instanceId == "i2"
+
+
+class TestDACPHandlerFindIntent:
+    @pytest.mark.asyncio
+    async def test_find_intent_no_apps_found(self):
+        handler, storage, _, _ = _handler()
+        ws = _websocket()
+
+        from fdc3.models.dacp.dacp import FindIntentRequest
+
+        req = FindIntentRequest.model_validate(
+            {
+                "type": "findIntent",
+                "payload": {"intent": "ViewChart"},
+                "meta": {"requestUuid": "req-1"},
+            }
+        )
+
+        storage.apps.list_apps.return_value = []
+
+        with (
+            patch("fdc3.desktop_agent.handlers.dacp.core_services") as cs,
+            patch.object(handler, "_send_model", new_callable=AsyncMock) as send,
+        ):
+            cs.listener_store.get_intent_listeners_for_intent.return_value = []
+            await handler._handle_find_intent(req, ws)
+            sent = send.call_args.args[1]
+            assert sent.type == "findIntentResponse"
+            assert sent.payload.error == "NoAppsFound"
+
+    @pytest.mark.asyncio
+    async def test_find_intent_returns_app_intent_from_directory(self):
+        handler, storage, _, _ = _handler()
+        ws = _websocket()
+
+        from fdc3.models.dacp.dacp import FindIntentRequest
+        from fdc3.desktop_agent.storage.interfaces import AppMetadata as StoredApp
+
+        req = FindIntentRequest.model_validate(
+            {
+                "type": "findIntent",
+                "payload": {"intent": "ViewChart"},
+                "meta": {"requestUuid": "req-1"},
+            }
+        )
+
+        storage.apps.list_apps.return_value = [
+            StoredApp(app_id="app-1", name="A1", intents=["ViewChart"])
+        ]
+
+        with (
+            patch("fdc3.desktop_agent.handlers.dacp.core_services") as cs,
+            patch.object(handler, "_send_model", new_callable=AsyncMock) as send,
+        ):
+            cs.listener_store.get_intent_listeners_for_intent.return_value = []
+            await handler._handle_find_intent(req, ws)
+            sent = send.call_args.args[1]
+            assert sent.type == "findIntentResponse"
+            assert sent.payload.appIntent.intent.name == "ViewChart"
+            assert sent.payload.appIntent.apps[0].appId == "app-1"
+            assert sent.payload.appIntent.apps[0].name == "A1"
+
+
+class TestDACPHandlerFindIntentsByContext:
+    @pytest.mark.asyncio
+    async def test_find_intents_by_context_no_apps_found(self):
+        handler, storage, _, _ = _handler()
+        ws = _websocket()
+
+        from fdc3.models.dacp.dacp import FindIntentsByContextRequest
+
+        req = FindIntentsByContextRequest.model_validate(
+            {
+                "type": "findIntentsByContext",
+                "payload": {"context": {"type": "fdc3.instrument"}},
+                "meta": {"requestUuid": "req-1"},
+            }
+        )
+
+        storage.apps.list_apps.return_value = []
+
+        with (
+            patch("fdc3.desktop_agent.handlers.dacp.core_services") as cs,
+            patch.object(handler, "_send_model", new_callable=AsyncMock) as send,
+        ):
+            cs.listener_store.intent_listeners = {}
+            await handler._handle_find_intents_by_context(req, ws)
+            sent = send.call_args.args[1]
+            assert sent.type == "findIntentsByContextResponse"
+            assert sent.payload.error == "NoAppsFound"
+
+    @pytest.mark.asyncio
+    async def test_find_intents_by_context_returns_directory_intents(self):
+        handler, storage, _, _ = _handler()
+        ws = _websocket()
+
+        from fdc3.models.dacp.dacp import FindIntentsByContextRequest
+        from fdc3.desktop_agent.storage.interfaces import AppMetadata as StoredApp
+
+        req = FindIntentsByContextRequest.model_validate(
+            {
+                "type": "findIntentsByContext",
+                "payload": {"context": {"type": "fdc3.instrument"}},
+                "meta": {"requestUuid": "req-1"},
+            }
+        )
+
+        storage.apps.list_apps.return_value = [
+            StoredApp(app_id="app-1", name="A1", intents=["ViewChart", "ViewNews"])
+        ]
+
+        with (
+            patch("fdc3.desktop_agent.handlers.dacp.core_services") as cs,
+            patch.object(handler, "_send_model", new_callable=AsyncMock) as send,
+        ):
+            cs.listener_store.intent_listeners = {}
+            await handler._handle_find_intents_by_context(req, ws)
+            sent = send.call_args.args[1]
+            assert sent.type == "findIntentsByContextResponse"
+            names = sorted([ai.intent.name for ai in sent.payload.appIntents])
+            assert names == ["ViewChart", "ViewNews"]
 
 
 class TestDACPHandlerSendModel:
@@ -902,7 +1325,7 @@ class TestDACPHandlerRaiseIntent:
             assert sent.payload.error == "NoAppsFound"
 
     @pytest.mark.asyncio
-    async def test_raise_intent_for_context_not_implemented(self):
+    async def test_raise_intent_for_context_no_apps_found(self):
         handler, _, _, _ = _handler()
         ws = _websocket()
 
@@ -916,11 +1339,89 @@ class TestDACPHandlerRaiseIntent:
             }
         )
 
-        with patch.object(handler, "_send_model", new_callable=AsyncMock) as send:
+        with (
+            patch("fdc3.desktop_agent.handlers.dacp.core_services") as cs,
+            patch.object(handler, "_send_model", new_callable=AsyncMock) as send,
+        ):
+            cs.listener_store.intent_listeners = {}
             await handler._handle_raise_intent_for_context(req, ws)
             sent = send.call_args.args[1]
             assert sent.type == "raiseIntentForContextResponse"
-            assert sent.payload.error == "NotImplemented"
+            assert sent.payload.error == "NoAppsFound"
+
+    @pytest.mark.asyncio
+    async def test_raise_intent_for_context_ambiguous_intents_returns_resolver_unavailable(
+        self,
+    ):
+        handler, _, _, _ = _handler()
+        ws = _websocket()
+
+        from fdc3.models.dacp.dacp import RaiseIntentForContextRequest
+
+        req = RaiseIntentForContextRequest.model_validate(
+            {
+                "type": "raiseIntentForContext",
+                "payload": {"context": {"type": "t"}},
+                "meta": {"requestUuid": "req-1"},
+            }
+        )
+
+        with (
+            patch("fdc3.desktop_agent.handlers.dacp.core_services") as cs,
+            patch.object(handler, "_send_model", new_callable=AsyncMock) as send,
+        ):
+            cs.listener_store.intent_listeners = {
+                "l1": SimpleNamespace(intent="ViewChart"),
+                "l2": SimpleNamespace(intent="ViewNews"),
+            }
+            await handler._handle_raise_intent_for_context(req, ws)
+            sent = send.call_args.args[1]
+            assert sent.type == "raiseIntentForContextResponse"
+            assert sent.payload.error == "ResolverUnavailable"
+
+    @pytest.mark.asyncio
+    async def test_raise_intent_for_context_single_intent_resolves_and_emits_event(
+        self,
+    ):
+        handler, _, _, connection_manager = _handler()
+        ws = _websocket()
+
+        from fdc3.models.dacp.dacp import RaiseIntentForContextRequest
+        from fdc3.desktop_agent.api import IntentResolution
+        from fdc3.models.identifiers import AppIdentifier
+
+        req = RaiseIntentForContextRequest.model_validate(
+            {
+                "type": "raiseIntentForContext",
+                "payload": {"context": {"type": "t"}},
+                "meta": {
+                    "requestUuid": "req-1",
+                    "source": {"appId": "source", "instanceId": "inst"},
+                },
+            }
+        )
+
+        resolution = IntentResolution(
+            source=AppIdentifier(appId="target", instanceId="target-inst"),
+            intent="ViewChart",
+        )
+
+        with (
+            patch("fdc3.desktop_agent.handlers.dacp.core_services") as cs,
+            patch.object(handler, "_send_model", new_callable=AsyncMock) as send,
+        ):
+            cs.listener_store.intent_listeners = {
+                "l1": SimpleNamespace(intent="ViewChart")
+            }
+            cs.intent_resolver.resolve_intent.return_value = resolution
+            cs.intent_resolver.deliver_intent_event.return_value = ["t1"]
+
+            await handler._handle_raise_intent_for_context(req, ws)
+
+            sent = send.call_args.args[1]
+            assert sent.type == "raiseIntentForContextResponse"
+            assert sent.payload.intentResolution.intent == "ViewChart"
+            assert connection_manager.send_to_instance.await_count == 1
 
     @pytest.mark.asyncio
     async def test_intent_result_and_heartbeat_paths(self):

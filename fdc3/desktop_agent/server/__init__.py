@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 
 from ..api.graphql import schema, set_graphql_storage
 from fdc3.models.dacp.dacp import AgentEventMeta, AgentEvent, AgentEventPayload
-from ..core import CoreServices
+from ..core import core_services
 from ..distributed.factory import get_adapter
 from ..storage import SqliteStorage
 from ..storage.interfaces import AppMetadata
@@ -27,6 +27,9 @@ from ..handlers import (
 from ..tools import create_task_safe
 from ..config import DesktopAgentConfig
 from ..version import __version__
+from ..bridging import BridgeClient
+from ..bridging.client import BridgeConnectionSettings
+from ..bridging.router import BridgeRequestRouter
 
 logger = logging.getLogger(__name__)
 
@@ -162,7 +165,8 @@ def create_app(config: Optional[DesktopAgentConfig] = None) -> FastAPI:
     launcher = config.launcher or SubprocessLauncher(
         agent_url=config.computed_agent_url
     )
-    core_services = CoreServices()
+    # Use the global singleton core_services so handlers, GraphQL, plugins,
+    # and any background components (e.g. bridging) share the same state.
 
     # Access control
     access_control = AccessControlManager()
@@ -179,6 +183,7 @@ def create_app(config: Optional[DesktopAgentConfig] = None) -> FastAPI:
         access_control, config.allowed_origins
     )
     wcp_handler = WCPHandler(storage)
+    # bridge client is created in lifespan (needs event loop); injected into handler.
     dacp_handler = DACPHandler(storage, launcher, instance_connection_manager)
 
     # WCP session state
@@ -223,6 +228,57 @@ def create_app(config: Optional[DesktopAgentConfig] = None) -> FastAPI:
         for plugin in all_plugins:
             await core_services.register_plugin(plugin)
             logger.info(f"Registered plugin: {plugin.name}")
+
+        # Desktop Agent Bridging (experimental)
+        app.state.bridge_client = None
+        if config.bridge_enabled:
+            settings = BridgeConnectionSettings(
+                host=config.bridge_host,
+                port_start=config.bridge_port_start,
+                port_end=config.bridge_port_end,
+                requested_name=config.bridge_requested_name,
+                retry_seconds=config.bridge_connect_retry_seconds,
+                request_timeout_seconds=config.bridge_request_timeout_seconds,
+            )
+
+            def _implementation_metadata() -> dict:
+                # Minimal ImplementationMetadata for bridging handshake.
+                # See FDC3 agent-bridging overview, BCP step 3.
+                return {
+                    "fdc3Version": "2.2",
+                    "provider": "py-fdc3-desktop-agent",
+                    "providerVersion": __version__,
+                    "optionalFeatures": {
+                        "OriginatingAppMetadata": True,
+                        "UserChannelMembershipAPIs": True,
+                        "DesktopAgentBridging": True,
+                    },
+                }
+
+            def _channels_state() -> dict:
+                # This implementation does not currently persist full channel state.
+                # Return an empty state map (bridge will merge from other agents).
+                return {}
+
+            router = BridgeRequestRouter(
+                storage=storage,
+                launcher=launcher,
+                connection_manager=instance_connection_manager,
+                core_services=core_services,
+                local_desktop_agent_name=None,
+            )
+
+            bridge_client = BridgeClient(
+                settings,
+                implementation_metadata_factory=_implementation_metadata,
+                channels_state_factory=_channels_state,
+                request_handler=router.handle,
+            )
+            await bridge_client.start()
+            app.state.bridge_client = bridge_client
+
+            # Inject into handler so outbound calls can be bridged.
+            dacp_handler.bridge_client = bridge_client
 
         # Initialize distributed adapter
         adapter = config.distributed_adapter
@@ -282,6 +338,13 @@ def create_app(config: Optional[DesktopAgentConfig] = None) -> FastAPI:
             yield
         finally:
             # Shutdown
+            try:
+                bridge_client = getattr(app.state, "bridge_client", None)
+                if bridge_client is not None:
+                    await bridge_client.stop()
+            except Exception:
+                logger.exception("Error stopping bridge client")
+
             adapter = getattr(app.state, "distributed_adapter", None)
             sub_id = getattr(app.state, "distributed_subscription_id", None)
             if adapter:

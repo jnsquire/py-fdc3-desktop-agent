@@ -129,10 +129,10 @@ class _DistributedAdapterStub:
 async def test_server_lifespan_registers_plugins_and_handles_get_adapter_error(
     monkeypatch,
 ):
-    # Patch CoreServices for deterministic plugin tracking
+    # Patch core_services for deterministic plugin tracking
     from fdc3.desktop_agent import server as server_mod
 
-    monkeypatch.setattr(server_mod, "CoreServices", _CoreServicesStub)
+    monkeypatch.setattr(server_mod, "core_services", _CoreServicesStub())
 
     class AgentClientManagerBoom:
         def __init__(self):
@@ -191,7 +191,7 @@ async def test_server_lifespan_registers_plugins_and_handles_get_adapter_error(
 async def test_server_lifespan_distributed_adapter_event_handling(monkeypatch):
     from fdc3.desktop_agent import server as server_mod
 
-    monkeypatch.setattr(server_mod, "CoreServices", _CoreServicesStub)
+    monkeypatch.setattr(server_mod, "core_services", _CoreServicesStub())
 
     adapter = _DistributedAdapterStub()
     storage = _StorageStub()
@@ -252,7 +252,7 @@ async def test_server_lifespan_distributed_adapter_start_failure_sets_state_none
 ):
     from fdc3.desktop_agent import server as server_mod
 
-    monkeypatch.setattr(server_mod, "CoreServices", _CoreServicesStub)
+    monkeypatch.setattr(server_mod, "core_services", _CoreServicesStub())
 
     adapter = _DistributedAdapterStub(fail_start=True)
     storage = _StorageStub()
