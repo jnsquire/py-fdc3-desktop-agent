@@ -403,12 +403,16 @@ class Subscription:
         else:
             # If channel manager doesn't support subscriptions yet, yield a placeholder
             logging.warning("Channel manager does not support event subscriptions")
+            try:
+                ts = asyncio.get_running_loop().time()
+            except RuntimeError:
+                ts = asyncio.get_event_loop().time()
             yield ChannelEventType(
                 event_type="system",
                 channel_id="system",
                 instance_uuid=None,
                 context='{"message": "Channel event subscriptions not yet implemented"}',
-                timestamp=str(asyncio.get_event_loop().time()),
+                timestamp=str(ts),
             )
 
 

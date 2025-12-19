@@ -148,7 +148,6 @@ class TestSubprocessLauncher:
         assert terminated is True
 
         # Check it's not running anymore
-        await asyncio.sleep(0.1)  # Give it time to terminate
         assert await launcher.is_app_running(result.instance_uuid) is False
 
     @pytest.mark.asyncio

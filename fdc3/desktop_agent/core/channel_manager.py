@@ -1,9 +1,14 @@
 from typing import Dict, List, Optional, Callable, Any
+import inspect
 import json
 import asyncio
 from datetime import datetime
+import logging
 from ..distributed.adapter import DistributedLogAdapter
 from ..api import DisplayMetadata
+
+
+logger = logging.getLogger(__name__)
 
 
 class ChannelInstance:
@@ -152,26 +157,47 @@ class ChannelManager:
             channel_filter = subscription["channel_filter"]
             if channel_filter is None or channel_filter == channel_id:
                 try:
-                    subscription["callback"](event_data)
-                except Exception as e:
-                    # Log error but don't let it break the event emission
-                    print(f"Error in channel event callback: {e}")
+                    result = subscription["callback"](event_data)
+                    if inspect.isawaitable(result):
+                        try:
+                            loop = asyncio.get_running_loop()
+                            loop.create_task(result)
+                        except RuntimeError:
+                            # No running loop in this thread; try thread-safe scheduling
+                            try:
+                                asyncio.get_event_loop().call_soon_threadsafe(
+                                    asyncio.create_task, result
+                                )
+                            except Exception:
+                                if inspect.iscoroutine(result):
+                                    result.close()
+                                logger.exception(
+                                    "Failed to schedule async channel callback"
+                                )
+                except Exception:
+                    logger.exception("Error in channel event callback")
 
         # Publish to distributed adapter for cross-worker delivery unless this event
         # originated from the distributed bus (avoid loops).
         if not remote and self.distributed_adapter is not None:
             try:
-                asyncio.create_task(self._publish_event(event_data))
+                from ..tools import create_task_safe
+
+                coro = self._publish_event(event_data)
+                try:
+                    create_task_safe(coro)
+                except Exception:
+                    coro.close()
+                    raise
             except Exception:
                 # Best-effort: do not break local emission if publishing fails
-                pass
+                logger.exception("Failed to schedule distributed publish task")
 
     async def _publish_event(self, event_data: Dict[str, Any]):
         try:
             adapter = self.distributed_adapter
-            if adapter is None:
-                return
-            await adapter.publish("channel_events", event_data)
+            if adapter:
+                await adapter.publish("channel_events", event_data)
         except Exception:
             # Swallow errors - publishing is best-effort
             return

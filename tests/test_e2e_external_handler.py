@@ -4,6 +4,7 @@ import asyncio
 import json
 import warnings
 import pytest
+import socket
 from uuid import uuid4
 from datetime import datetime
 
@@ -28,6 +29,13 @@ warnings.filterwarnings(
 pytest_plugins = ["pytest_asyncio"]
 
 
+def _get_free_port(host: str = "127.0.0.1") -> int:
+    """Get an ephemeral free TCP port from the OS."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind((host, 0))
+        return int(sock.getsockname()[1])
+
+
 @pytest.mark.asyncio
 async def test_external_handler_registration_e2e():
     """End-to-end test: connect via WebSocket, do WCP handshake, register handler."""
@@ -37,18 +45,33 @@ async def test_external_handler_registration_e2e():
     import uvicorn
     import threading
 
+    started = threading.Event()
+
     # Create app with permissive config
+    port = _get_free_port("127.0.0.1")
     config = DesktopAgentConfig(
         host="127.0.0.1",
-        port=18765,
+        port=port,
         db_path=":memory:",
         allowed_origins=["*"],
     )
     app = create_app(config)
 
+    # Wrap the ASGI app so we can signal readiness from the lifespan startup.
+    async def app_with_start_signal(scope, receive, send):
+        if scope["type"] == "lifespan":
+            async def send_wrapper(message):
+                if message.get("type") == "lifespan.startup.complete":
+                    started.set()
+                await send(message)
+
+            return await app(scope, receive, send_wrapper)
+
+        return await app(scope, receive, send)
+
     # Run server in background thread
     server_config = uvicorn.Config(
-        app, host="127.0.0.1", port=18765, log_level="warning"
+        app_with_start_signal, host="127.0.0.1", port=port, log_level="warning"
     )
     server = uvicorn.Server(server_config)
 
@@ -58,12 +81,13 @@ async def test_external_handler_registration_e2e():
     thread = threading.Thread(target=run_server, daemon=True)
     thread.start()
 
-    # Wait for server to start
-    await asyncio.sleep(1.0)
+    # Wait for server startup without polling sleeps.
+    if not await asyncio.to_thread(started.wait, 2.0):
+        raise RuntimeError("Server did not signal startup in time")
 
     try:
         # Connect WebSocket client
-        async with connect("ws://127.0.0.1:18765/ws") as ws:
+        async with connect(f"ws://127.0.0.1:{port}/ws") as ws:
             connection_uuid = str(uuid4())
             instance_uuid = str(uuid4())
 
@@ -158,7 +182,8 @@ async def test_external_handler_registration_e2e():
 
     finally:
         server.should_exit = True
-        await asyncio.sleep(0.5)
+        # Avoid fixed sleeps: wait briefly for server thread to exit.
+        await asyncio.to_thread(thread.join, 1.0)
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ Note: This is a lightweight prototype and not optimized for heavy workloads.
 from __future__ import annotations
 
 import asyncio
+import threading
 import json
 import uuid
 from typing import Any, Callable, Dict, Optional
@@ -33,11 +34,17 @@ class ConsulAdapter(DistributedLogAdapter):
         self.base = f"http://{host}:{port}/v1/kv/{prefix.rstrip('/')}"
         self._session: Optional[aiohttp.ClientSession] = None
         self._watch_tasks: Dict[str, asyncio.Task] = {}
+        self._watch_tasks_lock = threading.Lock()
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._subscription_counter = 0
 
     async def start(self) -> None:
         if self._session is None:
             self._session = aiohttp.ClientSession()
+        try:
+            self._loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._loop = None
 
     async def stop(self) -> None:
         for task in list(self._watch_tasks.values()):
@@ -88,7 +95,20 @@ class ConsulAdapter(DistributedLogAdapter):
                                 except Exception:
                                     data = {"raw": item}
                                 try:
-                                    callback(data)
+                                    # schedule callback on the captured loop to avoid
+                                    # blocking the watch coroutine and to provide a
+                                    # consistent execution context
+                                    target_loop = self._loop
+                                    if target_loop is None:
+                                        try:
+                                            target_loop = asyncio.get_running_loop()
+                                        except RuntimeError:
+                                            target_loop = None
+                                    if target_loop is not None:
+                                        target_loop.call_soon(callback, data)
+                                    else:
+                                        # fallback: call directly
+                                        callback(data)
                                 except Exception:
                                     pass
                         else:
@@ -98,11 +118,15 @@ class ConsulAdapter(DistributedLogAdapter):
                 except Exception:
                     await asyncio.sleep(1)
 
-        task = asyncio.create_task(_watch_loop())
-        self._watch_tasks[sub_id] = task
+        from ..tools import create_task_safe
+
+        task = create_task_safe(_watch_loop())
+        with self._watch_tasks_lock:
+            self._watch_tasks[sub_id] = task
         return sub_id
 
     async def unsubscribe(self, subscription_id: str) -> None:
-        task = self._watch_tasks.pop(subscription_id, None)
+        with self._watch_tasks_lock:
+            task = self._watch_tasks.pop(subscription_id, None)
         if task:
             task.cancel()

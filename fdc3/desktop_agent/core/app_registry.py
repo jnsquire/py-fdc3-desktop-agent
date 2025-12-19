@@ -29,7 +29,7 @@ class AppRegistry:
         instance = AppInstance(app_id, instance_id, instance_uuid)
         instance.connected = False
         self.instances[instance_uuid] = instance
-        self._connection_events[instance_uuid] = asyncio.Event()
+        self._ensure_connection_event(instance_uuid)
         return instance
 
     def register_instance(
@@ -40,19 +40,24 @@ class AppRegistry:
         if instance:
             # Update existing pending instance
             instance.connected = True
-            # Set the connection event
-            if instance_uuid in self._connection_events:
-                self._connection_events[instance_uuid].set()
         else:
             # Create new instance
             instance = AppInstance(app_id, instance_id, instance_uuid)
             instance.connected = True
             self.instances[instance_uuid] = instance
-            # For new connected instances, set event immediately
-            if instance_uuid not in self._connection_events:
-                self._connection_events[instance_uuid] = asyncio.Event()
-            self._connection_events[instance_uuid].set()
+
+        self._set_connection_event(instance_uuid)
         return instance
+
+    def _ensure_connection_event(self, instance_uuid: str) -> asyncio.Event:
+        """Ensure a connection event exists for an instance and return it."""
+        if instance_uuid not in self._connection_events:
+            self._connection_events[instance_uuid] = asyncio.Event()
+        return self._connection_events[instance_uuid]
+
+    def _set_connection_event(self, instance_uuid: str):
+        """Set the connection event for an instance, creating it if it doesn't exist."""
+        self._ensure_connection_event(instance_uuid).set()
 
     def get_instance(self, instance_uuid: str) -> Optional[AppInstance]:
         return self.instances.get(instance_uuid)

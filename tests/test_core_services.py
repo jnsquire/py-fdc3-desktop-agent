@@ -76,7 +76,7 @@ class TestAppRegistry:
         assert pending.connected is False
 
         # Start waiting for connection (should timeout since we don't connect it)
-        connected = await registry.wait_for_instance_connection("uuid1", timeout=0.1)
+        connected = await registry.wait_for_instance_connection("uuid1", timeout=0.01)
         assert connected is False
 
         # Now register as connected

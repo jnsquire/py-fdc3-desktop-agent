@@ -185,13 +185,10 @@ class WCPHandler:
                 runtime_info = {}
 
             # Merge runtime info into implementation metadata
-            try:
-                if impl_meta and isinstance(impl_meta, dict):
-                    impl_meta.update(runtime_info)
-                else:
-                    impl_meta = runtime_info
-            except Exception:
-                pass
+            if impl_meta:
+                impl_meta.update(runtime_info)
+            else:
+                impl_meta = runtime_info
 
             connection_attempt = getattr(
                 getattr(wcp4, "meta", None), "connectionAttemptUuid", None

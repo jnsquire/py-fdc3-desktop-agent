@@ -8,7 +8,7 @@ This connects, performs WCP handshake, registers a handler for a test intent,
 and replies with a simple payload.
 """
 
-from fdc3.client.client import ForwardedIntentModel
+from fdc3.models.dacp import ForwardedIntentMessage
 
 import argparse
 import asyncio
@@ -24,18 +24,19 @@ async def main(agent_url: str, handler_id: str):
     # Create client with handler_id for WCP self-registration
     async with FDC3Client(agent_url, handler_id=handler_id) as client:
 
-        async def on_intent(request: ForwardedIntentModel):
+        async def on_intent(request: ForwardedIntentMessage):
             # `request` is a pydantic model when received from the agent.
-            intent = request.payload.intent
-            req_id = request.payload.request_uuid
+            payload = request.payload
+            intent = payload.intent
+            req_id = payload.request_uuid
             logger.info(f"Received intent: {intent} id={req_id}")
             # Simple handling: echo the context back with handler info
             await client.send_intent_result(
-                request.payload.request_uuid,
+                payload.request_uuid,
                 result={
                     "handledBy": handler_id,
-                    "intent": request.payload.intent,
-                    "context": request.payload.context,
+                    "intent": payload.intent,
+                    "context": payload.context,
                 },
             )
 

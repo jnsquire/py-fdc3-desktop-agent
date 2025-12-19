@@ -5,4 +5,4 @@ and client libraries under the `fdc3.desktop_agent` and `fdc3.client`
 namespaces. It is the canonical import location for this repository.
 """
 
-__all__ = ["desktop_agent", "client"]
+__all__ = ["desktop_agent", "client", "models"]

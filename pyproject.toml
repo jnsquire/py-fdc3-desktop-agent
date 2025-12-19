@@ -40,8 +40,8 @@ distributed = [
 
 [project.scripts]
 fdc3-agent = "fdc3.desktop_agent.cli:main"
-install-git-hooks = "fdc3.desktop_agent.tools:install_git_hooks"
-check-style = "fdc3.desktop_agent.tools:prepush"
+install-git-hooks = "fdc3.desktop_agent.devtools:install_git_hooks"
+check-style = "fdc3.desktop_agent.devtools:prepush"
 
 [dependency-groups]
 dev = [

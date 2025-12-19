@@ -395,8 +395,10 @@ class DACPHandler:
             return
 
         # Not a system intent or plugin, try normal resolution
-        resolution = core_services.intent_resolver.resolve_intent(
-            request.payload.intent, request.payload.context, request.payload.target
+        resolution: IntentResolution | None = (
+            core_services.intent_resolver.resolve_intent(
+                request.payload.intent, request.payload.context, request.payload.target
+            )
         )
 
         if resolution:
@@ -701,7 +703,7 @@ class DACPHandler:
                 appId=f"external:{handler.handler_id}",
                 instanceId=None,
                 desktopAgent=None,
-            ).model_dump(),
+            ),
             intent=request.payload.intent,
         )
         return RaiseIntentResponse(

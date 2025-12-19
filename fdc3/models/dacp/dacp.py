@@ -20,7 +20,7 @@ from fdc3.models.primitives import (
 
 
 class AppRequestMeta(BaseModel):
-    requestUuid: RequestUuid
+    requestUuid: RequestUuid = Field(default_factory=RequestUuid)
     timestamp: Timestamp = Field(default_factory=Timestamp)
     source: Optional["AppIdentifier"] = None
 
@@ -28,11 +28,11 @@ class AppRequestMeta(BaseModel):
 class AppRequest(BaseModel):
     type: str
     payload: dict  # The specific payload depends on the type
-    meta: AppRequestMeta
+    meta: AppRequestMeta = Field(default_factory=AppRequestMeta)
 
 
 class AgentResponseMeta(BaseModel):
-    requestUuid: RequestUuid
+    requestUuid: RequestUuid = Field(default_factory=RequestUuid)
     responseUuid: ResponseUuid = Field(default_factory=ResponseUuid)
     timestamp: Timestamp = Field(default_factory=Timestamp)
 
@@ -50,7 +50,7 @@ class AgentResponseMeta(BaseModel):
 class AgentResponse(BaseModel):
     type: str
     payload: Union[dict, "ErrorResponsePayload"]  # Or specific error payload
-    meta: AgentResponseMeta
+    meta: AgentResponseMeta = Field(default_factory=AgentResponseMeta)
 
 
 class ErrorResponsePayload(BaseModel):
@@ -70,7 +70,7 @@ class AgentEventPayload(BaseModel):
 class AgentEvent(BaseModel):
     type: str
     payload: AgentEventPayload
-    meta: AgentEventMeta
+    meta: AgentEventMeta = Field(default_factory=AgentEventMeta)
 
 
 # Heartbeat
@@ -91,7 +91,7 @@ class HeartbeatAcknowledgmentRequestPayload(BaseModel):
 class HeartbeatAcknowledgmentRequest(BaseModel):
     type: Literal["heartbeatAcknowledgmentRequest"]
     payload: HeartbeatAcknowledgmentRequestPayload
-    meta: AppRequestMeta
+    meta: AppRequestMeta = Field(default_factory=AppRequestMeta)
 
 
 # Now, specific request/response types for the key messages
@@ -106,7 +106,7 @@ class OpenRequestPayload(BaseModel):
 class OpenRequest(BaseModel):
     type: Literal["open"]
     payload: OpenRequestPayload
-    meta: AppRequestMeta
+    meta: AppRequestMeta = Field(default_factory=AppRequestMeta)
 
 
 class OpenResponsePayload(BaseModel):
@@ -116,7 +116,7 @@ class OpenResponsePayload(BaseModel):
 class OpenResponse(BaseModel):
     type: Literal["openResponse"]
     payload: OpenResponsePayload
-    meta: AgentResponseMeta
+    meta: AgentResponseMeta = Field(default_factory=AgentResponseMeta)
 
 
 # broadcast
@@ -127,7 +127,7 @@ class BroadcastRequestPayload(BaseModel):
 class BroadcastRequest(BaseModel):
     type: Literal["broadcast"]
     payload: BroadcastRequestPayload
-    meta: AppRequestMeta
+    meta: AppRequestMeta = Field(default_factory=AppRequestMeta)
 
 
 class BroadcastEventPayload(BaseModel):
@@ -137,7 +137,7 @@ class BroadcastEventPayload(BaseModel):
 class BroadcastEvent(BaseModel):
     type: Literal["broadcastEvent"]
     payload: BroadcastEventPayload
-    meta: AgentEventMeta
+    meta: AgentEventMeta = Field(default_factory=AgentEventMeta)
 
 
 # context listeners
@@ -148,7 +148,7 @@ class AddContextListenerRequestPayload(BaseModel):
 class AddContextListenerRequest(BaseModel):
     type: Literal["addContextListener"]
     payload: AddContextListenerRequestPayload
-    meta: AppRequestMeta
+    meta: AppRequestMeta = Field(default_factory=AppRequestMeta)
 
 
 class AddContextListenerResponsePayload(BaseModel):
@@ -158,7 +158,7 @@ class AddContextListenerResponsePayload(BaseModel):
 class AddContextListenerResponse(BaseModel):
     type: Literal["addContextListenerResponse"]
     payload: AddContextListenerResponsePayload
-    meta: AgentResponseMeta
+    meta: AgentResponseMeta = Field(default_factory=AgentResponseMeta)
 
 
 class ContextListenerUnsubscribeRequestPayload(BaseModel):
@@ -168,7 +168,7 @@ class ContextListenerUnsubscribeRequestPayload(BaseModel):
 class ContextListenerUnsubscribeRequest(BaseModel):
     type: Literal["contextListenerUnsubscribe"]
     payload: ContextListenerUnsubscribeRequestPayload
-    meta: AppRequestMeta
+    meta: AppRequestMeta = Field(default_factory=AppRequestMeta)
 
 
 class ContextListenerUnsubscribeResponsePayload(BaseModel):
@@ -178,7 +178,7 @@ class ContextListenerUnsubscribeResponsePayload(BaseModel):
 class ContextListenerUnsubscribeResponse(BaseModel):
     type: Literal["contextListenerUnsubscribeResponse"]
     payload: ContextListenerUnsubscribeResponsePayload
-    meta: AgentResponseMeta
+    meta: AgentResponseMeta = Field(default_factory=AgentResponseMeta)
 
 
 # intent listeners
@@ -189,7 +189,7 @@ class AddIntentListenerRequestPayload(BaseModel):
 class AddIntentListenerRequest(BaseModel):
     type: Literal["addIntentListener"]
     payload: AddIntentListenerRequestPayload
-    meta: AppRequestMeta
+    meta: AppRequestMeta = Field(default_factory=AppRequestMeta)
 
 
 class AddIntentListenerResponsePayload(BaseModel):
@@ -199,7 +199,7 @@ class AddIntentListenerResponsePayload(BaseModel):
 class AddIntentListenerResponse(BaseModel):
     type: Literal["addIntentListenerResponse"]
     payload: AddIntentListenerResponsePayload
-    meta: AgentResponseMeta
+    meta: AgentResponseMeta = Field(default_factory=AgentResponseMeta)
 
 
 class IntentListenerUnsubscribeRequestPayload(BaseModel):
@@ -209,7 +209,7 @@ class IntentListenerUnsubscribeRequestPayload(BaseModel):
 class IntentListenerUnsubscribeRequest(BaseModel):
     type: Literal["intentListenerUnsubscribe"]
     payload: IntentListenerUnsubscribeRequestPayload
-    meta: AppRequestMeta
+    meta: AppRequestMeta = Field(default_factory=AppRequestMeta)
 
 
 class IntentListenerUnsubscribeResponsePayload(BaseModel):
@@ -219,7 +219,7 @@ class IntentListenerUnsubscribeResponsePayload(BaseModel):
 class IntentListenerUnsubscribeResponse(BaseModel):
     type: Literal["intentListenerUnsubscribeResponse"]
     payload: IntentListenerUnsubscribeResponsePayload
-    meta: AgentResponseMeta
+    meta: AgentResponseMeta = Field(default_factory=AgentResponseMeta)
 
 
 # raiseIntent
@@ -232,7 +232,7 @@ class RaiseIntentRequestPayload(BaseModel):
 class RaiseIntentRequest(BaseModel):
     type: Literal["raiseIntent"]
     payload: RaiseIntentRequestPayload
-    meta: AppRequestMeta
+    meta: AppRequestMeta = Field(default_factory=AppRequestMeta)
 
 
 class RaiseIntentResponsePayload(BaseModel):
@@ -242,7 +242,7 @@ class RaiseIntentResponsePayload(BaseModel):
 class RaiseIntentResponse(BaseModel):
     type: Literal["raiseIntentResponse"]
     payload: RaiseIntentResponsePayload
-    meta: AgentResponseMeta
+    meta: AgentResponseMeta = Field(default_factory=AgentResponseMeta)
 
 
 # raiseIntentForContext
@@ -254,7 +254,7 @@ class RaiseIntentForContextRequestPayload(BaseModel):
 class RaiseIntentForContextRequest(BaseModel):
     type: Literal["raiseIntentForContext"]
     payload: RaiseIntentForContextRequestPayload
-    meta: AppRequestMeta
+    meta: AppRequestMeta = Field(default_factory=AppRequestMeta)
 
 
 class RaiseIntentForContextResponsePayload(BaseModel):
@@ -264,7 +264,7 @@ class RaiseIntentForContextResponsePayload(BaseModel):
 class RaiseIntentForContextResponse(BaseModel):
     type: Literal["raiseIntentForContextResponse"]
     payload: RaiseIntentForContextResponsePayload
-    meta: AgentResponseMeta
+    meta: AgentResponseMeta = Field(default_factory=AgentResponseMeta)
 
 
 # intentEvent
@@ -277,7 +277,7 @@ class IntentEventPayload(BaseModel):
 class IntentEvent(BaseModel):
     type: Literal["intentEvent"]
     payload: IntentEventPayload
-    meta: AgentEventMeta
+    meta: AgentEventMeta = Field(default_factory=AgentEventMeta)
 
 
 # intentResult
@@ -288,7 +288,7 @@ class IntentResultRequestPayload(BaseModel):
 class IntentResultRequest(BaseModel):
     type: Literal["intentResultRequest"]
     payload: IntentResultRequestPayload
-    meta: AppRequestMeta
+    meta: AppRequestMeta = Field(default_factory=AppRequestMeta)
 
 
 class IntentResultResponsePayload(BaseModel):
@@ -298,7 +298,7 @@ class IntentResultResponsePayload(BaseModel):
 class IntentResultResponse(BaseModel):
     type: Literal["intentResultResponse"]
     payload: IntentResultResponsePayload
-    meta: AgentResponseMeta
+    meta: AgentResponseMeta = Field(default_factory=AgentResponseMeta)
 
 
 # raiseIntentResultResponse
@@ -309,4 +309,4 @@ class RaiseIntentResultResponsePayload(BaseModel):
 class RaiseIntentResultResponse(BaseModel):
     type: Literal["raiseIntentResultResponse"]
     payload: RaiseIntentResultResponsePayload
-    meta: AgentResponseMeta
+    meta: AgentResponseMeta = Field(default_factory=AgentResponseMeta)

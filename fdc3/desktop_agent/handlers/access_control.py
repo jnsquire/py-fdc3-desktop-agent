@@ -4,7 +4,7 @@ Handles origin validation and access control policy enforcement.
 """
 
 import logging
-from typing import List
+from typing import List, Mapping
 
 from fastapi import WebSocket
 
@@ -22,17 +22,19 @@ class AccessControlHandler:
         self.access_control = access_control_manager
         self.allowed_origins = allowed_origins
 
-    async def validate_connection(self, websocket: WebSocket) -> bool:
+    async def validate_connection(
+        self, websocket: WebSocket, headers: Mapping[str, str]
+    ) -> bool:
         """
         Validate WebSocket connection based on access control policy.
 
         Returns True if connection is allowed, False otherwise.
         Closes the WebSocket connection if access is denied.
         """
-        origin = websocket.headers.get("origin")
+        origin = headers.get("origin")
 
         access_request = AccessRequest(
-            origin=origin, user_agent=websocket.headers.get("user-agent")
+            origin=origin, user_agent=headers.get("user-agent")
         )
 
         access_decision = await self.access_control.check_access(access_request)

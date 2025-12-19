@@ -93,7 +93,7 @@ class SystemIntentHandler:
             if success:
                 # Create successful resolution
                 resolution = IntentResolution(
-                    source=self.get_system_app_identifier().model_dump(), intent=intent
+                    source=self.get_system_app_identifier(), intent=intent
                 )
 
                 response = RaiseIntentResponse(
@@ -117,7 +117,7 @@ class SystemIntentHandler:
 
             response = AgentResponse(
                 type="raiseIntentResponse",
-                payload=ErrorResponsePayload(error="IntentHandlingFailed"),
+                payload=ErrorResponsePayload(error=f"IntentHandlingFailed: {repr(e)}"),
                 meta=AgentResponseMeta(requestUuid=request_uuid),
             )
             return response
