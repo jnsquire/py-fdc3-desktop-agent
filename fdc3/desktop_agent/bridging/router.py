@@ -29,7 +29,15 @@ def _response_type_for(request_type: str) -> str:
 class BridgeRequestRouter:
     """Handles requests received from the bridge and produces agent responses."""
 
-    def __init__(self, *, storage, launcher, connection_manager, core_services, local_desktop_agent_name: str | None):
+    def __init__(
+        self,
+        *,
+        storage,
+        launcher,
+        connection_manager,
+        core_services,
+        local_desktop_agent_name: str | None,
+    ):
         self._storage = storage
         self._launcher = launcher
         self._connection_manager = connection_manager
@@ -50,27 +58,45 @@ class BridgeRequestRouter:
             return None
 
         if msg_type == "openRequest":
-            return await self._respond(request_uuid, msg_type, await self._handle_open(payload))
+            return await self._respond(
+                request_uuid, msg_type, await self._handle_open(payload)
+            )
 
         if msg_type == "getAppMetadataRequest":
-            return await self._respond(request_uuid, msg_type, await self._handle_get_app_metadata(payload))
+            return await self._respond(
+                request_uuid, msg_type, await self._handle_get_app_metadata(payload)
+            )
 
         if msg_type == "findInstancesRequest":
-            return await self._respond(request_uuid, msg_type, await self._handle_find_instances(payload))
+            return await self._respond(
+                request_uuid, msg_type, await self._handle_find_instances(payload)
+            )
 
         if msg_type == "findIntentRequest":
-            return await self._respond(request_uuid, msg_type, await self._handle_find_intent(payload))
+            return await self._respond(
+                request_uuid, msg_type, await self._handle_find_intent(payload)
+            )
 
         if msg_type == "findIntentsByContextRequest":
-            return await self._respond(request_uuid, msg_type, await self._handle_find_intents_by_context(payload))
+            return await self._respond(
+                request_uuid,
+                msg_type,
+                await self._handle_find_intents_by_context(payload),
+            )
 
         if msg_type == "raiseIntentRequest":
-            return await self._respond(request_uuid, msg_type, await self._handle_raise_intent(payload, meta))
+            return await self._respond(
+                request_uuid, msg_type, await self._handle_raise_intent(payload, meta)
+            )
 
         # Unknown request
-        return await self._respond(request_uuid, msg_type or "unknown", {"error": "MalformedMessage"})
+        return await self._respond(
+            request_uuid, msg_type or "unknown", {"error": "MalformedMessage"}
+        )
 
-    async def _respond(self, request_uuid: str, request_type: str, payload: dict) -> dict:
+    async def _respond(
+        self, request_uuid: str, request_type: str, payload: dict
+    ) -> dict:
         return {
             "type": _response_type_for(request_type),
             "payload": payload,
@@ -87,8 +113,14 @@ class BridgeRequestRouter:
             return
         # Broadcast to all local listeners/channel members.
         # No local source instance to exclude.
-        targets = self._core.context_router.broadcast_context(context, source_instance_uuid="")
-        from fdc3.models.dacp.dacp import BroadcastEvent, BroadcastEventPayload, AgentEventMeta
+        targets = self._core.context_router.broadcast_context(
+            context, source_instance_uuid=""
+        )
+        from fdc3.models.dacp.dacp import (
+            BroadcastEvent,
+            BroadcastEventPayload,
+            AgentEventMeta,
+        )
 
         for target_uuid in targets:
             event = BroadcastEvent(
@@ -96,7 +128,9 @@ class BridgeRequestRouter:
                 payload=BroadcastEventPayload(context=context),
                 meta=AgentEventMeta(),
             )
-            await self._connection_manager.send_to_instance(target_uuid, event.model_dump_json())
+            await self._connection_manager.send_to_instance(
+                target_uuid, event.model_dump_json()
+            )
 
     async def _handle_open(self, payload: dict) -> dict:
         app = payload.get("app") or {}
@@ -113,11 +147,19 @@ class BridgeRequestRouter:
         if not launch_config:
             return {"error": OpenError.AppNotFound.value}
 
-        launch_result = await self._launcher.launch_app(app_id, launch_config, context, app)
+        launch_result = await self._launcher.launch_app(
+            app_id, launch_config, context, app
+        )
         if not launch_result.success:
             return {"error": OpenError.ErrorOnLaunch.value}
 
-        return {"appIdentifier": {"appId": app_id, "instanceId": launch_result.instance_id, "desktopAgent": self._local_name}}
+        return {
+            "appIdentifier": {
+                "appId": app_id,
+                "instanceId": launch_result.instance_id,
+                "desktopAgent": self._local_name,
+            }
+        }
 
     async def _handle_get_app_metadata(self, payload: dict) -> dict:
         app = payload.get("app") or {}
@@ -149,7 +191,11 @@ class BridgeRequestRouter:
         instances = self._core.app_registry.get_connected_instances_for_app(app_id)
         return {
             "appIdentifiers": [
-                {"appId": i.app_id, "instanceId": i.instance_id, "desktopAgent": self._local_name}
+                {
+                    "appId": i.app_id,
+                    "instanceId": i.instance_id,
+                    "desktopAgent": self._local_name,
+                }
                 for i in instances
             ]
         }
@@ -199,8 +245,14 @@ class BridgeRequestRouter:
             return {"error": ResolveError.NoAppsFound.value}
 
         # Deliver intent event to the resolved instance.
-        targets = self._core.intent_resolver.deliver_intent_event(intent, context, meta.get("source"))
-        from fdc3.models.dacp.dacp import IntentEvent, IntentEventPayload, AgentEventMeta
+        targets = self._core.intent_resolver.deliver_intent_event(
+            intent, context, meta.get("source")
+        )
+        from fdc3.models.dacp.dacp import (
+            IntentEvent,
+            IntentEventPayload,
+            AgentEventMeta,
+        )
 
         for target_uuid in targets:
             event = IntentEvent(
@@ -212,7 +264,9 @@ class BridgeRequestRouter:
                 ),
                 meta=AgentEventMeta(),
             )
-            await self._connection_manager.send_to_instance(target_uuid, event.model_dump_json())
+            await self._connection_manager.send_to_instance(
+                target_uuid, event.model_dump_json()
+            )
 
         # Ensure returned resolution includes the local desktopAgent.
         try:

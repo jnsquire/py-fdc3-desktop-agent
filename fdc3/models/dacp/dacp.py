@@ -190,7 +190,9 @@ class GetUserChannelsRequestPayload(BaseModel):
 
 class GetUserChannelsRequest(BaseModel):
     type: Literal["getUserChannels"]
-    payload: GetUserChannelsRequestPayload = Field(default_factory=GetUserChannelsRequestPayload)
+    payload: GetUserChannelsRequestPayload = Field(
+        default_factory=GetUserChannelsRequestPayload
+    )
     meta: AppRequestMeta = Field(default_factory=AppRequestMeta)
 
 
@@ -210,7 +212,9 @@ class GetCurrentChannelRequestPayload(BaseModel):
 
 class GetCurrentChannelRequest(BaseModel):
     type: Literal["getCurrentChannel"]
-    payload: GetCurrentChannelRequestPayload = Field(default_factory=GetCurrentChannelRequestPayload)
+    payload: GetCurrentChannelRequestPayload = Field(
+        default_factory=GetCurrentChannelRequestPayload
+    )
     meta: AppRequestMeta = Field(default_factory=AppRequestMeta)
 
 
@@ -250,7 +254,9 @@ class LeaveCurrentChannelRequestPayload(BaseModel):
 
 class LeaveCurrentChannelRequest(BaseModel):
     type: Literal["leaveCurrentChannel"]
-    payload: LeaveCurrentChannelRequestPayload = Field(default_factory=LeaveCurrentChannelRequestPayload)
+    payload: LeaveCurrentChannelRequestPayload = Field(
+        default_factory=LeaveCurrentChannelRequestPayload
+    )
     meta: AppRequestMeta = Field(default_factory=AppRequestMeta)
 
 
@@ -260,7 +266,9 @@ class LeaveCurrentChannelResponsePayload(BaseModel):
 
 class LeaveCurrentChannelResponse(BaseModel):
     type: Literal["leaveCurrentChannelResponse"]
-    payload: LeaveCurrentChannelResponsePayload = Field(default_factory=LeaveCurrentChannelResponsePayload)
+    payload: LeaveCurrentChannelResponsePayload = Field(
+        default_factory=LeaveCurrentChannelResponsePayload
+    )
     meta: AgentResponseMeta = Field(default_factory=AgentResponseMeta)
 
 

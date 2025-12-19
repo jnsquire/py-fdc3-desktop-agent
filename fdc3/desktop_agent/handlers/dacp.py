@@ -86,7 +86,10 @@ from ..api import IntentResolution
 from fdc3.models.identifiers import AppIdentifier
 from fdc3.models.identifiers import IntentResolution as WireIntentResolution
 from fdc3.models.identifiers import AppIntent, IntentMetadata, AppMetadata
-from fdc3.models.identifiers import Channel as WireChannel, DisplayMetadata as WireDisplayMetadata
+from fdc3.models.identifiers import (
+    Channel as WireChannel,
+    DisplayMetadata as WireDisplayMetadata,
+)
 from fdc3.models.primitives import RequestUuid, ListenerUuid
 from .connection_manager import WebSocketConnectionManager
 from .system_intent import SystemIntentHandler
@@ -178,11 +181,17 @@ class DACPHandler:
         elif isinstance(parsed, GetUserChannelsRequest):
             await self._handle_get_user_channels(parsed, websocket)
         elif isinstance(parsed, GetCurrentChannelRequest):
-            await self._handle_get_current_channel(parsed, session_id, wcp_sessions, websocket)
+            await self._handle_get_current_channel(
+                parsed, session_id, wcp_sessions, websocket
+            )
         elif isinstance(parsed, JoinUserChannelRequest):
-            await self._handle_join_user_channel(parsed, session_id, wcp_sessions, websocket)
+            await self._handle_join_user_channel(
+                parsed, session_id, wcp_sessions, websocket
+            )
         elif isinstance(parsed, LeaveCurrentChannelRequest):
-            await self._handle_leave_current_channel(parsed, session_id, wcp_sessions, websocket)
+            await self._handle_leave_current_channel(
+                parsed, session_id, wcp_sessions, websocket
+            )
         elif isinstance(parsed, FindIntentRequest):
             await self._handle_find_intent(parsed, websocket)
         elif isinstance(parsed, FindIntentsByContextRequest):
@@ -223,7 +232,11 @@ class DACPHandler:
         to be available without prior configuration.
         """
         try:
-            existing = [c for c in core_services.channel_manager.list_channels() if getattr(c, "type", None) == "user"]
+            existing = [
+                c
+                for c in core_services.channel_manager.list_channels()
+                if getattr(c, "type", None) == "user"
+            ]
         except Exception:
             existing = []
 
@@ -249,9 +262,13 @@ class DACPHandler:
             )
         else:
             dm = None
-        return WireChannel(id=getattr(channel, "id"), type=getattr(channel, "type"), displayMetadata=dm)
+        return WireChannel(
+            id=getattr(channel, "id"), type=getattr(channel, "type"), displayMetadata=dm
+        )
 
-    async def _handle_get_user_channels(self, request: GetUserChannelsRequest, websocket: WebSocket) -> None:
+    async def _handle_get_user_channels(
+        self, request: GetUserChannelsRequest, websocket: WebSocket
+    ) -> None:
         self._ensure_default_user_channels()
         channels = [
             self._wire_channel(c)
@@ -333,7 +350,9 @@ class DACPHandler:
         )
         await self._send_model(websocket, response)
 
-    async def _handle_find_intent(self, request: FindIntentRequest, websocket: WebSocket):
+    async def _handle_find_intent(
+        self, request: FindIntentRequest, websocket: WebSocket
+    ):
         """Handle findIntent request.
 
         This is a best-effort implementation based on the app directory (static
@@ -359,8 +378,8 @@ class DACPHandler:
 
             # From runtime listeners
             try:
-                listeners = core_services.listener_store.get_intent_listeners_for_intent(
-                    intent
+                listeners = (
+                    core_services.listener_store.get_intent_listeners_for_intent(intent)
                 )
             except Exception:
                 listeners = []
@@ -437,7 +456,9 @@ class DACPHandler:
                         description=getattr(meta, "description", None)
                         if meta is not None
                         else None,
-                        icons=getattr(meta, "icons", None) if meta is not None else None,
+                        icons=getattr(meta, "icons", None)
+                        if meta is not None
+                        else None,
                     )
                 )
 
@@ -486,7 +507,9 @@ class DACPHandler:
 
             # Runtime listeners
             try:
-                listeners = getattr(core_services.listener_store, "intent_listeners", {})
+                listeners = getattr(
+                    core_services.listener_store, "intent_listeners", {}
+                )
             except Exception:
                 listeners = {}
             for listener in (listeners or {}).values():
@@ -604,7 +627,9 @@ class DACPHandler:
                 if bridge is not None and getattr(bridge, "is_connected", False):
                     identity = {}
                     if session_id is not None and wcp_sessions is not None:
-                        identity = (wcp_sessions.get(session_id) or {}).get("identity") or {}
+                        identity = (wcp_sessions.get(session_id) or {}).get(
+                            "identity"
+                        ) or {}
                     source_identity = AppIdentifier(
                         appId=identity.get("appId") or "unknown",
                         instanceId=identity.get("instanceId"),
@@ -625,14 +650,20 @@ class DACPHandler:
                     if payload.get("error"):
                         response = AgentResponse(
                             type="openResponse",
-                            payload=ErrorResponsePayload(error=str(payload.get("error"))),
-                            meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                            payload=ErrorResponsePayload(
+                                error=str(payload.get("error"))
+                            ),
+                            meta=AgentResponseMeta(
+                                requestUuid=request.meta.requestUuid
+                            ),
                         )
                     else:
                         response = OpenResponse(
                             type="openResponse",
                             payload=OpenResponsePayload(),
-                            meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                            meta=AgentResponseMeta(
+                                requestUuid=request.meta.requestUuid
+                            ),
                         )
                     await self._send_model(websocket, response)
                     return
@@ -871,7 +902,11 @@ class DACPHandler:
             target = request.payload.target
             target_da = getattr(target, "desktopAgent", None) if target else None
             bridge = getattr(self, "bridge_client", None)
-            if target_da and bridge is not None and getattr(bridge, "is_connected", False):
+            if (
+                target_da
+                and bridge is not None
+                and getattr(bridge, "is_connected", False)
+            ):
                 source_identity: AppIdentifier
                 if getattr(request.meta, "source", None) is not None:
                     src = request.meta.source
@@ -883,7 +918,9 @@ class DACPHandler:
                 else:
                     identity = {}
                     if session_id is not None and wcp_sessions is not None:
-                        identity = (wcp_sessions.get(session_id) or {}).get("identity") or {}
+                        identity = (wcp_sessions.get(session_id) or {}).get(
+                            "identity"
+                        ) or {}
                     source_identity = AppIdentifier(
                         appId=identity.get("appId") or "unknown",
                         instanceId=identity.get("instanceId"),
@@ -1005,10 +1042,13 @@ class DACPHandler:
             # - If there are no intent listeners, return NoAppsFound.
             # - If there are multiple distinct intents available, return ResolverUnavailable
             #   (we have no user intent resolver UI).
-            intent_listeners = getattr(core_services.listener_store, "intent_listeners", {})
+            intent_listeners = getattr(
+                core_services.listener_store, "intent_listeners", {}
+            )
+            # Build a sorted list of intent names (coerce to str for type-safety)
             available_intents = sorted(
                 {
-                    getattr(listener, "intent", None)
+                    str(getattr(listener, "intent", ""))
                     for listener in intent_listeners.values()
                     if getattr(listener, "intent", None)
                 }
@@ -1033,8 +1073,10 @@ class DACPHandler:
                 return
 
             intent = available_intents[0]
-            resolution: IntentResolution | None = core_services.intent_resolver.resolve_intent(
-                intent, request.payload.context, request.payload.target
+            resolution: IntentResolution | None = (
+                core_services.intent_resolver.resolve_intent(
+                    intent, request.payload.context, request.payload.target
+                )
             )
 
             if not resolution:
