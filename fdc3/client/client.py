@@ -1,38 +1,88 @@
 """Async client for connecting external intent handlers to the desktop agent.
 
-This is the implementation moved from `fdc3_client.client` into the
-`fdc3.client` package as part of the migration to the `fdc3` namespace.
+This module implements the `FDC3Client` used to connect external handlers
+to the desktop agent.
 """
 
 from __future__ import annotations
 
 import asyncio
+import threading
 import json
 import logging
 import uuid
 from datetime import datetime
-from types import SimpleNamespace
-from typing import Any, Awaitable, Callable, Dict, List, Optional, TypedDict
+from typing import (
+    Any,
+    Dict,
+    List,
+    Optional,
+    Union,
+    Callable,
+    Awaitable,
+    Tuple,
+)
+from .events import EventEmitter
 
+from pydantic import ValidationError, BaseModel
+from fdc3.client.models import (
+    parse_message,
+    Message,
+    WCP1Hello,
+    WCP4ValidateAppIdentity,
+    RegisterExternalHandler,
+    UnregisterExternalHandler,
+    AddContextListener,
+    ContextListenerUnsubscribe,
+    AddIntentListener,
+    IntentListenerUnsubscribe,
+    IntentResult,
+    Broadcast,
+)
+from fdc3.models.dacp import (
+    ForwardedIntentMessage,
+    BroadcastEvent,
+    IntentEvent,
+)
+import urllib.parse
+import httpx
 from websockets.asyncio.client import connect, ClientConnection
 
 logger = logging.getLogger(__name__)
 
 
-class ForwardedIntentPayload(TypedDict, total=False):
-    request_uuid: str
-    intent: str
-    context: Dict[str, Any]
-    source: Dict[str, Any]
-    timeout: int
+class ForwardedIntentPayload(BaseModel):
+    request_uuid: Optional[str] = None
+    intent: Optional[str] = None
+    context: Optional[Dict[str, Any]] = None
+    source: Optional[Dict[str, Any]] = None
+    timeout: Optional[int] = None
 
 
-class MessageDict(TypedDict, total=False):
-    type: str
-    payload: Dict[str, Any]
+class ListenerUuidDict(BaseModel):
+    root: str
 
 
-MessageHandler = Callable[[SimpleNamespace], Awaitable[None]]
+class AddListenerResponsePayload(BaseModel):
+    listenerUuid: Optional[Union[str, ListenerUuidDict]] = None
+
+
+class BroadcastEventPayload(BaseModel):
+    context: Optional[Dict[str, Any]] = None
+    instanceUuid: Optional[str] = None
+
+
+class IntentEventPayload(BaseModel):
+    intent: Optional[str] = None
+    context: Optional[Dict[str, Any]] = None
+    originatingApp: Optional[Dict[str, Any]] = None
+
+
+ForwardedIntentHandler = Callable[[ForwardedIntentMessage], Union[Awaitable[Any], Any]]
+
+BroadcastHandler = Callable[[BroadcastEvent], Union[Awaitable[Any], Any]]
+
+IntentEventHandler = Callable[[IntentEvent], Union[Awaitable[Any], Any]]
 
 
 class FDC3Client:
@@ -55,12 +105,141 @@ class FDC3Client:
         self._ws: Optional[ClientConnection] = None
         self._recv_task: Optional[asyncio.Task] = None
         self._ping_task: Optional[asyncio.Task] = None
-        self._on_intent: Optional[MessageHandler] = None
-        self._pending_responses: Dict[str, asyncio.Future] = {}
+        # Public event emitters — multiple handlers may subscribe via `.add()`
+        # Handlers will receive validated Pydantic models for known message
+        # types.
+        self.forwarded_intent_handlers: EventEmitter[Any] = EventEmitter()
+        self.broadcast_handlers: EventEmitter[Any] = EventEmitter()
+        self.intent_event_handlers: EventEmitter[Any] = EventEmitter()
+        # maps request_uuid -> (Future, loop)
+        self._pending_responses: Dict[
+            str, Tuple[asyncio.Future, asyncio.AbstractEventLoop]
+        ] = {}
+        self._pending_responses_lock = threading.Lock()
         self._handlers: Dict[str, Dict[str, Any]] = {}
         self._running = False
         self._instance_uuid: Optional[str] = None
         self._handshake_complete = asyncio.Event()
+
+    # ─── Internal helpers ────────────────────────────────────────────────────
+    def _ensure_connected(self) -> ClientConnection:
+        """Return the websocket connection, raising if not connected."""
+        if self._ws is None:
+            raise RuntimeError("Not connected")
+        return self._ws
+
+    async def _ensure_handshake(self, timeout: float = 10.0) -> None:
+        """Wait for WCP handshake if not already complete; raise on failure."""
+        if not self._handshake_complete.is_set():
+            if not await self.wait_for_handshake(timeout):
+                raise RuntimeError("WCP handshake failed or timed out")
+
+    @staticmethod
+    def _extract_listener_uuid(value: Any) -> Any:
+        """Extract listener UUID, unwrapping a dict with a 'root' key if present."""
+        if isinstance(value, dict) and value.get("root"):
+            return value["root"]
+        return value
+
+    # Pending response helpers
+    def _register_pending_response(self, request_uuid: str) -> asyncio.Future:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError as exc:
+            raise RuntimeError(
+                "_register_pending_response must be called from an async context"
+            ) from exc
+
+        fut: asyncio.Future = loop.create_future()
+        with self._pending_responses_lock:
+            self._pending_responses[request_uuid] = (fut, loop)
+        return fut
+
+    def _clear_pending_response(self, request_uuid: str) -> None:
+        with self._pending_responses_lock:
+            self._pending_responses.pop(request_uuid, None)
+
+    def _fail_all_pending_responses(self, *, error: Optional[str] = None) -> None:
+        with self._pending_responses_lock:
+            items = list(self._pending_responses.items())
+            self._pending_responses.clear()
+
+        for request_uuid, (fut, loop) in items:
+            if fut.done():
+                continue
+            if loop is not asyncio.get_running_loop():
+                # Use thread-safe scheduling if we're not on the same loop
+                try:
+                    loop.call_soon_threadsafe(
+                        fut.set_exception, Exception(error or "connection closed")
+                    )
+                except Exception:
+                    # best-effort: if scheduling fails, ignore
+                    pass
+            else:
+                fut.set_exception(Exception(error or "connection closed"))
+
+    def _resolve_pending_response(
+        self, request_uuid: str, *, result: Any = None, error: Optional[str] = None
+    ) -> None:
+        with self._pending_responses_lock:
+            entry = self._pending_responses.pop(request_uuid, None)
+
+        if not entry:
+            logger.warning(f"No pending future for requestUuid={request_uuid}")
+            return
+
+        fut, fut_loop = entry
+        if fut.done():
+            logger.warning(
+                "pending future %s already done when resolving response", request_uuid
+            )
+            return
+
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+
+        if fut_loop is not None and fut_loop is not current_loop:
+            # schedule resolution on the future's loop
+            if error is not None:
+                fut_loop.call_soon_threadsafe(fut.set_exception, Exception(error))
+            else:
+                fut_loop.call_soon_threadsafe(fut.set_result, result)
+        else:
+            if error is not None:
+                fut.set_exception(Exception(error))
+            else:
+                fut.set_result(result)
+
+    async def _send_and_wait(self, msg: Message, timeout: float = 5.0) -> Any:
+        """Send a `Message` and wait for the correlated response using its `meta.requestUuid`.
+
+        If the message doesn't include a `requestUuid` in `meta`, one will be generated
+        and injected into the message meta.
+        """
+        ws = self._ensure_connected()
+
+        # Ensure message has a requestUuid in meta
+        meta = msg.meta or {}
+        request_uuid = meta.get("requestUuid")
+        if not request_uuid:
+            request_uuid = str(uuid.uuid4())
+            meta = {
+                **meta,
+                "requestUuid": request_uuid,
+                "timestamp": datetime.now().isoformat(),
+            }
+            msg.meta = meta
+
+        await ws.send(msg.model_dump_json())
+
+        fut = self._register_pending_response(request_uuid)
+        try:
+            return await asyncio.wait_for(fut, timeout=timeout)
+        finally:
+            self._clear_pending_response(request_uuid)
 
     async def __aenter__(self):
         await self.connect()
@@ -88,33 +267,47 @@ class FDC3Client:
         self._instance_uuid = str(uuid.uuid4())
 
         # Send WCP1Hello
-        wcp1 = {
-            "type": "WCP1Hello",
-            "payload": {
+        wcp1 = WCP1Hello(
+            payload={
                 "identityUrl": f"http://external-handler.local/{self.handler_id}",
                 "actualUrl": f"http://external-handler.local/{self.handler_id}",
                 "fdc3Version": "2.0",
             },
-            "meta": {
+            meta={
                 "connectionAttemptUuid": connection_uuid,
                 "timestamp": datetime.now().isoformat(),
             },
-        }
-        await self._ws.send(json.dumps(wcp1))
+        )
+        await self._ensure_connected().send(wcp1.model_dump_json())
         logger.debug("Sent WCP1Hello")
-
         # Wait for WCP3Handshake (handled in _handle_message)
         # Then send WCP4ValidateAppIdentity
         # The handshake_complete event will be set when WCP5 is received
 
     async def close(self) -> None:
         self._running = False
+        # Cancel and await background tasks so they can clean up properly.
         if self._recv_task:
             self._recv_task.cancel()
+            try:
+                await self._recv_task
+            except asyncio.CancelledError:
+                pass
+            finally:
+                self._recv_task = None
         if self._ping_task:
             self._ping_task.cancel()
+            try:
+                await self._ping_task
+            except asyncio.CancelledError:
+                pass
+            finally:
+                self._ping_task = None
         if self._ws:
-            await self._ws.close()
+            try:
+                await self._ws.close()
+            finally:
+                self._ws = None
 
     async def _ping_loop(self) -> None:
         while self._running and self._ws:
@@ -136,9 +329,15 @@ class FDC3Client:
                     break
 
                 try:
-                    msg = json.loads(raw)
+                    parsed = json.loads(raw)
                 except Exception:
-                    logger.exception("Failed to parse message from agent")
+                    logger.exception("Failed to parse message JSON from agent")
+                    continue
+
+                try:
+                    msg = Message.model_validate(parsed)
+                except Exception:
+                    logger.exception("Invalid message envelope from agent")
                     continue
 
                 await self._handle_message(msg)
@@ -146,33 +345,38 @@ class FDC3Client:
             return
         except Exception:
             logger.exception("Receive loop error")
+        finally:
+            # Mark client no longer running and fail any pending responses so
+            # callers waiting for replies don't hang forever.
+            self._running = False
+            try:
+                self._fail_all_pending_responses(error="connection closed")
+            except Exception:
+                logger.exception("Error failing pending responses on close")
 
-    async def _handle_message(self, msg: MessageDict) -> None:
-        t = msg.get("type")
-        payload = msg.get("payload") or {}
-        meta = msg.get("meta") or {}
+    async def _handle_message(self, msg: Message) -> None:
+        t = msg.type
+        payload = msg.payload or {}
+        meta = msg.meta or {}
         logger.debug(f"Received message type={t} meta={meta}")
 
         # WCP handshake messages
         if t == "WCP3Handshake":
-            # Received handshake, now send WCP4ValidateAppIdentity
             await self._send_wcp4_validate(
                 meta.get("connectionAttemptUuid") or str(uuid.uuid4())
             )
 
         elif t == "WCP5ValidateAppIdentityResponse":
-            # Handshake complete
             self._instance_uuid = payload.get("instanceUuid")
             logger.info(f"WCP handshake complete, instanceUuid={self._instance_uuid}")
             self._handshake_complete.set()
 
         elif t == "WCP5ValidateAppIdentityFailedResponse":
             logger.error(f"WCP handshake failed: {payload.get('message')}")
-            self._handshake_complete.set()  # Unblock waiters even on failure
+            self._handshake_complete.set()
 
         # DACP messages
         elif t == "registerExternalHandlerResponse":
-            # Resolve pending register future by requestUuid
             request_uuid = meta.get("requestUuid", "")
             handler_uuid = payload.get("handler_uuid")
             logger.debug(
@@ -180,31 +384,100 @@ class FDC3Client:
                 f"handler_uuid={handler_uuid} pending_keys={list(self._pending_responses.keys())}"
             )
             if request_uuid:
-                fut = self._pending_responses.pop(request_uuid, None)
-                if fut and not fut.done():
-                    if payload.get("error"):
-                        fut.set_exception(Exception(payload.get("error")))
-                    else:
-                        fut.set_result(handler_uuid)
+                if payload.get("error"):
+                    self._resolve_pending_response(
+                        request_uuid, error=payload.get("error")
+                    )
                 else:
-                    logger.warning(f"No pending future for requestUuid={request_uuid}")
+                    self._resolve_pending_response(request_uuid, result=handler_uuid)
 
         elif t == "unregisterExternalHandlerResponse":
             request_uuid = meta.get("requestUuid", "")
             if request_uuid:
-                fut = self._pending_responses.pop(request_uuid, None)
-                if fut and not fut.done():
-                    if payload.get("error"):
-                        fut.set_exception(Exception(payload.get("error")))
-                    else:
-                        fut.set_result(None)
+                if payload.get("error"):
+                    self._resolve_pending_response(
+                        request_uuid, error=payload.get("error")
+                    )
+                else:
+                    self._resolve_pending_response(request_uuid, result=None)
 
         elif t == "forwardedIntent":
-            # payload: request_uuid, intent, context, source, timeout
-            if self._on_intent and isinstance(payload, dict):
-                req_payload: ForwardedIntentPayload = payload  # type: ignore[arg-type]
-                req = SimpleNamespace(**req_payload)
-                await self._on_intent(req)
+            try:
+                model = parse_message(msg)
+            except ValidationError as exc:
+                logger.exception("Invalid forwardedIntent payload")
+                # If we have a request UUID, inform the agent/caller with an intentResult error
+                request_uuid = (
+                    payload.get("request_uuid")
+                    or payload.get("requestUuid")
+                    or meta.get("requestUuid")
+                    or meta.get("request_uuid")
+                )
+                if request_uuid:
+                    try:
+                        await self.send_intent_result(
+                            request_uuid,
+                            error=f"Invalid forwardedIntent payload: {exc}",
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Failed to send intentResult error for forwardedIntent"
+                        )
+                return
+
+            if model is None:
+                logger.debug("No model mapping for forwardedIntent; dropping message")
+                return
+
+            await self.forwarded_intent_handlers.emit(model)
+
+        elif t == "addContextListenerResponse":
+            request_uuid = meta.get("requestUuid", "")
+            if request_uuid:
+                listener = self._extract_listener_uuid(payload.get("listenerUuid"))
+                self._resolve_pending_response(request_uuid, result=listener)
+
+        elif t == "addIntentListenerResponse":
+            request_uuid = meta.get("requestUuid", "")
+            if request_uuid:
+                listener = self._extract_listener_uuid(payload.get("listenerUuid"))
+                self._resolve_pending_response(request_uuid, result=listener)
+
+        elif t in (
+            "contextListenerUnsubscribeResponse",
+            "intentListenerUnsubscribeResponse",
+        ):
+            request_uuid = meta.get("requestUuid", "")
+            if request_uuid:
+                self._resolve_pending_response(request_uuid, result=None)
+
+        elif t == "broadcastEvent":
+            try:
+                model = parse_message(msg)
+            except ValidationError:
+                logger.exception("Invalid broadcastEvent payload")
+                # Drop unparsable payloads
+                return
+
+            if model is None:
+                logger.debug("No model mapping for broadcastEvent; dropping message")
+                return
+
+            await self.broadcast_handlers.emit(model)
+
+        elif t == "intentEvent":
+            try:
+                model = parse_message(msg)
+            except ValidationError:
+                logger.exception("Invalid intentEvent payload")
+                # Drop unparsable payloads
+                return
+
+            if model is None:
+                logger.debug("No model mapping for intentEvent; dropping message")
+                return
+
+            await self.intent_event_handlers.emit(model)
 
         else:
             logger.debug(f"Unhandled message type: {t}")
@@ -212,19 +485,18 @@ class FDC3Client:
     async def _send_wcp4_validate(self, connection_uuid: str) -> None:
         """Send WCP4ValidateAppIdentity for self-registration."""
         assert self._ws is not None
-        wcp4 = {
-            "type": "WCP4ValidateAppIdentity",
-            "payload": {
+        wcp4 = WCP4ValidateAppIdentity(
+            payload={
                 "appId": f"external-handler:{self.handler_id}",
                 "instanceId": str(uuid.uuid4()),
                 "instanceUuid": self._instance_uuid,
             },
-            "meta": {
+            meta={
                 "connectionAttemptUuid": connection_uuid,
                 "timestamp": datetime.now().isoformat(),
             },
-        }
-        await self._ws.send(json.dumps(wcp4))
+        )
+        await self._ensure_connected().send(wcp4.model_dump_json())
         logger.debug("Sent WCP4ValidateAppIdentity")
 
     async def wait_for_handshake(self, timeout: float = 10.0) -> bool:
@@ -250,76 +522,76 @@ class FDC3Client:
         timeout: float = 5.0,
     ) -> str:
         """Register an external handler and return agent-assigned handler_uuid."""
-        assert self._ws is not None, "Not connected"
+        await self._ensure_handshake()
 
-        # Wait for handshake to complete first
-        if not self._handshake_complete.is_set():
-            if not await self.wait_for_handshake():
-                raise Exception("WCP handshake failed or timed out")
-
-        request_uuid = str(uuid.uuid4())
-        payload = {
-            "handler_id": handler_id,
-            "intents": intents,
-            "priority": priority,
-            "metadata": metadata or {},
-        }
-
-        msg = {
-            "type": "registerExternalHandler",
-            "payload": payload,
-            "meta": {
-                "requestUuid": request_uuid,
-                "timestamp": datetime.now().isoformat(),
+        msg = RegisterExternalHandler(
+            payload={
+                "handler_id": handler_id,
+                "intents": intents,
+                "priority": priority,
+                "metadata": metadata or {},
             },
-        }
-        logger.debug(f"Sending registerExternalHandler: requestUuid={request_uuid}")
-        await self._ws.send(json.dumps(msg))
-
-        # Create a future to be resolved when response arrives
-        fut: asyncio.Future[str] = asyncio.get_running_loop().create_future()
-        self._pending_responses[request_uuid] = fut
-
-        try:
-            handler_uuid = await asyncio.wait_for(fut, timeout=timeout)
-        finally:
-            self._pending_responses.pop(request_uuid, None)
+        )
+        handler_uuid = await self._send_and_wait(msg, timeout=timeout)
 
         # Store handler metadata locally
         self._handlers[handler_uuid] = {"handler_id": handler_id, "intents": intents}
         return handler_uuid
 
+    async def add_context_listener(
+        self, context_type: Optional[str] = None, timeout: float = 5.0
+    ) -> str:
+        """Register a context listener with the agent and return the listener UUID."""
+        msg = AddContextListener(payload={"contextType": context_type})
+        return await self._send_and_wait(msg, timeout=timeout)
+
+    async def remove_context_listener(
+        self, listener_uuid: str, timeout: float = 5.0
+    ) -> None:
+        msg = ContextListenerUnsubscribe(
+            payload={"listenerUuid": {"root": listener_uuid}}
+        )
+        try:
+            await self._send_and_wait(msg, timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"Unsubscribe response timed out for listener {listener_uuid}"
+            )
+
+    async def add_intent_listener(self, intent: str, timeout: float = 5.0) -> str:
+        msg = AddIntentListener(payload={"intent": intent})
+        return await self._send_and_wait(msg, timeout=timeout)
+
+    async def remove_intent_listener(
+        self, listener_uuid: str, timeout: float = 5.0
+    ) -> None:
+        msg = IntentListenerUnsubscribe(
+            payload={"listenerUuid": {"root": listener_uuid}}
+        )
+        try:
+            await self._send_and_wait(msg, timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"Unsubscribe response timed out for listener {listener_uuid}"
+            )
+
+    # Public `EventEmitter` attributes are exposed for subscribing handlers:
+    # - `forwarded_intent_handlers`
+    # - `broadcast_handlers`
+    # - `intent_event_handlers`
+
     async def unregister_handler(self, handler_uuid: str, timeout: float = 5.0) -> None:
         """Unregister a handler by its UUID."""
-        assert self._ws is not None
-
-        request_uuid = str(uuid.uuid4())
-        msg = {
-            "type": "unregisterExternalHandler",
-            "payload": {"handler_uuid": handler_uuid},
-            "meta": {
-                "requestUuid": request_uuid,
-                "timestamp": datetime.now().isoformat(),
-            },
-        }
-        await self._ws.send(json.dumps(msg))
-
-        # Create a future for response
-        fut: asyncio.Future[None] = asyncio.get_running_loop().create_future()
-        self._pending_responses[request_uuid] = fut
-
+        msg = UnregisterExternalHandler(payload={"handler_uuid": handler_uuid})
         try:
-            await asyncio.wait_for(fut, timeout=timeout)
+            await self._send_and_wait(msg, timeout=timeout)
         except asyncio.TimeoutError:
             logger.warning(f"Unregister response timed out for {handler_uuid}")
-        finally:
-            self._pending_responses.pop(request_uuid, None)
 
         self._handlers.pop(handler_uuid, None)
-        self._handlers.pop(handler_uuid, None)
 
-    def on_intent(self, handler: MessageHandler) -> None:
-        self._on_intent = handler
+    # Use `client.forwarded_intent_handlers.add(handler)` to register handlers
+    # and `client.forwarded_intent_handlers.remove(handler)` to remove them.
 
     async def send_intent_result(
         self,
@@ -328,14 +600,71 @@ class FDC3Client:
         result: Optional[Dict[str, Any]] = None,
         error: Optional[str] = None,
     ) -> None:
-        assert self._ws is not None
+        ws = self._ensure_connected()
         payload: Dict[str, Any] = {"request_uuid": request_uuid}
         if result is not None:
             payload["result"] = result
         if error is not None:
             payload["error"] = error
-        msg = {"type": "intentResult", "payload": payload}
-        await self._ws.send(json.dumps(msg))
+        msg = IntentResult(payload=payload)
+        await ws.send(msg.model_dump_json())
+
+    async def emit_channel_event(
+        self,
+        event_type: str,
+        channel_id: str,
+        *,
+        instance_uuid: Optional[str] = None,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Emit a dev-only channel event via the server GraphQL `emitChannelEvent` mutation.
+
+        This is intended for examples and demos only.
+        """
+        parsed = urllib.parse.urlparse(self.agent_url)
+        scheme = "https" if parsed.scheme == "wss" else "http"
+        netloc = parsed.netloc
+        base = f"{scheme}://{netloc}"
+
+        mutation = (
+            "mutation EmitEvent($channelId: String!, $eventType: String!, $instanceUuid: String, $context: String) {"
+            " emitChannelEvent(channelId: $channelId, eventType: $eventType, instanceUuid: $instanceUuid, context: $context) }"
+        )
+
+        variables = {
+            "channelId": channel_id,
+            "eventType": event_type,
+            "instanceUuid": instance_uuid,
+            "context": json.dumps(context) if context is not None else None,
+        }
+
+        async with httpx.AsyncClient(base_url=base, timeout=10.0) as client:
+            resp = await client.post(
+                "/graphql", json={"query": mutation, "variables": variables}
+            )
+            resp.raise_for_status()
+
+    async def broadcast(self, context: Dict[str, Any]) -> None:
+        """Send a DACP `broadcast` request to the agent to broadcast `context`.
+
+        This will cause the agent to deliver the context to the channel the
+        sending instance is currently joined to.
+        """
+        await self._ensure_handshake()
+        ws = self._ensure_connected()
+
+        msg = Broadcast(
+            payload={"context": context},
+            meta={
+                "timestamp": datetime.now().isoformat(),
+                "source": {
+                    "appId": f"external-handler:{self.handler_id}",
+                    "instanceId": self._instance_uuid,
+                },
+            },
+        )
+
+        await ws.send(msg.model_dump_json())
 
     async def run_forever(self) -> None:
         try:

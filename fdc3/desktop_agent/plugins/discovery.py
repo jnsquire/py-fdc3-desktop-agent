@@ -6,7 +6,7 @@ implementations from installed packages using Python's entry points mechanism.
 External packages can register plugins by adding an entry point in their
 pyproject.toml::
 
-    [project.entry-points."fdc3_desktop_agent.plugins"]
+    [project.entry-points."fdc3.plugins"]
     my-plugin = "my_package.plugins:MyIntentPlugin"
 
 The entry point value should be a class that inherits from IntentHandlerPlugin.
@@ -24,17 +24,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Primary entry point group name for the unified `fdc3` package (recommended)
-PLUGIN_ENTRY_POINT_GROUP = "fdc3.desktop_agent.plugins"
-# Legacy group name retained for discovery during migration
-LEGACY_PLUGIN_ENTRY_POINT_GROUP = "fdc3_desktop_agent.plugins"
+# Primary entry point group name for plugin discovery (preferred)
+PLUGIN_ENTRY_POINT_GROUP = "fdc3.plugins"
 
 
 def discover_plugins() -> List["IntentHandlerPlugin"]:
     """Discover and instantiate plugins from installed packages.
 
     Scans all installed packages for entry points in the
-    'fdc3_desktop_agent.plugins' group and instantiates each plugin class.
+    'fdc3.plugins' group and instantiates each plugin class.
 
     Returns:
         List of instantiated IntentHandlerPlugin instances.
@@ -42,7 +40,7 @@ def discover_plugins() -> List["IntentHandlerPlugin"]:
     Example:
         External packages register plugins in pyproject.toml::
 
-            [project.entry-points."fdc3_desktop_agent.plugins"]
+            [project.entry-points."fdc3.desktop_agent.plugins"]
             my-handler = "my_package.plugins:MyIntentHandler"
             another-handler = "my_package.plugins:AnotherHandler"
 
@@ -53,9 +51,8 @@ def discover_plugins() -> List["IntentHandlerPlugin"]:
     """
     from .interfaces import IntentHandlerPlugin
 
-    # Use importlib.metadata (Python 3.9+). Look for both new and legacy
-    # entry point group names to support a gradual migration.
-    groups = [PLUGIN_ENTRY_POINT_GROUP, LEGACY_PLUGIN_ENTRY_POINT_GROUP]
+    # Use importlib.metadata (Python 3.9+). Look for the configured group name.
+    groups = [PLUGIN_ENTRY_POINT_GROUP]
 
     eps = []
     if sys.version_info >= (3, 10):
@@ -126,7 +123,7 @@ def list_plugin_entry_points() -> List[dict]:
     Returns:
         List of dicts with 'name', 'value', and 'group' keys.
     """
-    groups = [PLUGIN_ENTRY_POINT_GROUP, LEGACY_PLUGIN_ENTRY_POINT_GROUP]
+    groups = [PLUGIN_ENTRY_POINT_GROUP]
     eps = []
     if sys.version_info >= (3, 10):
         from importlib.metadata import entry_points

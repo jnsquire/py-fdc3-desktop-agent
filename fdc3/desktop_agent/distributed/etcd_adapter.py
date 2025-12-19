@@ -9,6 +9,7 @@ entries to subscribers.
 from __future__ import annotations
 
 import asyncio
+import threading
 import json
 import uuid
 from typing import Any, Callable, Dict, Optional
@@ -51,10 +52,18 @@ class EtcdAdapter(DistributedLogAdapter):
         self.prefix = prefix.rstrip("/")
         # Values may be asyncio.Task, a cancel callable, or None (gateway iterator)
         self._watch_tasks: Dict[str, Optional[Any]] = {}
+        self._watch_tasks_lock = threading.Lock()
+        # Event loop used to schedule callbacks into the async runtime
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._subscription_counter = 0
 
     async def start(self) -> None:
-        # No async client to initialize here; nothing to do for start.
+        # Capture the running event loop so callbacks from blocking threads
+        # can be scheduled safely with `call_soon_threadsafe`.
+        try:
+            self._loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._loop = None
         return None
 
     async def stop(self) -> None:
@@ -113,14 +122,25 @@ class EtcdAdapter(DistributedLogAdapter):
                     data = {"raw": str(val)}
             except Exception:
                 data = {"raw": str(event)}
+
             try:
-                # ensure callback runs on the asyncio event loop
-                try:
-                    loop = asyncio.get_running_loop()
-                    loop.call_soon_threadsafe(callback, data)
-                except RuntimeError:
-                    # no running loop in this thread; schedule on default loop
-                    asyncio.get_event_loop().call_soon_threadsafe(callback, data)
+                # schedule callback on the adapter's stored loop if available;
+                # otherwise fall back to current running loop.
+                target_loop = self._loop
+                if target_loop is None:
+                    try:
+                        target_loop = asyncio.get_running_loop()
+                    except RuntimeError:
+                        target_loop = None
+                if target_loop is not None:
+                    target_loop.call_soon_threadsafe(callback, data)
+                else:
+                    # best-effort fallback: try to use the default event loop
+                    try:
+                        asyncio.get_event_loop().call_soon_threadsafe(callback, data)
+                    except Exception:
+                        # give up if no loop available
+                        return
             except Exception:
                 return
 
@@ -144,10 +164,12 @@ class EtcdAdapter(DistributedLogAdapter):
 
                     if cancel is not None:
                         # store cancel callable to allow unsubscribe
-                        self._watch_tasks[watch_id] = cancel
+                        with self._watch_tasks_lock:
+                            self._watch_tasks[watch_id] = cancel
                     else:
                         # otherwise store nothing yet and iterate
-                        self._watch_tasks[watch_id] = None
+                        with self._watch_tasks_lock:
+                            self._watch_tasks[watch_id] = None
 
                     if events_iter is not None:
                         for ev in events_iter:
@@ -155,8 +177,11 @@ class EtcdAdapter(DistributedLogAdapter):
                 except Exception:
                     pass
 
-            t = asyncio.create_task(asyncio.to_thread(_blocking_watch_gw))
-            self._watch_tasks[watch_id] = t
+            from ..tools import create_task_safe
+
+            t = create_task_safe(asyncio.to_thread(_blocking_watch_gw))
+            with self._watch_tasks_lock:
+                self._watch_tasks[watch_id] = t
             return watch_id
         else:
             # sync etcd3 client
@@ -164,7 +189,8 @@ class EtcdAdapter(DistributedLogAdapter):
             if callable(add_watch):
                 try:
                     cancel = add_watch(prefix, _on_event_sync)
-                    self._watch_tasks[watch_id] = cancel
+                    with self._watch_tasks_lock:
+                        self._watch_tasks[watch_id] = cancel
                     return watch_id
                 except Exception:
                     pass
@@ -176,12 +202,16 @@ class EtcdAdapter(DistributedLogAdapter):
                 except Exception:
                     pass
 
-            t = asyncio.create_task(asyncio.to_thread(_blocking_watch))
-            self._watch_tasks[watch_id] = t
+            from ..tools import create_task_safe
+
+            t = create_task_safe(asyncio.to_thread(_blocking_watch))
+            with self._watch_tasks_lock:
+                self._watch_tasks[watch_id] = t
             return watch_id
 
     async def unsubscribe(self, subscription_id: str) -> None:
-        task = self._watch_tasks.pop(subscription_id, None)
+        with self._watch_tasks_lock:
+            task = self._watch_tasks.pop(subscription_id, None)
         if not task:
             return
         try:

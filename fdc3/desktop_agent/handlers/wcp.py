@@ -185,13 +185,10 @@ class WCPHandler:
                 runtime_info = {}
 
             # Merge runtime info into implementation metadata
-            try:
-                if impl_meta and isinstance(impl_meta, dict):
-                    impl_meta.update(runtime_info)
-                else:
-                    impl_meta = runtime_info
-            except Exception:
-                pass
+            if impl_meta:
+                impl_meta.update(runtime_info)
+            else:
+                impl_meta = runtime_info
 
             connection_attempt = getattr(
                 getattr(wcp4, "meta", None), "connectionAttemptUuid", None
@@ -289,8 +286,14 @@ class WCPHandler:
             if pending_instance and not pending_instance.connected:
                 app_id = pending_instance.app_id
 
-                # Check allowed origins
-                allowed_origins = await self.storage.origins.get_allowed_origins(app_id)
+                # Check allowed origins stored on the app metadata
+                allowed_origins = []
+                try:
+                    app_meta = await self.storage.apps.get_app_metadata(app_id)
+                    allowed_origins = getattr(app_meta, "allowed_origins", []) or []
+                except Exception:
+                    allowed_origins = []
+
                 if allowed_origins:
                     identity_origin = (
                         urlparse(identity_url).netloc if identity_url else None

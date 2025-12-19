@@ -5,9 +5,7 @@ CREATE TABLE IF NOT EXISTS apps (
     app_id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     version TEXT,
-    description TEXT,
-    icons TEXT,  -- JSON array of icon objects
-    intents TEXT  -- JSON array of intent strings
+    description TEXT
 );
 
 CREATE TABLE IF NOT EXISTS launch_configs (
@@ -22,6 +20,25 @@ CREATE TABLE IF NOT EXISTS launch_configs (
 CREATE TABLE IF NOT EXISTS origins (
     app_id TEXT PRIMARY KEY,
     origins TEXT  -- JSON array of allowed origin URLs
+);
+
+CREATE TABLE IF NOT EXISTS app_icons (
+    app_id TEXT NOT NULL,
+    src TEXT NOT NULL,
+    size TEXT,
+    PRIMARY KEY (app_id, src)
+);
+
+CREATE TABLE IF NOT EXISTS app_intents (
+    app_id TEXT NOT NULL,
+    intent TEXT NOT NULL,
+    PRIMARY KEY (app_id, intent)
+);
+
+CREATE TABLE IF NOT EXISTS app_allowed_origins (
+    app_id TEXT NOT NULL,
+    origin TEXT NOT NULL,
+    PRIMARY KEY (app_id, origin)
 );
 
 -- Indexes for performance

@@ -76,20 +76,24 @@ class MessageParseError(Exception):
         self.request_uuid = request_uuid
 
 
-def parse_message(raw: Dict[str, Any]) -> ParsedMessage:
-    """Parse and validate a raw message dict into a typed Pydantic model.
+def parse_message(raw: Any) -> ParsedMessage:
+    """Parse and validate a message (dict or Pydantic model) into a Pydantic model.
 
-    Args:
-        raw: The raw message dictionary from the WebSocket.
-
-    Returns:
-        A validated Pydantic model instance.
-
-    Raises:
-        MessageParseError: If the message type is unknown or validation fails.
+    Accepts either a raw mapping (dict-like) or a Pydantic `BaseModel` envelope.
+    When given a model, it is converted to a plain dict via `.model_dump()`
+    (or `.dict()` for older Pydantic versions) before validation.
     """
-    msg_type = raw.get("type")
-    request_uuid = (raw.get("meta") or {}).get("requestUuid")
+    # Normalize to plain dict so downstream validators receive JSON-native types.
+    if isinstance(raw, BaseModel):
+        if hasattr(raw, "model_dump"):
+            data = raw.model_dump()
+        else:
+            data = raw.dict()
+    else:
+        data = dict(raw)
+
+    msg_type = data.get("type")
+    request_uuid = (data.get("meta") or {}).get("requestUuid")
 
     if not msg_type:
         raise MessageParseError("Missing message type", request_uuid)
@@ -99,7 +103,7 @@ def parse_message(raw: Dict[str, Any]) -> ParsedMessage:
         raise MessageParseError(f"Unknown message type: {msg_type}", request_uuid)
 
     try:
-        return cast(ParsedMessage, model_class.model_validate(raw))
+        return cast(ParsedMessage, model_class.model_validate(data))
     except ValidationError as e:
         # Extract a clean error message from Pydantic validation errors
         errors = e.errors()

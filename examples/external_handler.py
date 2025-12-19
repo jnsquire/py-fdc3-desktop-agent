@@ -1,4 +1,4 @@
-"""Example external intent handler using the minimal `fdc3_client`.
+"""Example external intent handler using the `fdc3.client` library.
 
 Usage:
 
@@ -7,6 +7,8 @@ Usage:
 This connects, performs WCP handshake, registers a handler for a test intent,
 and replies with a simple payload.
 """
+
+from fdc3.models.dacp import ForwardedIntentMessage
 
 import argparse
 import asyncio
@@ -22,19 +24,23 @@ async def main(agent_url: str, handler_id: str):
     # Create client with handler_id for WCP self-registration
     async with FDC3Client(agent_url, handler_id=handler_id) as client:
 
-        async def on_intent(request):
-            logger.info(f"Received intent: {request.intent} id={request.request_uuid}")
+        async def on_intent(request: ForwardedIntentMessage):
+            # `request` is a pydantic model when received from the agent.
+            payload = request.payload
+            intent = payload.intent
+            req_id = payload.request_uuid
+            logger.info(f"Received intent: {intent} id={req_id}")
             # Simple handling: echo the context back with handler info
             await client.send_intent_result(
-                request.request_uuid,
+                payload.request_uuid,
                 result={
                     "handledBy": handler_id,
-                    "intent": request.intent,
-                    "context": getattr(request, "context", {}),
+                    "intent": payload.intent,
+                    "context": payload.context,
                 },
             )
 
-        client.on_intent(on_intent)
+        client.forwarded_intent_handlers.add(on_intent)
 
         # Wait for WCP handshake to complete
         if not await client.wait_for_handshake():

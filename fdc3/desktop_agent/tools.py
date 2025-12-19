@@ -1,68 +1,62 @@
-"""Utility scripts for developer workflows.
+"""Runtime utilities for the desktop agent.
 
-Provide a `prepush`/`check_style` entry point that runs the same style
-and lint checks used by CI so contributors can run them locally.
+This module contains small helpers used by the running agent.
+
+Developer workflow entry points (e.g. `check-style`, `install-git-hooks`)
+live in `fdc3.desktop_agent.devtools`.
 """
 
 from __future__ import annotations
 
-import subprocess
-import sys
-from typing import Sequence
+from typing import Any, Coroutine
+import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
 
 
-def _run(cmd: Sequence[str]) -> int:
-    print("Running:", " ".join(cmd))
-    res = subprocess.run(cmd)
-    return res.returncode
+# Backward-compatible re-exports (dev tooling was moved to devtools.py)
+from .devtools import install_git_hooks, prepush, run_pytest  # noqa: E402,F401
 
 
-def prepush() -> None:
-    """Run ruff and black checks used by CI.
+def create_task_safe(
+    coro: Coroutine[Any, Any, Any], *, name: str | None = None
+) -> asyncio.Task[Any]:
+    """Create an asyncio.Task and log uncaught exceptions.
 
-    Exits with non-zero status if any check fails.
+    Use this helper for fire-and-forget background tasks so exceptions are
+    surfaced to the logger instead of being silently dropped.
     """
-    cmds = [[sys.executable, "-m", "ruff", "check", "."]]
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        # No running loop; fallback to creating task on default loop
+        loop = asyncio.get_event_loop()
 
-    failures = 0
-    for cmd in cmds:
-        rc = _run(cmd)
-        if rc != 0:
-            failures += 1
+    task = loop.create_task(coro)
 
-    if failures:
-        print(f"Style checks failed ({failures} failed). Fix issues and try again.")
-        raise SystemExit(1)
+    def _on_done(t: asyncio.Task[Any]) -> None:
+        try:
+            exc = t.exception()
+            if exc is not None:
+                logger.exception("Background task raised an exception", exc_info=exc)
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.exception("Error retrieving task exception")
+
+    task.add_done_callback(_on_done)
+    return task
 
 
-if __name__ == "__main__":
-    prepush()
+async def yield_once() -> None:
+    """Yield control to the event loop exactly once.
 
-
-def install_git_hooks() -> None:
-    """Install `pre-commit` and register git hooks.
-
-    Installs into the active Python environment (venv) when detected,
-    otherwise falls back to a user install.
+    This is a sleep-free alternative to `await asyncio.sleep(0)` or
+    `await asyncio.sleep(0.01)` when the intent is simply to allow pending
+    callbacks/transports to finalize.
     """
-    python = sys.executable
-    print(f"Using Python executable: {python}")
-
-    inside_venv = sys.prefix != getattr(sys, "base_prefix", sys.prefix)
-    if inside_venv:
-        rc = _run([python, "-m", "pip", "install", "pre-commit"])
-    else:
-        rc = _run([python, "-m", "pip", "install", "--user", "pre-commit"])
-
-    if rc != 0:
-        print("Failed to install pre-commit; aborting.")
-        raise SystemExit(1)
-
-    rc = _run([python, "-m", "pre_commit", "install"])
-    if rc != 0:
-        print(
-            "pre-commit install failed. You may need to run 'pre-commit install' manually."
-        )
-        raise SystemExit(1)
-
-    print("pre-commit hooks installed. Run: pre-commit run --all-files")
+    loop = asyncio.get_running_loop()
+    fut = loop.create_future()
+    loop.call_soon(fut.set_result, None)
+    await fut

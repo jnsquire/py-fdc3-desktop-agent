@@ -2,6 +2,7 @@ import strawberry
 from typing import List, Optional, AsyncGenerator
 import asyncio
 import logging
+import json
 
 # Import storage types
 from ..storage.interfaces import Storage as StorageInterface
@@ -334,6 +335,34 @@ class Mutation:
             logging.error(f"Error broadcasting to channel {channel_id}: {e}")
             raise
 
+    @strawberry.mutation
+    def emit_channel_event(
+        self,
+        channel_id: str,
+        event_type: str,
+        instance_uuid: Optional[str] = None,
+        context: Optional[str] = None,
+    ) -> bool:
+        """Emit a synthetic channel event (admin/dev helper).
+
+        This mutation is intended for testing/demo purposes only and will
+        directly emit the specified event to channel subscribers.
+        """
+        if not hasattr(core_services, "channel_manager"):
+            raise Exception("Channel manager not available")
+
+        ctx = None
+        if context:
+            try:
+                ctx = json.loads(context)
+            except Exception:
+                ctx = None
+
+        core_services.channel_manager._emit_event(
+            event_type, channel_id, instance_uuid, ctx
+        )
+        return True
+
 
 @strawberry.type
 class Subscription:
@@ -374,12 +403,16 @@ class Subscription:
         else:
             # If channel manager doesn't support subscriptions yet, yield a placeholder
             logging.warning("Channel manager does not support event subscriptions")
+            try:
+                ts = asyncio.get_running_loop().time()
+            except RuntimeError:
+                ts = asyncio.get_event_loop().time()
             yield ChannelEventType(
                 event_type="system",
                 channel_id="system",
                 instance_uuid=None,
                 context='{"message": "Channel event subscriptions not yet implemented"}',
-                timestamp=str(asyncio.get_event_loop().time()),
+                timestamp=str(ts),
             )
 
 

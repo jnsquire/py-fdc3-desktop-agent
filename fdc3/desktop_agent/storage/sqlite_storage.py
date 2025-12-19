@@ -8,7 +8,6 @@ from .interfaces import (
     Storage,
     AppDirectoryRepository,
     LaunchConfigRepository,
-    OriginRepository,
     AppMetadata,
     LaunchConfig,
 )
@@ -25,54 +24,113 @@ class SqliteAppDirectoryRepository(AppDirectoryRepository):
     async def get_app_metadata(self, app_id: str) -> Optional[AppMetadata]:
         """Get app metadata by app_id"""
         async with self.db.execute(
-            "SELECT name, version, description, icons, intents FROM apps WHERE app_id = ?",
+            "SELECT name, version, description FROM apps WHERE app_id = ?",
             (app_id,),
         ) as cursor:
             row = await cursor.fetchone()
-            if row:
-                name, version, description, icons_json, intents_json = row
-                icons = json.loads(icons_json) if icons_json else []
-                intents = json.loads(intents_json) if intents_json else []
-                return AppMetadata(app_id, name, version, description, icons, intents)
+            if not row:
+                return None
+            name, version, description = row
+
+        # Load normalized lists (order is not guaranteed)
+        icons = []
+        async with self.db.execute(
+            "SELECT src, size FROM app_icons WHERE app_id = ?",
+            (app_id,),
+        ) as cursor:
+            async for r in cursor:
+                src, size = r
+                icons.append({"src": src, "size": size} if size else {"src": src})
+
+        intents = []
+        async with self.db.execute(
+            "SELECT intent FROM app_intents WHERE app_id = ?",
+            (app_id,),
+        ) as cursor:
+            async for r in cursor:
+                (intent,) = r
+                intents.append(intent)
+
+        allowed_origins = []
+        async with self.db.execute(
+            "SELECT origin FROM app_allowed_origins WHERE app_id = ?",
+            (app_id,),
+        ) as cursor:
+            async for r in cursor:
+                (origin,) = r
+                allowed_origins.append(origin)
+
+        return AppMetadata(
+            app_id, name, version, description, icons, intents, allowed_origins
+        )
         return None
 
     async def list_apps(self) -> List[AppMetadata]:
         """List all apps in directory"""
         apps = []
         async with self.db.execute(
-            "SELECT app_id, name, version, description, icons, intents FROM apps"
+            "SELECT app_id, name, version, description FROM apps"
         ) as cursor:
             async for row in cursor:
-                app_id, name, version, description, icons_json, intents_json = row
-                icons = json.loads(icons_json) if icons_json else []
-                intents = json.loads(intents_json) if intents_json else []
-                apps.append(
-                    AppMetadata(app_id, name, version, description, icons, intents)
-                )
+                app_id, name, version, description = row
+                # reuse get_app_metadata to assemble lists
+                meta = await self.get_app_metadata(app_id)
+                apps.append(meta)
         return apps
 
     async def add_app(self, metadata: AppMetadata) -> None:
         """Add or update app in directory"""
-        icons_json = json.dumps(metadata.icons)
-        intents_json = json.dumps(metadata.intents)
         await self.db.execute(
             """
-            INSERT OR REPLACE INTO apps (app_id, name, version, description, icons, intents)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO apps (app_id, name, version, description)
+            VALUES (?, ?, ?, ?)
             """,
             (
                 metadata.app_id,
                 metadata.name,
                 metadata.version,
                 metadata.description,
-                icons_json,
-                intents_json,
             ),
         )
+
+        # Replace icons, intents, allowed_origins
+        await self.db.execute(
+            "DELETE FROM app_icons WHERE app_id = ?", (metadata.app_id,)
+        )
+        for icon in metadata.icons:
+            src = icon.get("src")
+            size = icon.get("size") if icon.get("size") is not None else None
+            await self.db.execute(
+                "INSERT INTO app_icons (app_id, src, size) VALUES (?, ?, ?)",
+                (metadata.app_id, src, size),
+            )
+
+        await self.db.execute(
+            "DELETE FROM app_intents WHERE app_id = ?", (metadata.app_id,)
+        )
+        for intent in metadata.intents:
+            await self.db.execute(
+                "INSERT INTO app_intents (app_id, intent) VALUES (?, ?)",
+                (metadata.app_id, intent),
+            )
+
+        await self.db.execute(
+            "DELETE FROM app_allowed_origins WHERE app_id = ?", (metadata.app_id,)
+        )
+        for origin in metadata.allowed_origins:
+            await self.db.execute(
+                "INSERT INTO app_allowed_origins (app_id, origin) VALUES (?, ?)",
+                (metadata.app_id, origin),
+            )
         await self.db.commit()
 
     async def remove_app(self, app_id: str) -> None:
         """Remove app from directory"""
+        await self.db.execute("DELETE FROM app_icons WHERE app_id = ?", (app_id,))
+        await self.db.execute("DELETE FROM app_intents WHERE app_id = ?", (app_id,))
+        await self.db.execute(
+            "DELETE FROM app_allowed_origins WHERE app_id = ?", (app_id,)
+        )
         await self.db.execute("DELETE FROM apps WHERE app_id = ?", (app_id,))
         await self.db.commit()
 
@@ -137,36 +195,6 @@ class SqliteLaunchConfigRepository(LaunchConfigRepository):
             return configs
 
 
-class SqliteOriginRepository(OriginRepository):
-    """SQLite implementation of origin repository"""
-
-    def __init__(self, db: aiosqlite.Connection):
-        self.db = db
-
-    async def get_allowed_origins(self, app_id: str) -> List[str]:
-        """Get allowed origins for app"""
-        async with self.db.execute(
-            "SELECT origins FROM origins WHERE app_id = ?", (app_id,)
-        ) as cursor:
-            row = await cursor.fetchone()
-            if row:
-                (origins_json,) = row
-                return json.loads(origins_json) if origins_json else []
-        return []
-
-    async def set_allowed_origins(self, app_id: str, origins: List[str]) -> None:
-        """Set allowed origins for app"""
-        origins_json = json.dumps(origins)
-        await self.db.execute(
-            """
-            INSERT OR REPLACE INTO origins (app_id, origins)
-            VALUES (?, ?)
-            """,
-            (app_id, origins_json),
-        )
-        await self.db.commit()
-
-
 class SqliteStorage(Storage):
     """SQLite implementation of storage interface"""
 
@@ -175,7 +203,6 @@ class SqliteStorage(Storage):
         self._db: Optional[aiosqlite.Connection] = None
         self._apps_repo: Optional[SqliteAppDirectoryRepository] = None
         self._launch_repo: Optional[SqliteLaunchConfigRepository] = None
-        self._origins_repo: Optional[SqliteOriginRepository] = None
 
     @property
     def apps(self) -> AppDirectoryRepository:
@@ -191,13 +218,6 @@ class SqliteStorage(Storage):
             raise RuntimeError("Storage not initialized")
         return self._launch_repo
 
-    @property
-    def origins(self) -> OriginRepository:
-        """Origin repository"""
-        if self._origins_repo is None:
-            raise RuntimeError("Storage not initialized")
-        return self._origins_repo
-
     async def initialize(self) -> None:
         """Initialize storage (create tables, etc.)"""
         self._db = await aiosqlite.connect(self.db_path)
@@ -210,9 +230,7 @@ class SqliteStorage(Storage):
                 app_id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 version TEXT,
-                description TEXT,
-                icons TEXT,  -- JSON array
-                intents TEXT  -- JSON array
+                description TEXT
             );
 
             CREATE TABLE IF NOT EXISTS launch_configs (
@@ -224,9 +242,23 @@ class SqliteStorage(Storage):
                 timeout INTEGER DEFAULT 30
             );
 
-            CREATE TABLE IF NOT EXISTS origins (
-                app_id TEXT PRIMARY KEY,
-                origins TEXT  -- JSON array
+            CREATE TABLE IF NOT EXISTS app_icons (
+                app_id TEXT NOT NULL,
+                src TEXT NOT NULL,
+                size TEXT,
+                PRIMARY KEY (app_id, src)
+            );
+
+            CREATE TABLE IF NOT EXISTS app_intents (
+                app_id TEXT NOT NULL,
+                intent TEXT NOT NULL,
+                PRIMARY KEY (app_id, intent)
+            );
+
+            CREATE TABLE IF NOT EXISTS app_allowed_origins (
+                app_id TEXT NOT NULL,
+                origin TEXT NOT NULL,
+                PRIMARY KEY (app_id, origin)
             );
         """
         )
@@ -234,7 +266,7 @@ class SqliteStorage(Storage):
         # Create repositories
         self._apps_repo = SqliteAppDirectoryRepository(self._db)
         self._launch_repo = SqliteLaunchConfigRepository(self._db)
-        self._origins_repo = SqliteOriginRepository(self._db)
+        # origins repo removed; apps repo stores allowed_origins
 
         logger.info(f"SQLite storage initialized at {self.db_path}")
 

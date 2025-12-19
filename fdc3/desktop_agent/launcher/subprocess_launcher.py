@@ -77,7 +77,9 @@ class SubprocessLauncher(ProcessLauncher):
             self._process_events[instance_uuid] = asyncio.Event()
 
             # Start a background reaper to clean up transports when the process exits
-            asyncio.create_task(self._reap_process(instance_uuid, process))
+            from ..tools import create_task_safe  # local import to avoid cycles
+
+            create_task_safe(self._reap_process(instance_uuid, process))
 
             logger.info(
                 f"App {app_id} launched successfully with instance UUID {instance_uuid}"
@@ -182,9 +184,12 @@ class SubprocessLauncher(ProcessLauncher):
                 del self._running_processes[instance_uuid]
         except Exception:
             pass
-        # Give the event loop a moment to finalize transports on Windows
+        # Yield control once to let the event loop finalize transports on Windows
+        # without introducing a fixed sleep.
         try:
-            await asyncio.sleep(0.01)
+            from ..tools import yield_once  # local import to avoid cycles
+
+            await yield_once()
         except Exception:
             pass
 

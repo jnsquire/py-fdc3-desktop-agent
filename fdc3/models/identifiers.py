@@ -1,5 +1,15 @@
-from pydantic import BaseModel, Field
+"""Identifier and small domain types.
+
+This module contains compact Pydantic models used across the codebase
+and was previously re-exported from the generated
+`fdc3.desktop_agent.api`. Keeping the definitions here avoids import
+cycles and provides a stable surface for other modules.
+"""
+
+from enum import Enum
 from typing import Optional, List
+
+from pydantic import BaseModel, Field
 
 
 class AppIdentifier(BaseModel):
@@ -84,10 +94,19 @@ class IntentResult(BaseModel):
     pass  # placeholder
 
 
-class FDC3EventType(str):
+class FDC3EventType(str, Enum):
     USER_CHANNEL_CHANGED = "USER_CHANNEL_CHANGED"
 
 
 class FDC3Event(BaseModel):
     type: FDC3EventType
     details: dict
+
+
+__all__ = [
+    "AppIdentifier",
+    "Icon",
+    "Image",
+    "AppMetadata",
+    "IntentResolution",
+]

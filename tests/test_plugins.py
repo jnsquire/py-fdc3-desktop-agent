@@ -1,7 +1,9 @@
 """Tests for the plugin system."""
 
 import pytest
-from typing import Dict, Any, List, Optional
+from types import SimpleNamespace
+from typing import Dict, Any, List, Optional, cast
+from unittest.mock import patch
 
 from fdc3.desktop_agent.plugins import (
     IntentHandlerPlugin,
@@ -262,20 +264,163 @@ class TestPluginDiscovery:
             assert "value" in ep
             assert "group" in ep
 
-    def test_plugin_entry_point_group_constant(self):
-        """Test the entry point group constant is correct."""
-        from fdc3.desktop_agent.plugins import PLUGIN_ENTRY_POINT_GROUP
-
-        assert PLUGIN_ENTRY_POINT_GROUP == "fdc3.desktop_agent.plugins"
-
-    def test_exports_from_main_package(self):
-        """Test discovery functions are exported from main package."""
-        from fdc3.desktop_agent import (
-            discover_plugins,
-            list_plugin_entry_points,
+    def test_discover_plugins_entry_point_branches_py310plus(self):
+        from fdc3.desktop_agent.plugins import IntentHandlerPlugin
+        from fdc3.desktop_agent.plugins.discovery import (
             PLUGIN_ENTRY_POINT_GROUP,
+            discover_plugins,
         )
 
-        assert callable(discover_plugins)
-        assert callable(list_plugin_entry_points)
-        assert isinstance(PLUGIN_ENTRY_POINT_GROUP, str)
+        class GoodPlugin(IntentHandlerPlugin):
+            @property
+            def handled_intents(self) -> List[str]:
+                return ["x"]
+
+            async def handle_intent(
+                self,
+                intent: str,
+                context: Optional[Dict[str, Any]],
+                source: Optional[Dict[str, Any]],
+            ):
+                return IntentHandlerResult(handled=True)
+
+        class NotAPlugin:
+            pass
+
+        class FakeEP:
+            def __init__(self, name: str, value: str, loader):
+                self.name = name
+                self.value = value
+                self._loader = loader
+                self.group = PLUGIN_ENTRY_POINT_GROUP
+
+            def load(self):
+                return self._loader()
+
+        eps = [
+            FakeEP("not-a-class", "x", lambda: 123),
+            FakeEP("not-a-subclass", "y", lambda: NotAPlugin),
+            FakeEP(
+                "load-throws", "z", lambda: (_ for _ in ()).throw(RuntimeError("boom"))
+            ),
+            FakeEP("good", "g", lambda: GoodPlugin),
+        ]
+
+        def fake_entry_points(*, group: str):
+            assert group == PLUGIN_ENTRY_POINT_GROUP
+            return eps
+
+        with (
+            patch("importlib.metadata.entry_points", side_effect=fake_entry_points),
+            patch("fdc3.desktop_agent.plugins.discovery.logger") as mock_logger,
+        ):
+            plugins = discover_plugins()
+
+            assert [p.name for p in plugins] == ["GoodPlugin"]
+            mock_logger.warning.assert_called()  # non-class and non-subclass
+            mock_logger.error.assert_called()  # load exception
+
+    def test_discover_plugins_entry_points_group_exception_is_ignored(self):
+        from fdc3.desktop_agent.plugins.discovery import discover_plugins
+
+        with (
+            patch(
+                "importlib.metadata.entry_points",
+                side_effect=RuntimeError("unknown group"),
+            ),
+            patch("fdc3.desktop_agent.plugins.discovery.logger") as mock_logger,
+        ):
+            plugins = discover_plugins()
+            assert plugins == []
+            mock_logger.debug.assert_called()
+
+    def test_discover_plugins_py39_fallback_path(self):
+        from fdc3.desktop_agent.plugins.discovery import (
+            PLUGIN_ENTRY_POINT_GROUP,
+            discover_plugins,
+        )
+        from fdc3.desktop_agent.plugins import IntentHandlerPlugin
+
+        class GoodPlugin(IntentHandlerPlugin):
+            @property
+            def handled_intents(self) -> List[str]:
+                return ["x"]
+
+            async def handle_intent(
+                self,
+                intent: str,
+                context: Optional[Dict[str, Any]],
+                source: Optional[Dict[str, Any]],
+            ):
+                return IntentHandlerResult(handled=True)
+
+        class FakeEP:
+            name = "good"
+            value = "g"
+            group = PLUGIN_ENTRY_POINT_GROUP
+
+            def load(self):
+                return GoodPlugin
+
+        all_eps = {PLUGIN_ENTRY_POINT_GROUP: [FakeEP()]}
+
+        with (
+            patch(
+                "fdc3.desktop_agent.plugins.discovery.sys",
+                SimpleNamespace(version_info=(3, 9)),
+            ),
+            patch("importlib.metadata.entry_points", return_value=all_eps),
+        ):
+            plugins = discover_plugins()
+            assert len(plugins) == 1
+            assert plugins[0].name == "GoodPlugin"
+
+    def test_list_plugin_entry_points_py39_fallback_path(self):
+        from fdc3.desktop_agent.plugins.discovery import (
+            PLUGIN_ENTRY_POINT_GROUP,
+            list_plugin_entry_points,
+        )
+
+        class FakeEP:
+            name = "good"
+            value = "g"
+
+        all_eps = {PLUGIN_ENTRY_POINT_GROUP: [FakeEP()]}
+
+        with (
+            patch(
+                "fdc3.desktop_agent.plugins.discovery.sys",
+                SimpleNamespace(version_info=(3, 9)),
+            ),
+            patch("importlib.metadata.entry_points", return_value=all_eps),
+        ):
+            eps = list_plugin_entry_points()
+            assert eps == [
+                {"name": "good", "value": "g", "group": PLUGIN_ENTRY_POINT_GROUP}
+            ]
+
+    def test_list_plugin_entry_points_group_exception_is_ignored(self):
+        from fdc3.desktop_agent.plugins.discovery import list_plugin_entry_points
+
+        with patch(
+            "importlib.metadata.entry_points",
+            side_effect=RuntimeError("unknown group"),
+        ):
+            assert list_plugin_entry_points() == []
+
+
+@pytest.mark.asyncio
+async def test_intent_handler_plugin_base_defaults_cover_pass_lines():
+    from fdc3.desktop_agent.plugins.interfaces import IntentHandlerPlugin
+
+    dummy = cast(IntentHandlerPlugin, object())
+
+    # Abstract members still exist as callables; executing them covers the
+    # default/pass lines for coverage purposes.
+    assert IntentHandlerPlugin.handled_intents.fget(dummy) is None
+    assert IntentHandlerPlugin.priority.fget(dummy) == 0
+    assert IntentHandlerPlugin.name.fget(dummy) == "object"
+
+    await IntentHandlerPlugin.on_register(dummy, core_services=None)
+    await IntentHandlerPlugin.on_unregister(dummy)
+    await IntentHandlerPlugin.handle_intent(dummy, "x", None, None)

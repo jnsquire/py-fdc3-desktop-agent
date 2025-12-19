@@ -16,6 +16,58 @@ python -m pip install -e '.[dev]'
 python -m pytest
 ```
 
+## Developer setup
+
+This repository includes helper scripts to bootstrap a developer environment and install git hooks.
+
+- Windows (PowerShell): `scripts/bootstrap-dev.ps1`
+- POSIX (macOS / Linux): `scripts/bootstrap-dev.sh`
+
+`install-git-hooks` is provided as a console script entry (installed when you run an editable install). After installing dev deps you can run:
+
+```powershell
+# Windows
+install-git-hooks
+
+# or explicitly via the venv
+.venv\Scripts\install-git-hooks
+```
+
+Each script will (when run from the repository root):
+
+- install or upgrade `pip` in the `.venv` virtualenv
+- install the project's development extras (`.[dev]`) into the `.venv`
+- install `pre-commit` hooks into `.git/hooks`
+- run `pre-commit` once across the repository to auto-fix style issues
+
+Examples:
+
+PowerShell
+
+```powershell
+./scripts/bootstrap-dev.ps1
+```
+
+POSIX
+
+```bash
+./scripts/bootstrap-dev.sh
+```
+
+If you prefer manual steps, the equivalent commands are:
+
+```bash
+# install dev deps
+./.venv/bin/python -m pip install --upgrade pip
+./.venv/bin/python -m pip install -e '.[dev]'
+
+# install pre-commit hooks
+./.venv/bin/pre-commit install --install-hooks
+
+# run pre-commit once
+./.venv/bin/pre-commit run --all-files
+```
+
 CI should install the same extras so tests can be executed (see CI note below).
 
 ## Distributed adapters (optional)

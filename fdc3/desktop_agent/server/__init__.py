@@ -11,7 +11,7 @@ from typing import Dict, Set, Optional
 from contextlib import asynccontextmanager
 
 from ..api.graphql import schema, set_graphql_storage
-from ..protocol.dacp.dacp import AgentEventMeta, AgentEvent, AgentEventPayload
+from fdc3.models.dacp.dacp import AgentEventMeta, AgentEvent, AgentEventPayload
 from ..core import CoreServices
 from ..distributed.factory import get_adapter
 from ..storage import SqliteStorage
@@ -24,6 +24,7 @@ from ..handlers import (
     DACPHandler,
     WebSocketConnectionManager,
 )
+from ..tools import create_task_safe
 from ..config import DesktopAgentConfig
 from ..version import __version__
 
@@ -199,10 +200,16 @@ def create_app(config: Optional[DesktopAgentConfig] = None) -> FastAPI:
         logger.info(f"Server configured for {config.host}:{config.port}")
         logger.info(f"Allowed origins: {', '.join(config.allowed_origins)}")
 
-        logger.info(f"HTTP API available at: http://{config.host}:{config.port}")
-        logger.info(f"GraphQL endpoint at: http://{config.host}:{config.port}/graphql")
-        logger.info(f"WebSocket endpoint at: {config.computed_agent_url}")
-        logger.info(f"Admin interface at: http://{config.host}:{config.port}/admin")
+        # For display purposes, prefer localhost when the server is bound to 0.0.0.0
+        display_host = "127.0.0.1" if config.host == "0.0.0.0" else config.host
+        display_agent_url = config.computed_agent_url.replace(
+            f"//{config.host}", f"//{display_host}", 1
+        )
+
+        logger.info(f"HTTP API available at: http://{display_host}:{config.port}")
+        logger.info(f"GraphQL endpoint at: http://{display_host}:{config.port}/graphql")
+        logger.info(f"WebSocket endpoint at: {display_agent_url}")
+        logger.info(f"Admin interface at: http://{display_host}:{config.port}/admin")
 
         # Register intent handler plugins
         # First, discover plugins from entry points if enabled
@@ -249,10 +256,12 @@ def create_app(config: Optional[DesktopAgentConfig] = None) -> FastAPI:
                             remote=True,
                         )
                     except Exception:
-                        pass
+                        logger.exception("Error handling distributed event")
 
                 def _sub_cb(ev: dict):
-                    asyncio.create_task(_distributed_event_handler(ev))
+                    # Fire-and-forget: schedule handler safely so exceptions
+                    # are logged instead of being dropped.
+                    create_task_safe(_distributed_event_handler(ev))
 
                 sub_id = await adapter.subscribe("channel_events", _sub_cb)
                 app.state.distributed_subscription_id = sub_id
@@ -328,37 +337,44 @@ def create_app(config: Optional[DesktopAgentConfig] = None) -> FastAPI:
     @app.get("/admin", response_class=HTMLResponse)
     async def admin_page(request: Request):
         """Admin page for managing launch configurations"""
-        return templates.TemplateResponse("admin.html", {"request": request})
+        return templates.TemplateResponse(request, "admin.html", {})
 
     @app.get("/app-directory", response_class=HTMLResponse)
     async def app_directory_page(request: Request):
         """App directory management interface"""
-        return templates.TemplateResponse("app_directory.html", {"request": request})
+        return templates.TemplateResponse(request, "app_directory.html", {})
 
     @app.get("/system-settings", response_class=HTMLResponse)
     async def system_settings_page(request: Request):
         """System configuration panel"""
-        return templates.TemplateResponse("system_settings.html", {"request": request})
+        return templates.TemplateResponse(request, "system_settings.html", {})
 
     @app.get("/diagnostics", response_class=HTMLResponse)
     async def diagnostics_page(request: Request):
         """System diagnostics and health checks"""
-        return templates.TemplateResponse("diagnostics.html", {"request": request})
+        return templates.TemplateResponse(request, "diagnostics.html", {})
 
     @app.get("/channel-monitor", response_class=HTMLResponse)
     async def channel_monitor_page(request: Request):
         """Channel monitor UI for subscribing to channel events"""
-        return templates.TemplateResponse("channel_monitor.html", {"request": request})
+        return templates.TemplateResponse(request, "channel_monitor.html", {})
+
+    @app.get("/channel-sequence", response_class=HTMLResponse)
+    async def channel_sequence_page(request: Request):
+        """Sequence diagram view for channel traffic (uses GraphQL subscription)."""
+        return templates.TemplateResponse(request, "sequence_diagram.html", {})
 
     @app.get("/public-channels", response_class=HTMLResponse)
     async def public_channels_page(request: Request):
         """Public channels management interface"""
-        return templates.TemplateResponse("public_channels.html", {"request": request})
+        return templates.TemplateResponse(request, "public_channels.html", {})
 
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket):
         """WebSocket endpoint for FDC3 WCP and DACP communication"""
-        access_granted = await access_control_handler.validate_connection(websocket)
+        access_granted = await access_control_handler.validate_connection(
+            websocket, websocket.headers
+        )
         if not access_granted:
             return
 
@@ -372,7 +388,7 @@ def create_app(config: Optional[DesktopAgentConfig] = None) -> FastAPI:
             while True:
                 await asyncio.sleep(30)
                 if session_id and dacp_active:
-                    from ..protocol.dacp.dacp import (
+                    from fdc3.models.dacp.dacp import (
                         HeartbeatEvent,
                         AgentEventMeta as HBMeta,
                     )
@@ -410,6 +426,10 @@ def create_app(config: Optional[DesktopAgentConfig] = None) -> FastAPI:
         except WebSocketDisconnect:
             if heartbeat_task:
                 heartbeat_task.cancel()
+                try:
+                    await heartbeat_task
+                except asyncio.CancelledError:
+                    pass
             if session_id in wcp_sessions:
                 identity = wcp_sessions[session_id]["identity"]
                 instance_uuid = identity["instanceUuid"]

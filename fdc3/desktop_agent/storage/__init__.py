@@ -4,7 +4,6 @@ from .interfaces import (
     Storage,
     AppDirectoryRepository,
     LaunchConfigRepository,
-    OriginRepository,
     AppMetadata,
     LaunchConfig,
 )
@@ -14,7 +13,6 @@ __all__ = [
     "Storage",
     "AppDirectoryRepository",
     "LaunchConfigRepository",
-    "OriginRepository",
     "AppMetadata",
     "LaunchConfig",
     "SqliteStorage",

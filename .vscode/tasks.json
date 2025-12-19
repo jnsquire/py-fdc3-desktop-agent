@@ -5,7 +5,7 @@
       "label": "Install Dev Dependencies",
       "type": "shell",
       "group": "build",
-      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe -m pip install --upgrade pip && ${workspaceFolder}\\.venv\\Scripts\\python.exe -m pip install -e '.[dev]'",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe -m pip install --upgrade pip; ${workspaceFolder}\\.venv\\Scripts\\python.exe -m pip install -e '.[dev]'",
       "problemMatcher": []
     },
     {
