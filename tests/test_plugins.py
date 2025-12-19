@@ -300,7 +300,9 @@ class TestPluginDiscovery:
         eps = [
             FakeEP("not-a-class", "x", lambda: 123),
             FakeEP("not-a-subclass", "y", lambda: NotAPlugin),
-            FakeEP("load-throws", "z", lambda: (_ for _ in ()).throw(RuntimeError("boom"))),
+            FakeEP(
+                "load-throws", "z", lambda: (_ for _ in ()).throw(RuntimeError("boom"))
+            ),
             FakeEP("good", "g", lambda: GoodPlugin),
         ]
 

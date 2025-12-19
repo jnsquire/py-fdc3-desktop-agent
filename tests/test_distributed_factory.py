@@ -207,7 +207,7 @@ def test_get_adapter_consul_relative_import_failure_returns_noop(monkeypatch):
 @pytest.mark.asyncio
 async def test_distributed_log_adapter_abstract_methods_raise_not_implemented():
     from fdc3.desktop_agent.distributed.adapter import DistributedLogAdapter
-    
+
     dummy = cast(DistributedLogAdapter, object())
     with pytest.raises(NotImplementedError):
         await DistributedLogAdapter.start(dummy)

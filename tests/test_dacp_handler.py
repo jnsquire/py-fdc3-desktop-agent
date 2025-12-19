@@ -462,7 +462,9 @@ class TestDACPHandlerOpen:
             await handler._handle_open(req, ws)
 
     @pytest.mark.asyncio
-    async def test_open_launch_success_missing_instance_info_returns_error_on_launch(self):
+    async def test_open_launch_success_missing_instance_info_returns_error_on_launch(
+        self,
+    ):
         handler, storage, launcher, _ = _handler()
         ws = _websocket()
 

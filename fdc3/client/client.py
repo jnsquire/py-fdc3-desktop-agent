@@ -112,7 +112,9 @@ class FDC3Client:
         self.broadcast_handlers: EventEmitter[Any] = EventEmitter()
         self.intent_event_handlers: EventEmitter[Any] = EventEmitter()
         # maps request_uuid -> (Future, loop)
-        self._pending_responses: Dict[str, Tuple[asyncio.Future, asyncio.AbstractEventLoop]] = {}
+        self._pending_responses: Dict[
+            str, Tuple[asyncio.Future, asyncio.AbstractEventLoop]
+        ] = {}
         self._pending_responses_lock = threading.Lock()
         self._handlers: Dict[str, Dict[str, Any]] = {}
         self._running = False
@@ -144,7 +146,9 @@ class FDC3Client:
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError as exc:
-            raise RuntimeError("_register_pending_response must be called from an async context") from exc
+            raise RuntimeError(
+                "_register_pending_response must be called from an async context"
+            ) from exc
 
         fut: asyncio.Future = loop.create_future()
         with self._pending_responses_lock:

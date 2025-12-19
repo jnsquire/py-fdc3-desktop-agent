@@ -60,6 +60,7 @@ async def test_external_handler_registration_e2e():
     # Wrap the ASGI app so we can signal readiness from the lifespan startup.
     async def app_with_start_signal(scope, receive, send):
         if scope["type"] == "lifespan":
+
             async def send_wrapper(message):
                 if message.get("type") == "lifespan.startup.complete":
                     started.set()
