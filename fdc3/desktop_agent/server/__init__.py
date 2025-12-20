@@ -1,8 +1,8 @@
 # FastAPI app, websocket handlers, GraphQL endpoint
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from strawberry.fastapi import GraphQLRouter
 import asyncio
 import json
@@ -189,9 +189,6 @@ def create_app(config: Optional[DesktopAgentConfig] = None) -> FastAPI:
     # WCP session state
     wcp_sessions: Dict[str, dict] = {}
 
-    # Templates (use absolute path for ASGI mounting compatibility)
-    templates = Jinja2Templates(directory=str(config.templates_dir))
-
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         """Lifespan handler to initialize and teardown resources."""
@@ -249,7 +246,7 @@ def create_app(config: Optional[DesktopAgentConfig] = None) -> FastAPI:
                     "provider": "py-fdc3-desktop-agent",
                     "providerVersion": __version__,
                     "optionalFeatures": {
-                        "OriginatingAppMetadata": True,
+                        "OriginatingAppMetadata": False,
                         "UserChannelMembershipAPIs": True,
                         "DesktopAgentBridging": True,
                     },
@@ -391,46 +388,65 @@ def create_app(config: Optional[DesktopAgentConfig] = None) -> FastAPI:
         lifespan=lifespan,
     )
 
+    # UI pages (static HTML)
+    # Mount the templates directory as static files and keep the historical
+    # friendly URLs (/admin, /diagnostics, etc.) as redirects.
+    app.mount(
+        "/ui",
+        StaticFiles(directory=str(config.templates_dir), html=False),
+        name="ui",
+    )
+
     # Initialize GraphQL with storage
     set_graphql_storage(storage)
     graphql_app = GraphQLRouter(schema)
     app.include_router(graphql_app, prefix="/graphql")
 
-    # Admin routes
-    @app.get("/admin", response_class=HTMLResponse)
+    # Admin routes (redirect to mounted static HTML)
+    @app.get("/admin")
     async def admin_page(request: Request):
         """Admin page for managing launch configurations"""
-        return templates.TemplateResponse(request, "admin.html", {})
+        return RedirectResponse(url=str(request.url_for("ui", path="admin.html")))
 
-    @app.get("/app-directory", response_class=HTMLResponse)
+    @app.get("/app-directory")
     async def app_directory_page(request: Request):
         """App directory management interface"""
-        return templates.TemplateResponse(request, "app_directory.html", {})
+        return RedirectResponse(
+            url=str(request.url_for("ui", path="app_directory.html"))
+        )
 
-    @app.get("/system-settings", response_class=HTMLResponse)
+    @app.get("/system-settings")
     async def system_settings_page(request: Request):
         """System configuration panel"""
-        return templates.TemplateResponse(request, "system_settings.html", {})
+        return RedirectResponse(
+            url=str(request.url_for("ui", path="system_settings.html"))
+        )
 
-    @app.get("/diagnostics", response_class=HTMLResponse)
+    @app.get("/diagnostics")
     async def diagnostics_page(request: Request):
         """System diagnostics and health checks"""
-        return templates.TemplateResponse(request, "diagnostics.html", {})
+        return RedirectResponse(url=str(request.url_for("ui", path="diagnostics.html")))
 
-    @app.get("/channel-monitor", response_class=HTMLResponse)
+    @app.get("/channel-monitor")
     async def channel_monitor_page(request: Request):
         """Channel monitor UI for subscribing to channel events"""
-        return templates.TemplateResponse(request, "channel_monitor.html", {})
+        return RedirectResponse(
+            url=str(request.url_for("ui", path="channel_monitor.html"))
+        )
 
-    @app.get("/channel-sequence", response_class=HTMLResponse)
+    @app.get("/channel-sequence")
     async def channel_sequence_page(request: Request):
         """Sequence diagram view for channel traffic (uses GraphQL subscription)."""
-        return templates.TemplateResponse(request, "sequence_diagram.html", {})
+        return RedirectResponse(
+            url=str(request.url_for("ui", path="sequence_diagram.html"))
+        )
 
-    @app.get("/public-channels", response_class=HTMLResponse)
+    @app.get("/public-channels")
     async def public_channels_page(request: Request):
         """Public channels management interface"""
-        return templates.TemplateResponse(request, "public_channels.html", {})
+        return RedirectResponse(
+            url=str(request.url_for("ui", path="public_channels.html"))
+        )
 
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket):

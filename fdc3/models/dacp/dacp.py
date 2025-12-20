@@ -7,9 +7,12 @@ remain functionally equivalent.
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional, Literal, Union, List
 from fdc3.models.identifiers import AppIdentifier
+from fdc3.models.identifiers import AppMetadata
 from fdc3.models.identifiers import AppIntent
 from fdc3.models.identifiers import IntentResolution
 from fdc3.models.identifiers import Channel
+from fdc3.models.identifiers import ImplementationMetadata
+from fdc3.models.identifiers import FDC3Event
 from fdc3.models.primitives import (
     RequestUuid,
     ResponseUuid,
@@ -183,6 +186,59 @@ class ContextListenerUnsubscribeResponse(BaseModel):
     meta: AgentResponseMeta = Field(default_factory=AgentResponseMeta)
 
 
+# DesktopAgent event listeners
+class AddEventListenerRequestPayload(BaseModel):
+    eventType: str
+
+
+class AddEventListenerRequest(BaseModel):
+    type: Literal["addEventListener"]
+    payload: AddEventListenerRequestPayload
+    meta: AppRequestMeta = Field(default_factory=AppRequestMeta)
+
+
+class AddEventListenerResponsePayload(BaseModel):
+    listenerUuid: ListenerUuid
+
+
+class AddEventListenerResponse(BaseModel):
+    type: Literal["addEventListenerResponse"]
+    payload: AddEventListenerResponsePayload
+    meta: AgentResponseMeta = Field(default_factory=AgentResponseMeta)
+
+
+class RemoveEventListenerRequestPayload(BaseModel):
+    listenerUuid: ListenerUuid
+
+
+class RemoveEventListenerRequest(BaseModel):
+    type: Literal["removeEventListener"]
+    payload: RemoveEventListenerRequestPayload
+    meta: AppRequestMeta = Field(default_factory=AppRequestMeta)
+
+
+class RemoveEventListenerResponsePayload(BaseModel):
+    pass
+
+
+class RemoveEventListenerResponse(BaseModel):
+    type: Literal["removeEventListenerResponse"]
+    payload: RemoveEventListenerResponsePayload = Field(
+        default_factory=RemoveEventListenerResponsePayload
+    )
+    meta: AgentResponseMeta = Field(default_factory=AgentResponseMeta)
+
+
+class FDC3EventMessagePayload(BaseModel):
+    event: FDC3Event
+
+
+class FDC3EventMessage(BaseModel):
+    type: Literal["fdc3Event"]
+    payload: FDC3EventMessagePayload
+    meta: AgentEventMeta = Field(default_factory=AgentEventMeta)
+
+
 # user channel membership APIs
 class GetUserChannelsRequestPayload(BaseModel):
     pass
@@ -269,6 +325,48 @@ class LeaveCurrentChannelResponse(BaseModel):
     payload: LeaveCurrentChannelResponsePayload = Field(
         default_factory=LeaveCurrentChannelResponsePayload
     )
+    meta: AgentResponseMeta = Field(default_factory=AgentResponseMeta)
+
+
+# getInfo
+class GetInfoRequestPayload(BaseModel):
+    pass
+
+
+class GetInfoRequest(BaseModel):
+    type: Literal["getInfo"]
+    payload: GetInfoRequestPayload = Field(default_factory=GetInfoRequestPayload)
+    meta: AppRequestMeta = Field(default_factory=AppRequestMeta)
+
+
+class GetInfoResponsePayload(BaseModel):
+    implementationMetadata: ImplementationMetadata
+
+
+class GetInfoResponse(BaseModel):
+    type: Literal["getInfoResponse"]
+    payload: GetInfoResponsePayload
+    meta: AgentResponseMeta = Field(default_factory=AgentResponseMeta)
+
+
+# getAppMetadata
+class GetAppMetadataRequestPayload(BaseModel):
+    app: AppIdentifier
+
+
+class GetAppMetadataRequest(BaseModel):
+    type: Literal["getAppMetadata"]
+    payload: GetAppMetadataRequestPayload
+    meta: AppRequestMeta = Field(default_factory=AppRequestMeta)
+
+
+class GetAppMetadataResponsePayload(BaseModel):
+    appMetadata: AppMetadata
+
+
+class GetAppMetadataResponse(BaseModel):
+    type: Literal["getAppMetadataResponse"]
+    payload: GetAppMetadataResponsePayload
     meta: AgentResponseMeta = Field(default_factory=AgentResponseMeta)
 
 

@@ -27,6 +27,20 @@ from fdc3.models.dacp.dacp import (
     AddIntentListenerRequest,
     AddIntentListenerResponse,
     AddIntentListenerResponsePayload,
+    AddEventListenerRequest,
+    AddEventListenerResponse,
+    AddEventListenerResponsePayload,
+    RemoveEventListenerRequest,
+    RemoveEventListenerResponse,
+    RemoveEventListenerResponsePayload,
+    FDC3EventMessage,
+    FDC3EventMessagePayload,
+    GetInfoRequest,
+    GetInfoResponse,
+    GetInfoResponsePayload,
+    GetAppMetadataRequest,
+    GetAppMetadataResponse,
+    GetAppMetadataResponsePayload,
     GetUserChannelsRequest,
     GetUserChannelsResponse,
     GetUserChannelsResponsePayload,
@@ -86,14 +100,18 @@ from ..api import IntentResolution
 from fdc3.models.identifiers import AppIdentifier
 from fdc3.models.identifiers import IntentResolution as WireIntentResolution
 from fdc3.models.identifiers import AppIntent, IntentMetadata, AppMetadata
+from fdc3.models.identifiers import ImplementationMetadata
 from fdc3.models.identifiers import (
     Channel as WireChannel,
     DisplayMetadata as WireDisplayMetadata,
 )
+from fdc3.models.identifiers import FDC3Event, FDC3EventType
 from fdc3.models.primitives import RequestUuid, ListenerUuid
 from .connection_manager import WebSocketConnectionManager
 from .system_intent import SystemIntentHandler
 from ..api import DisplayMetadata
+from ..version import __version__
+from fdc3.desktop_agent.api import OpenError
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +140,10 @@ class DACPHandler:
         self.system_intent_handler = SystemIntentHandler()
         # Optional Desktop Agent Bridging client (set by server lifespan).
         self.bridge_client = None
+
+    @staticmethod
+    def _meta_from_request(request: Any) -> AgentResponseMeta:
+        return AgentResponseMeta(requestUuid=request.meta.requestUuid)
 
     async def _send_model(self, websocket: WebSocket, model) -> None:
         """Helper method to send a Pydantic model as JSON over WebSocket"""
@@ -178,6 +200,10 @@ class DACPHandler:
             )
         elif isinstance(parsed, IntentListenerUnsubscribeRequest):
             await self._handle_intent_listener_unsubscribe(parsed, websocket)
+        elif isinstance(parsed, GetInfoRequest):
+            await self._handle_get_info(parsed, session_id, wcp_sessions, websocket)
+        elif isinstance(parsed, GetAppMetadataRequest):
+            await self._handle_get_app_metadata(parsed, websocket)
         elif isinstance(parsed, GetUserChannelsRequest):
             await self._handle_get_user_channels(parsed, websocket)
         elif isinstance(parsed, GetCurrentChannelRequest):
@@ -220,10 +246,155 @@ class DACPHandler:
             await self._handle_raise_intent_result_response(parsed)
         elif isinstance(parsed, ContextListenerUnsubscribeRequest):
             await self._handle_context_listener_unsubscribe(parsed, websocket)
+        elif isinstance(parsed, AddEventListenerRequest):
+            await self._handle_add_event_listener(
+                parsed, session_id, wcp_sessions, websocket
+            )
+        elif isinstance(parsed, RemoveEventListenerRequest):
+            await self._handle_remove_event_listener(parsed, websocket)
         elif isinstance(parsed, HeartbeatAcknowledgmentRequest):
             await self._handle_heartbeat_acknowledgment(parsed)
         else:
             logger.warning(f"Unknown DACP message type: {msg_type}")
+
+    async def _emit_user_channel_changed_event(
+        self, *, instance_uuid: str, current_channel_id: str | None
+    ) -> None:
+        listeners = core_services.listener_store.get_event_listeners(
+            FDC3EventType.USER_CHANNEL_CHANGED.value, instance_uuid=instance_uuid
+        )
+        if not listeners:
+            return
+
+        event = FDC3EventMessage(
+            type="fdc3Event",
+            payload=FDC3EventMessagePayload(
+                event=FDC3Event(
+                    type=FDC3EventType.USER_CHANNEL_CHANGED,
+                    details={"currentChannelId": current_channel_id},
+                )
+            ),
+            meta=AgentEventMeta(),
+        )
+
+        try:
+            await self.connection_manager.send_to_instance(
+                instance_uuid, event.model_dump_json()
+            )
+        except Exception:
+            logger.debug(
+                "Failed to send USER_CHANNEL_CHANGED event to instance %s",
+                instance_uuid,
+                exc_info=True,
+            )
+
+    async def _handle_get_info(
+        self,
+        request: GetInfoRequest,
+        session_id: str,
+        wcp_sessions: Dict[str, Any],
+        websocket: WebSocket,
+    ) -> None:
+        identity = (wcp_sessions.get(session_id) or {}).get("identity") or {}
+        app_id = identity.get("appId") or "unknown"
+        instance_id = identity.get("instanceId")
+
+        # Best-effort: enrich app metadata from storage if available.
+        name = None
+        version = None
+        description = None
+        icons = None
+        if app_id and app_id != "unknown":
+            try:
+                meta = await self.storage.apps.get_app_metadata(app_id)
+            except Exception:
+                logger.debug(
+                    "getInfo: failed to load app metadata from storage", exc_info=True
+                )
+                meta = None
+
+            if meta is not None:
+                name = getattr(meta, "name", None)
+                version = getattr(meta, "version", None)
+                description = getattr(meta, "description", None)
+                icons = getattr(meta, "icons", None)
+
+        impl = ImplementationMetadata(
+            fdc3Version="2.2",
+            provider="py-fdc3-desktop-agent",
+            providerVersion=__version__,
+            optionalFeatures={
+                # We do not currently expose originating app metadata on
+                # context/intent delivery payloads.
+                "OriginatingAppMetadata": False,
+                "UserChannelMembershipAPIs": True,
+                # Bridging is optional and only available when configured.
+                "DesktopAgentBridging": self.bridge_client is not None,
+            },
+            appMetadata=AppMetadata(
+                appId=app_id,
+                instanceId=instance_id,
+                name=name,
+                version=version,
+                description=description,
+                icons=icons,
+            ),
+        )
+
+        response = GetInfoResponse(
+            type="getInfoResponse",
+            payload=GetInfoResponsePayload(implementationMetadata=impl),
+            meta=self._meta_from_request(request),
+        )
+        await self._send_model(websocket, response)
+
+    async def _handle_get_app_metadata(
+        self, request: GetAppMetadataRequest, websocket: WebSocket
+    ) -> None:
+        app_id = request.payload.app.appId
+        if not app_id:
+            response = AgentResponse(
+                type="getAppMetadataResponse",
+                payload=ErrorResponsePayload(error=OpenError.AppNotFound.value),
+                meta=self._meta_from_request(request),
+            )
+            await self._send_model(websocket, response)
+            return
+
+        try:
+            meta = await self.storage.apps.get_app_metadata(app_id)
+        except Exception:
+            logger.debug(
+                "getAppMetadata: failed to load app metadata from storage",
+                exc_info=True,
+            )
+            meta = None
+
+        if not meta:
+            response = AgentResponse(
+                type="getAppMetadataResponse",
+                payload=ErrorResponsePayload(error=OpenError.AppNotFound.value),
+                meta=self._meta_from_request(request),
+            )
+            await self._send_model(websocket, response)
+            return
+
+        app_meta = AppMetadata(
+            appId=getattr(meta, "app_id", None)
+            or getattr(meta, "appId", None)
+            or app_id,
+            name=getattr(meta, "name", None),
+            version=getattr(meta, "version", None),
+            description=getattr(meta, "description", None),
+            icons=getattr(meta, "icons", None),
+        )
+
+        response = GetAppMetadataResponse(
+            type="getAppMetadataResponse",
+            payload=GetAppMetadataResponsePayload(appMetadata=app_meta),
+            meta=self._meta_from_request(request),
+        )
+        await self._send_model(websocket, response)
 
     def _ensure_default_user_channels(self) -> None:
         """Ensure a baseline set of user channels exists.
@@ -250,6 +421,22 @@ class DACPHandler:
                     "user",
                     display_metadata=DisplayMetadata(name=name, color=color),
                 )
+
+    @staticmethod
+    def _extract_storage_app_id(meta: object) -> str | None:
+        return getattr(meta, "app_id", None) or getattr(meta, "appId", None)
+
+    @staticmethod
+    def _wire_app_metadata(app_id: str, meta: object | None) -> AppMetadata:
+        return AppMetadata(
+            appId=app_id,
+            name=getattr(meta, "name", None) if meta is not None else None,
+            version=getattr(meta, "version", None) if meta is not None else None,
+            description=getattr(meta, "description", None)
+            if meta is not None
+            else None,
+            icons=getattr(meta, "icons", None) if meta is not None else None,
+        )
 
     @staticmethod
     def _wire_channel(channel) -> WireChannel:
@@ -279,7 +466,7 @@ class DACPHandler:
         response = GetUserChannelsResponse(
             type="getUserChannelsResponse",
             payload=GetUserChannelsResponsePayload(channels=channels),
-            meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+            meta=self._meta_from_request(request),
         )
         await self._send_model(websocket, response)
 
@@ -297,7 +484,7 @@ class DACPHandler:
             payload=GetCurrentChannelResponsePayload(
                 channel=(self._wire_channel(current) if current is not None else None)
             ),
-            meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+            meta=self._meta_from_request(request),
         )
         await self._send_model(websocket, response)
 
@@ -318,7 +505,7 @@ class DACPHandler:
             response = AgentResponse(
                 type="joinUserChannelResponse",
                 payload=ErrorResponsePayload(error="NoChannelFound"),
-                meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                meta=self._meta_from_request(request),
             )
             await self._send_model(websocket, response)
             return
@@ -329,9 +516,12 @@ class DACPHandler:
         response = JoinUserChannelResponse(
             type="joinUserChannelResponse",
             payload=JoinUserChannelResponsePayload(channel=self._wire_channel(channel)),
-            meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+            meta=self._meta_from_request(request),
         )
         await self._send_model(websocket, response)
+        await self._emit_user_channel_changed_event(
+            instance_uuid=instance_uuid, current_channel_id=channel_id
+        )
 
     async def _handle_leave_current_channel(
         self,
@@ -346,7 +536,42 @@ class DACPHandler:
         response = LeaveCurrentChannelResponse(
             type="leaveCurrentChannelResponse",
             payload=LeaveCurrentChannelResponsePayload(),
-            meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+            meta=self._meta_from_request(request),
+        )
+        await self._send_model(websocket, response)
+        await self._emit_user_channel_changed_event(
+            instance_uuid=instance_uuid, current_channel_id=None
+        )
+
+    async def _handle_add_event_listener(
+        self,
+        request: AddEventListenerRequest,
+        session_id: str,
+        wcp_sessions: Dict[str, Any],
+        websocket: WebSocket,
+    ) -> None:
+        instance_uuid = wcp_sessions[session_id]["identity"]["instanceUuid"]
+        listener = core_services.listener_store.add_event_listener(
+            ListenerUuid(), instance_uuid, request.payload.eventType
+        )
+
+        response = AddEventListenerResponse(
+            type="addEventListenerResponse",
+            payload=AddEventListenerResponsePayload(
+                listenerUuid=listener.listener_uuid
+            ),
+            meta=self._meta_from_request(request),
+        )
+        await self._send_model(websocket, response)
+
+    async def _handle_remove_event_listener(
+        self, request: RemoveEventListenerRequest, websocket: WebSocket
+    ) -> None:
+        core_services.listener_store.remove_listener(request.payload.listenerUuid.root)
+        response = RemoveEventListenerResponse(
+            type="removeEventListenerResponse",
+            payload=RemoveEventListenerResponsePayload(),
+            meta=self._meta_from_request(request),
         )
         await self._send_model(websocket, response)
 
@@ -370,7 +595,7 @@ class DACPHandler:
                 listed = []
 
             for meta in listed or []:
-                app_id = getattr(meta, "app_id", None) or getattr(meta, "appId", None)
+                app_id = self._extract_storage_app_id(meta)
                 intents = getattr(meta, "intents", None) or []
                 if app_id and intent in intents:
                     app_ids.add(app_id)
@@ -409,9 +634,7 @@ class DACPHandler:
                             payload=ErrorResponsePayload(
                                 error="TargetInstanceUnavailable"
                             ),
-                            meta=AgentResponseMeta(
-                                requestUuid=request.meta.requestUuid
-                            ),
+                            meta=self._meta_from_request(request),
                         )
                         await self._send_model(websocket, response)
                         return
@@ -426,9 +649,7 @@ class DACPHandler:
                         response = AgentResponse(
                             type="findIntentResponse",
                             payload=ErrorResponsePayload(error="TargetAppUnavailable"),
-                            meta=AgentResponseMeta(
-                                requestUuid=request.meta.requestUuid
-                            ),
+                            meta=self._meta_from_request(request),
                         )
                         await self._send_model(websocket, response)
                         return
@@ -438,7 +659,7 @@ class DACPHandler:
                 response = AgentResponse(
                     type="findIntentResponse",
                     payload=ErrorResponsePayload(error="NoAppsFound"),
-                    meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                    meta=self._meta_from_request(request),
                 )
                 await self._send_model(websocket, response)
                 return
@@ -446,27 +667,13 @@ class DACPHandler:
             apps: list[AppMetadata] = []
             for app_id in sorted(app_ids):
                 meta = app_meta_by_id.get(app_id)
-                apps.append(
-                    AppMetadata(
-                        appId=app_id,
-                        name=getattr(meta, "name", None) if meta is not None else None,
-                        version=getattr(meta, "version", None)
-                        if meta is not None
-                        else None,
-                        description=getattr(meta, "description", None)
-                        if meta is not None
-                        else None,
-                        icons=getattr(meta, "icons", None)
-                        if meta is not None
-                        else None,
-                    )
-                )
+                apps.append(self._wire_app_metadata(app_id, meta))
 
             app_intent = AppIntent(intent=IntentMetadata(name=intent), apps=apps)
             response = FindIntentResponse(
                 type="findIntentResponse",
                 payload=FindIntentResponsePayload(appIntent=app_intent),
-                meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                meta=self._meta_from_request(request),
             )
             await self._send_model(websocket, response)
         except Exception:
@@ -474,7 +681,7 @@ class DACPHandler:
             response = AgentResponse(
                 type="findIntentResponse",
                 payload=ErrorResponsePayload(error="ResolverUnavailable"),
-                meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                meta=self._meta_from_request(request),
             )
             await self._send_model(websocket, response)
 
@@ -497,7 +704,7 @@ class DACPHandler:
             except Exception:
                 listed = []
             for meta in listed or []:
-                app_id = getattr(meta, "app_id", None) or getattr(meta, "appId", None)
+                app_id = self._extract_storage_app_id(meta)
                 if not app_id:
                     continue
                 intents = getattr(meta, "intents", None) or []
@@ -526,23 +733,7 @@ class DACPHandler:
                 apps: list[AppMetadata] = []
                 for app_id in sorted(intent_to_apps[intent]):
                     meta = app_meta_by_id.get(app_id)
-                    apps.append(
-                        AppMetadata(
-                            appId=app_id,
-                            name=getattr(meta, "name", None)
-                            if meta is not None
-                            else None,
-                            version=getattr(meta, "version", None)
-                            if meta is not None
-                            else None,
-                            description=getattr(meta, "description", None)
-                            if meta is not None
-                            else None,
-                            icons=getattr(meta, "icons", None)
-                            if meta is not None
-                            else None,
-                        )
-                    )
+                    apps.append(self._wire_app_metadata(app_id, meta))
                 if apps:
                     app_intents.append(
                         AppIntent(intent=IntentMetadata(name=intent), apps=apps)
@@ -552,7 +743,7 @@ class DACPHandler:
                 response = AgentResponse(
                     type="findIntentsByContextResponse",
                     payload=ErrorResponsePayload(error="NoAppsFound"),
-                    meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                    meta=self._meta_from_request(request),
                 )
                 await self._send_model(websocket, response)
                 return
@@ -560,7 +751,7 @@ class DACPHandler:
             response = FindIntentsByContextResponse(
                 type="findIntentsByContextResponse",
                 payload=FindIntentsByContextResponsePayload(appIntents=app_intents),
-                meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                meta=self._meta_from_request(request),
             )
             await self._send_model(websocket, response)
         except Exception:
@@ -568,7 +759,7 @@ class DACPHandler:
             response = AgentResponse(
                 type="findIntentsByContextResponse",
                 payload=ErrorResponsePayload(error="ResolverUnavailable"),
-                meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                meta=self._meta_from_request(request),
             )
             await self._send_model(websocket, response)
 
@@ -598,7 +789,7 @@ class DACPHandler:
             response = FindInstancesResponse(
                 type="findInstancesResponse",
                 payload=FindInstancesResponsePayload(instances=result),
-                meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                meta=self._meta_from_request(request),
             )
             await self._send_model(websocket, response)
         except Exception:
@@ -606,7 +797,7 @@ class DACPHandler:
             response = AgentResponse(
                 type="findInstancesResponse",
                 payload=ErrorResponsePayload(error="ResolverUnavailable"),
-                meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                meta=self._meta_from_request(request),
             )
             await self._send_model(websocket, response)
 
@@ -653,17 +844,13 @@ class DACPHandler:
                             payload=ErrorResponsePayload(
                                 error=str(payload.get("error"))
                             ),
-                            meta=AgentResponseMeta(
-                                requestUuid=request.meta.requestUuid
-                            ),
+                            meta=self._meta_from_request(request),
                         )
                     else:
                         response = OpenResponse(
                             type="openResponse",
                             payload=OpenResponsePayload(),
-                            meta=AgentResponseMeta(
-                                requestUuid=request.meta.requestUuid
-                            ),
+                            meta=self._meta_from_request(request),
                         )
                     await self._send_model(websocket, response)
                     return
@@ -676,7 +863,7 @@ class DACPHandler:
                 response = AgentResponse(
                     type="openResponse",
                     payload=ErrorResponsePayload(error="AppNotFound"),
-                    meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                    meta=self._meta_from_request(request),
                 )
                 await self._send_model(websocket, response)
                 return
@@ -700,7 +887,7 @@ class DACPHandler:
                     response = OpenResponse(
                         type="openResponse",
                         payload=OpenResponsePayload(),
-                        meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                        meta=self._meta_from_request(request),
                     )
                     await self._send_model(websocket, response)
                     return
@@ -709,7 +896,7 @@ class DACPHandler:
                 response = OpenResponse(
                     type="openResponse",
                     payload=OpenResponsePayload(),
-                    meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                    meta=self._meta_from_request(request),
                 )
                 await self._send_model(websocket, response)
                 return
@@ -720,7 +907,7 @@ class DACPHandler:
                 response = AgentResponse(
                     type="openResponse",
                     payload=ErrorResponsePayload(error="AppNotFound"),
-                    meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                    meta=self._meta_from_request(request),
                 )
                 await self._send_model(websocket, response)
                 return
@@ -735,7 +922,7 @@ class DACPHandler:
                     response = AgentResponse(
                         type="openResponse",
                         payload=ErrorResponsePayload(error="ErrorOnLaunch"),
-                        meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                        meta=self._meta_from_request(request),
                     )
                     await self._send_model(websocket, response)
                     return
@@ -756,7 +943,7 @@ class DACPHandler:
                     response = OpenResponse(
                         type="openResponse",
                         payload=OpenResponsePayload(),
-                        meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                        meta=self._meta_from_request(request),
                     )
                 else:
                     core_services.app_registry.unregister_instance(
@@ -765,13 +952,13 @@ class DACPHandler:
                     response = AgentResponse(
                         type="openResponse",
                         payload=ErrorResponsePayload(error="AppTimeout"),
-                        meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                        meta=self._meta_from_request(request),
                     )
             else:
                 response = AgentResponse(
                     type="openResponse",
                     payload=ErrorResponsePayload(error="ErrorOnLaunch"),
-                    meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                    meta=self._meta_from_request(request),
                 )
 
             await self._send_model(websocket, response)
@@ -783,7 +970,7 @@ class DACPHandler:
                 response = AgentResponse(
                     type="openResponse",
                     payload=ErrorResponsePayload(error="AppLaunchFailed"),
-                    meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                    meta=self._meta_from_request(request),
                 )
                 await self._send_model(websocket, response)
             except Exception:
@@ -848,7 +1035,7 @@ class DACPHandler:
             payload=AddContextListenerResponsePayload(
                 listenerUuid=listener.listener_uuid
             ),
-            meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+            meta=self._meta_from_request(request),
         )
         await self._send_model(websocket, response)
 
@@ -871,7 +1058,7 @@ class DACPHandler:
             payload=AddIntentListenerResponsePayload(
                 listenerUuid=listener.listener_uuid
             ),
-            meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+            meta=self._meta_from_request(request),
         )
         await self._send_model(websocket, response)
 
@@ -884,7 +1071,7 @@ class DACPHandler:
         response = IntentListenerUnsubscribeResponse(
             type="intentListenerUnsubscribeResponse",
             payload=IntentListenerUnsubscribeResponsePayload(),
-            meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+            meta=self._meta_from_request(request),
         )
         await self._send_model(websocket, response)
 
@@ -943,7 +1130,7 @@ class DACPHandler:
                     response = AgentResponse(
                         type="raiseIntentResponse",
                         payload=ErrorResponsePayload(error=str(payload.get("error"))),
-                        meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                        meta=self._meta_from_request(request),
                     )
                 else:
                     intent_resolution_raw = payload.get("intentResolution")
@@ -955,7 +1142,7 @@ class DACPHandler:
                         payload=RaiseIntentResponsePayload(
                             intentResolution=intent_resolution
                         ),
-                        meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                        meta=self._meta_from_request(request),
                     )
                 await self._send_model(websocket, response)
                 return
@@ -1002,7 +1189,7 @@ class DACPHandler:
                 payload=RaiseIntentResponsePayload(
                     intentResolution=resolution.model_dump()
                 ),
-                meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                meta=self._meta_from_request(request),
             )
             await self._send_model(websocket, response)
 
@@ -1028,7 +1215,7 @@ class DACPHandler:
             response = AgentResponse(
                 type="raiseIntentResponse",
                 payload=ErrorResponsePayload(error="NoAppsFound"),
-                meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                meta=self._meta_from_request(request),
             )
             await self._send_model(websocket, response)
 
@@ -1058,7 +1245,7 @@ class DACPHandler:
                 response = AgentResponse(
                     type="raiseIntentForContextResponse",
                     payload=ErrorResponsePayload(error="NoAppsFound"),
-                    meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                    meta=self._meta_from_request(request),
                 )
                 await self._send_model(websocket, response)
                 return
@@ -1067,7 +1254,7 @@ class DACPHandler:
                 response = AgentResponse(
                     type="raiseIntentForContextResponse",
                     payload=ErrorResponsePayload(error="ResolverUnavailable"),
-                    meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                    meta=self._meta_from_request(request),
                 )
                 await self._send_model(websocket, response)
                 return
@@ -1083,7 +1270,7 @@ class DACPHandler:
                 response = AgentResponse(
                     type="raiseIntentForContextResponse",
                     payload=ErrorResponsePayload(error="NoAppsFound"),
-                    meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                    meta=self._meta_from_request(request),
                 )
                 await self._send_model(websocket, response)
                 return
@@ -1096,7 +1283,7 @@ class DACPHandler:
                 payload=RaiseIntentForContextResponsePayload(
                     intentResolution=intent_resolution
                 ),
-                meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                meta=self._meta_from_request(request),
             )
             await self._send_model(websocket, response)
 
@@ -1122,7 +1309,7 @@ class DACPHandler:
             response = AgentResponse(
                 type="raiseIntentForContextResponse",
                 payload=ErrorResponsePayload(error="ResolverUnavailable"),
-                meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                meta=self._meta_from_request(request),
             )
             await self._send_model(websocket, response)
 
@@ -1135,7 +1322,7 @@ class DACPHandler:
         response = IntentResultResponse(
             type="intentResultResponse",
             payload=IntentResultResponsePayload(),
-            meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+            meta=self._meta_from_request(request),
         )
         await self._send_model(websocket, response)
 
@@ -1154,7 +1341,7 @@ class DACPHandler:
         response = ContextListenerUnsubscribeResponse(
             type="contextListenerUnsubscribeResponse",
             payload=ContextListenerUnsubscribeResponsePayload(),
-            meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+            meta=self._meta_from_request(request),
         )
         await self._send_model(websocket, response)
 
@@ -1195,9 +1382,7 @@ class DACPHandler:
                         return AgentResponse(
                             type="raiseIntentResponse",
                             payload=ErrorResponsePayload(error=result.error),
-                            meta=AgentResponseMeta(
-                                requestUuid=request.meta.requestUuid
-                            ),
+                            meta=self._meta_from_request(request),
                         )
 
                     # Plugin handled successfully
@@ -1214,7 +1399,7 @@ class DACPHandler:
                         payload=RaiseIntentResponsePayload(
                             intentResolution=resolution.model_dump()
                         ),
-                        meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                        meta=self._meta_from_request(request),
                     )
 
             except Exception as e:
@@ -1256,7 +1441,7 @@ class DACPHandler:
                 payload=RegisterExternalHandlerResponsePayload(
                     handler_uuid=handler_uuid
                 ),
-                meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                meta=self._meta_from_request(request),
             )
             logger.debug(
                 "Sending registerExternalHandlerResponse: handler_uuid=%s requestUuid=%s",
@@ -1269,7 +1454,7 @@ class DACPHandler:
             err = AgentResponse(
                 type="registerExternalHandlerResponse",
                 payload=ErrorResponsePayload(error="InternalError"),
-                meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                meta=self._meta_from_request(request),
             )
             await self._send_model(websocket, err)
 
@@ -1288,7 +1473,7 @@ class DACPHandler:
 
             # Send success response using Pydantic model
             response = UnregisterExternalHandlerResponse(
-                meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                meta=self._meta_from_request(request),
             )
             await websocket.send_text(response.model_dump_json())
         except Exception:
@@ -1296,7 +1481,7 @@ class DACPHandler:
             err = AgentResponse(
                 type="unregisterExternalHandlerResponse",
                 payload=ErrorResponsePayload(error="InternalError"),
-                meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                meta=self._meta_from_request(request),
             )
             await self._send_model(websocket, err)
 
@@ -1388,5 +1573,5 @@ class DACPHandler:
             payload=RaiseIntentResponsePayload(
                 intentResolution=resolution.model_dump()
             ),
-            meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+            meta=self._meta_from_request(request),
         )

@@ -24,12 +24,22 @@ class IntentListener:
         self.intent = intent
 
 
+class EventListener:
+    def __init__(
+        self, listener_uuid: ListenerUuid, instance_uuid: str, event_type: str
+    ):
+        self.listener_uuid = listener_uuid
+        self.instance_uuid = instance_uuid
+        self.event_type = event_type
+
+
 class ListenerStore:
     """Manages context listeners and intent listeners."""
 
     def __init__(self):
         self.context_listeners: Dict[str, ContextListener] = {}
         self.intent_listeners: Dict[str, IntentListener] = {}
+        self.event_listeners: Dict[str, EventListener] = {}
         self.listeners_by_instance: Dict[str, Set[str]] = {}
 
     def add_context_listener(
@@ -55,6 +65,16 @@ class ListenerStore:
         )
         return listener
 
+    def add_event_listener(
+        self, listener_uuid: ListenerUuid, instance_uuid: str, event_type: str
+    ) -> EventListener:
+        listener = EventListener(listener_uuid, instance_uuid, event_type)
+        self.event_listeners[listener_uuid.root] = listener
+        self.listeners_by_instance.setdefault(instance_uuid, set()).add(
+            listener_uuid.root
+        )
+        return listener
+
     def remove_listener(self, listener_uuid: str) -> None:
         if listener_uuid in self.context_listeners:
             instance_uuid = self.context_listeners[listener_uuid].instance_uuid
@@ -62,6 +82,9 @@ class ListenerStore:
         elif listener_uuid in self.intent_listeners:
             instance_uuid = self.intent_listeners[listener_uuid].instance_uuid
             del self.intent_listeners[listener_uuid]
+        elif listener_uuid in self.event_listeners:
+            instance_uuid = self.event_listeners[listener_uuid].instance_uuid
+            del self.event_listeners[listener_uuid]
         else:
             return
 
@@ -87,6 +110,22 @@ class ListenerStore:
             listener
             for listener in self.intent_listeners.values()
             if listener.intent == intent
+        ]
+
+    def get_event_listeners(
+        self, event_type: str, *, instance_uuid: Optional[str] = None
+    ) -> List[EventListener]:
+        listeners = [
+            listener
+            for listener in self.event_listeners.values()
+            if listener.event_type == event_type
+        ]
+        if instance_uuid is None:
+            return listeners
+        return [
+            listener
+            for listener in listeners
+            if listener.instance_uuid == instance_uuid
         ]
 
     def remove_listeners_for_instance(self, instance_uuid: str) -> None:

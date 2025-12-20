@@ -5,6 +5,7 @@ import asyncio
 import json
 from types import SimpleNamespace
 from typing import Any, cast
+from contextlib import ExitStack
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -101,61 +102,117 @@ class TestDACPHandlerParsingAndDispatch:
         session_id, sessions = _wcp_sessions("src-uuid")
 
         # Patch internal handlers so we only validate dispatch wiring.
-        with (
-            patch.object(handler, "_handle_open", new_callable=AsyncMock) as h_open,
-            patch.object(
-                handler, "_handle_broadcast", new_callable=AsyncMock
-            ) as h_broadcast,
-            patch.object(
-                handler, "_handle_add_context_listener", new_callable=AsyncMock
-            ) as h_acl,
-            patch.object(
-                handler, "_handle_add_intent_listener", new_callable=AsyncMock
-            ) as h_ail,
-            patch.object(
-                handler, "_handle_intent_listener_unsubscribe", new_callable=AsyncMock
-            ) as h_ilu,
-            patch.object(
-                handler, "_handle_get_user_channels", new_callable=AsyncMock
-            ) as h_gucs,
-            patch.object(
-                handler, "_handle_get_current_channel", new_callable=AsyncMock
-            ) as h_gcc,
-            patch.object(
-                handler, "_handle_join_user_channel", new_callable=AsyncMock
-            ) as h_juc,
-            patch.object(
-                handler, "_handle_leave_current_channel", new_callable=AsyncMock
-            ) as h_lcc,
-            patch.object(
-                handler, "_handle_find_intent", new_callable=AsyncMock
-            ) as h_fi,
-            patch.object(
-                handler, "_handle_find_intents_by_context", new_callable=AsyncMock
-            ) as h_fibc,
-            patch.object(
-                handler, "_handle_find_instances", new_callable=AsyncMock
-            ) as h_finst,
-            patch.object(handler, "_handle_raise_intent", new_callable=AsyncMock),
-            patch.object(
-                handler, "_handle_raise_intent_for_context", new_callable=AsyncMock
-            ) as h_rifc,
-            patch.object(
-                handler, "_handle_intent_result_request", new_callable=AsyncMock
-            ) as h_irr,
-            patch.object(
-                handler, "_handle_raise_intent_result_response", new_callable=AsyncMock
-            ) as h_rirr,
-            patch.object(
-                handler, "_handle_context_listener_unsubscribe", new_callable=AsyncMock
-            ) as h_clu,
-            patch.object(
-                handler, "_handle_heartbeat_acknowledgment", new_callable=AsyncMock
-            ) as h_hb,
-            patch.object(
-                handler, "_handle_external_intent_result", new_callable=AsyncMock
-            ),
-        ):
+        with ExitStack() as stack:
+            h_open = stack.enter_context(
+                patch.object(handler, "_handle_open", new_callable=AsyncMock)
+            )
+            h_broadcast = stack.enter_context(
+                patch.object(handler, "_handle_broadcast", new_callable=AsyncMock)
+            )
+            h_acl = stack.enter_context(
+                patch.object(
+                    handler, "_handle_add_context_listener", new_callable=AsyncMock
+                )
+            )
+            h_ail = stack.enter_context(
+                patch.object(
+                    handler, "_handle_add_intent_listener", new_callable=AsyncMock
+                )
+            )
+            h_ilu = stack.enter_context(
+                patch.object(
+                    handler,
+                    "_handle_intent_listener_unsubscribe",
+                    new_callable=AsyncMock,
+                )
+            )
+            h_ael = stack.enter_context(
+                patch.object(
+                    handler, "_handle_add_event_listener", new_callable=AsyncMock
+                )
+            )
+            h_rel = stack.enter_context(
+                patch.object(
+                    handler, "_handle_remove_event_listener", new_callable=AsyncMock
+                )
+            )
+            h_gi = stack.enter_context(
+                patch.object(handler, "_handle_get_info", new_callable=AsyncMock)
+            )
+            h_gam = stack.enter_context(
+                patch.object(
+                    handler, "_handle_get_app_metadata", new_callable=AsyncMock
+                )
+            )
+            h_gucs = stack.enter_context(
+                patch.object(
+                    handler, "_handle_get_user_channels", new_callable=AsyncMock
+                )
+            )
+            h_gcc = stack.enter_context(
+                patch.object(
+                    handler, "_handle_get_current_channel", new_callable=AsyncMock
+                )
+            )
+            h_juc = stack.enter_context(
+                patch.object(
+                    handler, "_handle_join_user_channel", new_callable=AsyncMock
+                )
+            )
+            h_lcc = stack.enter_context(
+                patch.object(
+                    handler, "_handle_leave_current_channel", new_callable=AsyncMock
+                )
+            )
+            h_fi = stack.enter_context(
+                patch.object(handler, "_handle_find_intent", new_callable=AsyncMock)
+            )
+            h_fibc = stack.enter_context(
+                patch.object(
+                    handler, "_handle_find_intents_by_context", new_callable=AsyncMock
+                )
+            )
+            h_finst = stack.enter_context(
+                patch.object(handler, "_handle_find_instances", new_callable=AsyncMock)
+            )
+            stack.enter_context(
+                patch.object(handler, "_handle_raise_intent", new_callable=AsyncMock)
+            )
+            h_rifc = stack.enter_context(
+                patch.object(
+                    handler, "_handle_raise_intent_for_context", new_callable=AsyncMock
+                )
+            )
+            h_irr = stack.enter_context(
+                patch.object(
+                    handler, "_handle_intent_result_request", new_callable=AsyncMock
+                )
+            )
+            h_rirr = stack.enter_context(
+                patch.object(
+                    handler,
+                    "_handle_raise_intent_result_response",
+                    new_callable=AsyncMock,
+                )
+            )
+            h_clu = stack.enter_context(
+                patch.object(
+                    handler,
+                    "_handle_context_listener_unsubscribe",
+                    new_callable=AsyncMock,
+                )
+            )
+            h_hb = stack.enter_context(
+                patch.object(
+                    handler, "_handle_heartbeat_acknowledgment", new_callable=AsyncMock
+                )
+            )
+            stack.enter_context(
+                patch.object(
+                    handler, "_handle_external_intent_result", new_callable=AsyncMock
+                )
+            )
+
             # open
             await handler.handle_message(
                 {
@@ -201,6 +258,30 @@ class TestDACPHandlerParsingAndDispatch:
                 ws,
             )
 
+            # addEventListener
+            await handler.handle_message(
+                {
+                    "type": "addEventListener",
+                    "payload": {"eventType": "USER_CHANNEL_CHANGED"},
+                    "meta": {"requestUuid": "r4e0"},
+                },
+                session_id,
+                sessions,
+                ws,
+            )
+
+            # removeEventListener
+            await handler.handle_message(
+                {
+                    "type": "removeEventListener",
+                    "payload": {"listenerUuid": "l-event"},
+                    "meta": {"requestUuid": "r4e1"},
+                },
+                session_id,
+                sessions,
+                ws,
+            )
+
             # findIntent
             await handler.handle_message(
                 {
@@ -237,12 +318,36 @@ class TestDACPHandlerParsingAndDispatch:
                 ws,
             )
 
+            # getInfo
+            await handler.handle_message(
+                {
+                    "type": "getInfo",
+                    "payload": {},
+                    "meta": {"requestUuid": "r4e"},
+                },
+                session_id,
+                sessions,
+                ws,
+            )
+
+            # getAppMetadata
+            await handler.handle_message(
+                {
+                    "type": "getAppMetadata",
+                    "payload": {"app": {"appId": "app-1"}},
+                    "meta": {"requestUuid": "r4f"},
+                },
+                session_id,
+                sessions,
+                ws,
+            )
+
             # getUserChannels
             await handler.handle_message(
                 {
                     "type": "getUserChannels",
                     "payload": {},
-                    "meta": {"requestUuid": "r4e"},
+                    "meta": {"requestUuid": "r4g"},
                 },
                 session_id,
                 sessions,
@@ -254,7 +359,7 @@ class TestDACPHandlerParsingAndDispatch:
                 {
                     "type": "getCurrentChannel",
                     "payload": {},
-                    "meta": {"requestUuid": "r4f"},
+                    "meta": {"requestUuid": "r4h"},
                 },
                 session_id,
                 sessions,
@@ -266,7 +371,7 @@ class TestDACPHandlerParsingAndDispatch:
                 {
                     "type": "joinUserChannel",
                     "payload": {"channelId": "user:red"},
-                    "meta": {"requestUuid": "r4g"},
+                    "meta": {"requestUuid": "r4i"},
                 },
                 session_id,
                 sessions,
@@ -278,7 +383,7 @@ class TestDACPHandlerParsingAndDispatch:
                 {
                     "type": "leaveCurrentChannel",
                     "payload": {},
-                    "meta": {"requestUuid": "r4h"},
+                    "meta": {"requestUuid": "r4j"},
                 },
                 session_id,
                 sessions,
@@ -380,16 +485,110 @@ class TestDACPHandlerParsingAndDispatch:
         assert h_fi.await_count == 1
         assert h_finst.await_count == 1
         assert h_fibc.await_count == 1
+        assert h_gi.await_count == 1
+        assert h_gam.await_count == 1
         assert h_gucs.await_count == 1
         assert h_gcc.await_count == 1
         assert h_juc.await_count == 1
         assert h_lcc.await_count == 1
         assert h_ilu.await_count == 1
+        assert h_ael.await_count == 1
+        assert h_rel.await_count == 1
         assert h_rifc.await_count == 1
         assert h_irr.await_count == 1
         assert h_rirr.await_count == 1
         assert h_clu.await_count == 1
         assert h_hb.await_count == 1
+
+
+class TestDACPHandlerGetInfo:
+    @pytest.mark.asyncio
+    async def test_get_info_response_contains_implementation_metadata(self):
+        handler, storage, _, _ = _handler()
+        ws = _websocket()
+
+        from fdc3.desktop_agent.version import __version__
+
+        storage.apps.get_app_metadata.return_value = SimpleNamespace(
+            name="Test App",
+            version="1.2.3",
+            description="desc",
+            icons=[],
+            intents=[],
+        )
+
+        await handler.handle_message(
+            {
+                "type": "getInfo",
+                "payload": {},
+                "meta": {"requestUuid": "r-info"},
+            },
+            session_id="s1",
+            wcp_sessions={
+                "s1": {
+                    "identity": {
+                        "appId": "app-1",
+                        "instanceId": "inst-1",
+                        "instanceUuid": "inst-uuid-1",
+                    }
+                }
+            },
+            websocket=ws,
+        )
+
+        ws.send_text.assert_called_once()
+        payload = json.loads(ws.send_text.call_args.args[0])
+        assert payload["type"] == "getInfoResponse"
+        assert payload["meta"]["requestUuid"] == "r-info"
+
+        impl = payload["payload"]["implementationMetadata"]
+        assert impl["fdc3Version"] == "2.2"
+        assert impl["provider"] == "py-fdc3-desktop-agent"
+        assert impl["providerVersion"] == __version__
+        assert impl["optionalFeatures"]["OriginatingAppMetadata"] is False
+        assert impl["optionalFeatures"]["UserChannelMembershipAPIs"] is True
+        assert impl["optionalFeatures"]["DesktopAgentBridging"] is False
+
+        app_meta = impl["appMetadata"]
+        assert app_meta["appId"] == "app-1"
+        assert app_meta["instanceId"] == "inst-1"
+
+        storage.apps.get_app_metadata.assert_awaited_once_with("app-1")
+
+
+class TestDACPHandlerGetAppMetadata:
+    @pytest.mark.asyncio
+    async def test_get_app_metadata_success(self):
+        handler, storage, _, _ = _handler()
+        ws = _websocket()
+
+        storage.apps.get_app_metadata.return_value = SimpleNamespace(
+            app_id="app-1",
+            name="Test App",
+            version="1.2.3",
+            description="desc",
+            icons=[],
+        )
+
+        await handler.handle_message(
+            {
+                "type": "getAppMetadata",
+                "payload": {"app": {"appId": "app-1"}},
+                "meta": {"requestUuid": "r-appmeta"},
+            },
+            session_id="s1",
+            wcp_sessions={"s1": {"identity": {"instanceUuid": "i1"}}},
+            websocket=ws,
+        )
+
+        ws.send_text.assert_called_once()
+        payload = json.loads(ws.send_text.call_args.args[0])
+        assert payload["type"] == "getAppMetadataResponse"
+        assert payload["meta"]["requestUuid"] == "r-appmeta"
+        assert payload["payload"]["appMetadata"]["appId"] == "app-1"
+        assert payload["payload"]["appMetadata"]["name"] == "Test App"
+
+        storage.apps.get_app_metadata.assert_awaited_once_with("app-1")
 
 
 class TestDACPHandlerUserChannels:
@@ -527,6 +726,134 @@ class TestDACPHandlerUserChannels:
         payload = json.loads(ws.send_text.call_args.args[0])
         assert payload["type"] == "joinUserChannelResponse"
         assert payload["payload"]["error"] == "NoChannelFound"
+
+
+class TestDACPHandlerEventListeners:
+    @pytest.mark.asyncio
+    async def test_user_channel_changed_emitted_on_join_and_leave(self):
+        handler, _, _, connection_manager = _handler()
+        ws = _websocket()
+
+        from fdc3.desktop_agent.core import core_services
+
+        core_services.channel_manager.channels.clear()
+        core_services.channel_manager.instance_channels.clear()
+        core_services.listener_store.event_listeners.clear()
+        core_services.listener_store.listeners_by_instance.clear()
+
+        # Register USER_CHANNEL_CHANGED listener
+        ws.send_text.reset_mock()
+        await handler.handle_message(
+            {
+                "type": "addEventListener",
+                "payload": {"eventType": "USER_CHANNEL_CHANGED"},
+                "meta": {"requestUuid": "r-el"},
+            },
+            session_id="s1",
+            wcp_sessions={"s1": {"identity": {"instanceUuid": "inst-1"}}},
+            websocket=ws,
+        )
+
+        connection_manager.send_to_instance.reset_mock()
+
+        # Join a user channel -> expect fdc3Event emitted
+        await handler.handle_message(
+            {
+                "type": "joinUserChannel",
+                "payload": {"channelId": "red"},
+                "meta": {"requestUuid": "r-j"},
+            },
+            session_id="s1",
+            wcp_sessions={"s1": {"identity": {"instanceUuid": "inst-1"}}},
+            websocket=ws,
+        )
+
+        assert connection_manager.send_to_instance.await_count == 1
+        target_uuid, raw = connection_manager.send_to_instance.call_args.args
+        assert target_uuid == "inst-1"
+        msg = json.loads(raw)
+        assert msg["type"] == "fdc3Event"
+        assert msg["payload"]["event"]["type"] == "USER_CHANNEL_CHANGED"
+        assert msg["payload"]["event"]["details"]["currentChannelId"] == "user:red"
+
+        connection_manager.send_to_instance.reset_mock()
+
+        # Leave current channel -> expect fdc3Event emitted with null currentChannelId
+        await handler.handle_message(
+            {
+                "type": "leaveCurrentChannel",
+                "payload": {},
+                "meta": {"requestUuid": "r-l"},
+            },
+            session_id="s1",
+            wcp_sessions={"s1": {"identity": {"instanceUuid": "inst-1"}}},
+            websocket=ws,
+        )
+
+        assert connection_manager.send_to_instance.await_count == 1
+        target_uuid, raw = connection_manager.send_to_instance.call_args.args
+        assert target_uuid == "inst-1"
+        msg = json.loads(raw)
+        assert msg["type"] == "fdc3Event"
+        assert msg["payload"]["event"]["type"] == "USER_CHANNEL_CHANGED"
+        assert msg["payload"]["event"]["details"]["currentChannelId"] is None
+
+    @pytest.mark.asyncio
+    async def test_remove_event_listener_stops_delivery(self):
+        handler, _, _, connection_manager = _handler()
+        ws = _websocket()
+
+        from fdc3.desktop_agent.core import core_services
+
+        core_services.channel_manager.channels.clear()
+        core_services.channel_manager.instance_channels.clear()
+        core_services.listener_store.event_listeners.clear()
+        core_services.listener_store.listeners_by_instance.clear()
+
+        # Add listener, capture returned UUID
+        ws.send_text.reset_mock()
+        await handler.handle_message(
+            {
+                "type": "addEventListener",
+                "payload": {"eventType": "USER_CHANNEL_CHANGED"},
+                "meta": {"requestUuid": "r-el"},
+            },
+            session_id="s1",
+            wcp_sessions={"s1": {"identity": {"instanceUuid": "inst-1"}}},
+            websocket=ws,
+        )
+        add_resp = json.loads(ws.send_text.call_args.args[0])
+        lu = add_resp["payload"]["listenerUuid"]
+        listener_uuid = lu["root"] if isinstance(lu, dict) else lu
+
+        # Remove listener
+        ws.send_text.reset_mock()
+        await handler.handle_message(
+            {
+                "type": "removeEventListener",
+                "payload": {"listenerUuid": listener_uuid},
+                "meta": {"requestUuid": "r-rel"},
+            },
+            session_id="s1",
+            wcp_sessions={"s1": {"identity": {"instanceUuid": "inst-1"}}},
+            websocket=ws,
+        )
+
+        connection_manager.send_to_instance.reset_mock()
+
+        # Join should no longer emit events
+        await handler.handle_message(
+            {
+                "type": "joinUserChannel",
+                "payload": {"channelId": "red"},
+                "meta": {"requestUuid": "r-j"},
+            },
+            session_id="s1",
+            wcp_sessions={"s1": {"identity": {"instanceUuid": "inst-1"}}},
+            websocket=ws,
+        )
+
+        connection_manager.send_to_instance.assert_not_awaited()
 
 
 class TestDACPHandlerFindInstances:

@@ -6,8 +6,9 @@ import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable, Dict, Optional
+from typing import Any, Awaitable, Callable, Dict, Literal, Optional
 
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from websockets.asyncio.client import ClientConnection, connect
 
 from fdc3.models.identifiers import AppIdentifier
@@ -34,6 +35,79 @@ class BridgeConnectionSettings:
 
 
 ConnectFunc = Callable[[str], Awaitable[ClientConnection]]
+
+
+class BridgeMeta(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    requestUuid: Optional[str] = None
+    responseUuid: Optional[str] = None
+    timestamp: Optional[str] = None
+    source: Optional[AppIdentifier] = None
+    destination: Optional[AppIdentifier] = None
+
+
+class BridgeMessage(BaseModel):
+    """Generic envelope for any bridge message.
+
+    We keep this permissive (extra fields allowed) so the client can safely
+    ignore new/unknown message types while still getting typed `meta`.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    type: str
+    payload: Optional[dict[str, Any]] = None
+    meta: Optional[BridgeMeta] = None
+
+
+class BridgeHelloPayload(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    desktopAgentBridgeVersion: str
+
+
+class BridgeHello(BridgeMessage):
+    type: Literal["hello"]
+    payload: BridgeHelloPayload
+
+
+class BridgeHandshakePayload(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    requestedName: str
+    implementationMetadata: Dict[str, Any]
+    channelsState: Dict[str, list[dict]] = Field(default_factory=dict)
+
+
+class BridgeHandshake(BridgeMessage):
+    type: Literal["handshake"]
+    payload: BridgeHandshakePayload
+    meta: BridgeMeta
+
+
+class BridgeConnectedAgentsUpdatePayload(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    addAgent: Optional[str] = None
+    allAgents: list[dict] = Field(default_factory=list)
+
+
+class BridgeConnectedAgentsUpdate(BridgeMessage):
+    type: Literal["connectedAgentsUpdate"]
+    payload: BridgeConnectedAgentsUpdatePayload
+    meta: Optional[BridgeMeta] = None
+
+
+class BridgeAuthenticationFailedPayload(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    message: Optional[str] = None
+
+
+class BridgeAuthenticationFailed(BridgeMessage):
+    type: Literal["authenticationFailed"]
+    payload: Optional[BridgeAuthenticationFailedPayload] = None
 
 
 class BridgeClient:
@@ -171,25 +245,29 @@ class BridgeClient:
 
         # Step 2: wait for hello
         raw = await asyncio.wait_for(ws.recv(), timeout=3.0)
-        hello = self._parse_json(raw)
-        if not self._is_hello(hello):
-            raise RuntimeError("Connected websocket did not send a valid bridge hello")
+        hello_raw = self._parse_json(raw)
+        try:
+            BridgeHello.model_validate(hello_raw)
+        except ValidationError as exc:
+            raise RuntimeError(
+                "Connected websocket did not send a valid bridge hello"
+            ) from exc
 
         # Step 3: send handshake
         handshake_request_uuid = _make_uuid()
-        handshake = {
-            "type": "handshake",
-            "payload": {
-                "requestedName": self._settings.requested_name,
-                "implementationMetadata": self._implementation_metadata_factory(),
-                "channelsState": self._channels_state_factory(),
-            },
-            "meta": {
-                "requestUuid": handshake_request_uuid,
-                "timestamp": _utc_now_iso(),
-            },
-        }
-        await ws.send(json.dumps(handshake))
+        handshake = BridgeHandshake(
+            type="handshake",
+            payload=BridgeHandshakePayload(
+                requestedName=self._settings.requested_name,
+                implementationMetadata=self._implementation_metadata_factory(),
+                channelsState=self._channels_state_factory(),
+            ),
+            meta=BridgeMeta(
+                requestUuid=handshake_request_uuid,
+                timestamp=_utc_now_iso(),
+            ),
+        )
+        await ws.send(handshake.model_dump_json())
 
         # Start recv loop (handles connectedAgentsUpdate and BMP messages)
         self._recv_task = asyncio.create_task(self._recv_loop(), name="bridge-recv")
@@ -218,56 +296,56 @@ class BridgeClient:
             raise ValueError("Expected text websocket message")
         return json.loads(raw)
 
-    @staticmethod
-    def _is_hello(msg: dict) -> bool:
-        try:
-            return (
-                msg.get("type") == "hello"
-                and isinstance(msg.get("payload"), dict)
-                and bool(msg["payload"].get("desktopAgentBridgeVersion"))
-            )
-        except Exception:
-            return False
-
     async def _recv_loop(self) -> None:
         assert self._ws is not None
         ws = self._ws
         while not self._stopping.is_set():
             raw = await ws.recv()
-            msg = self._parse_json(raw)
+            msg_raw = self._parse_json(raw)
+            msg = BridgeMessage.model_validate(msg_raw)
 
-            msg_type = msg.get("type")
-            meta = msg.get("meta") or {}
+            msg_type = msg.type
+            meta = msg.meta
 
             # Step 4/6: connectedAgentsUpdate (atomic processing)
             if msg_type == "connectedAgentsUpdate":
                 async with self._sync_lock:
-                    payload = msg.get("payload") or {}
+                    try:
+                        update = BridgeConnectedAgentsUpdate.model_validate(msg_raw)
+                        payload = update.payload
+                    except ValidationError:
+                        payload = BridgeConnectedAgentsUpdatePayload.model_validate(
+                            msg_raw.get("payload") or {}
+                        )
                     # Newly connected agent gets addAgent assigned name.
-                    add_agent = payload.get("addAgent")
-                    if isinstance(add_agent, str) and add_agent:
-                        self._assigned_name = add_agent
-                    self._connected_agents = payload.get("allAgents") or []
+                    if isinstance(payload.addAgent, str) and payload.addAgent:
+                        self._assigned_name = payload.addAgent
+                    self._connected_agents = payload.allAgents
                 continue
 
             # Bridge auth failure
             if msg_type == "authenticationFailed":
+                try:
+                    failed = BridgeAuthenticationFailed.model_validate(msg_raw)
+                except ValidationError:
+                    failed = BridgeAuthenticationFailed(type="authenticationFailed")
                 raise RuntimeError(
-                    (msg.get("payload") or {}).get("message") or "auth failed"
+                    (failed.payload.message if failed.payload else None)
+                    or "auth failed"
                 )
 
-            request_uuid = meta.get("requestUuid")
-            response_uuid = meta.get("responseUuid")
+            request_uuid = meta.requestUuid if meta else None
+            response_uuid = meta.responseUuid if meta else None
 
             # Responses (meta.responseUuid present)
             if request_uuid and response_uuid:
-                await self._handle_response(request_uuid, msg)
+                await self._handle_response(request_uuid, msg_raw)
                 continue
 
             # Requests forwarded by bridge (requestUuid present, no responseUuid)
             if request_uuid and not response_uuid:
                 async with self._sync_lock:
-                    response = await self._request_handler(msg)
+                    response = await self._request_handler(msg_raw)
                 if response is not None:
                     await ws.send(json.dumps(response))
                 continue
@@ -324,7 +402,8 @@ class BridgeClient:
         async with self._pending_lock:
             self._pending[req_uuid] = fut
 
-        await self._ws.send(json.dumps(msg))
+        # Validate + normalize before sending.
+        await self._ws.send(BridgeMessage.model_validate(msg).model_dump_json())
         try:
             return await asyncio.wait_for(fut, timeout=timeout)
         finally:
@@ -366,7 +445,8 @@ class BridgeClient:
                 else dict(destination)
             )
 
-        await self._ws.send(json.dumps(msg))
+        # Validate + normalize before sending.
+        await self._ws.send(BridgeMessage.model_validate(msg).model_dump_json())
         return req_uuid
 
 
