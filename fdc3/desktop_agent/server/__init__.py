@@ -28,7 +28,11 @@ from ..tools import create_task_safe
 from ..config import DesktopAgentConfig
 from ..version import __version__
 from ..bridging import BridgeClient
-from ..bridging.client import BridgeConnectionSettings
+from ..bridging.client import (
+    BridgeConnectionSettings,
+    RequestHandlerProtocol,
+)
+from typing import cast
 from ..bridging.router import BridgeRequestRouter
 
 logger = logging.getLogger(__name__)
@@ -240,22 +244,63 @@ def create_app(config: Optional[DesktopAgentConfig] = None) -> FastAPI:
 
             def _implementation_metadata() -> dict:
                 # Minimal ImplementationMetadata for bridging handshake.
+                # Compute optional features based on available core services.
                 # See FDC3 agent-bridging overview, BCP step 3.
+                optional_features = {
+                    "OriginatingAppMetadata": hasattr(core_services, "app_registry")
+                    and getattr(core_services, "app_registry") is not None,
+                    "UserChannelMembershipAPIs": hasattr(
+                        core_services, "channel_manager"
+                    )
+                    and getattr(core_services, "channel_manager") is not None,
+                    "DesktopAgentBridging": True,
+                }
+
                 return {
                     "fdc3Version": "2.2",
                     "provider": "py-fdc3-desktop-agent",
                     "providerVersion": __version__,
-                    "optionalFeatures": {
-                        "OriginatingAppMetadata": False,
-                        "UserChannelMembershipAPIs": True,
-                        "DesktopAgentBridging": True,
-                    },
+                    "optionalFeatures": optional_features,
                 }
 
             def _channels_state() -> dict:
-                # This implementation does not currently persist full channel state.
-                # Return an empty state map (bridge will merge from other agents).
-                return {}
+                # Provide a best-effort snapshot of current channel membership for
+                # the bridging handshake. We include `instanceUuid` (internal) and
+                # enrich with `appId`/`instanceId` when known.
+                state: dict[str, list[dict]] = {}
+
+                channel_manager = core_services.channel_manager
+                app_registry = getattr(core_services, "app_registry", None)
+
+                for channel in channel_manager.list_channels():
+                    members: list[dict] = []
+                    for instance_uuid in channel_manager.get_channel_members(
+                        channel.id
+                    ):
+                        instance_info = (
+                            app_registry.get_instance(instance_uuid)
+                            if app_registry is not None
+                            else None
+                        )
+                        if instance_info is not None:
+                            members.append(
+                                {
+                                    "desktopAgent": settings.requested_name,
+                                    "appId": instance_info.app_id,
+                                    "instanceId": instance_info.instance_id,
+                                    "instanceUuid": instance_info.instance_uuid,
+                                }
+                            )
+                        else:
+                            members.append(
+                                {
+                                    "desktopAgent": settings.requested_name,
+                                    "instanceUuid": instance_uuid,
+                                }
+                            )
+                    state[channel.id] = members
+
+                return state
 
             router = BridgeRequestRouter(
                 storage=storage,
@@ -269,7 +314,7 @@ def create_app(config: Optional[DesktopAgentConfig] = None) -> FastAPI:
                 settings,
                 implementation_metadata_factory=_implementation_metadata,
                 channels_state_factory=_channels_state,
-                request_handler=router.handle,
+                request_handler=cast(RequestHandlerProtocol, router.handle),
             )
             await bridge_client.start()
             app.state.bridge_client = bridge_client

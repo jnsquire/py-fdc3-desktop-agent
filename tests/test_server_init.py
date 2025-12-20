@@ -126,6 +126,108 @@ class _DistributedAdapterStub:
 
 
 @pytest.mark.asyncio
+async def test_server_lifespan_bridge_channels_state_factory_populates_state(
+    monkeypatch,
+):
+    from fdc3.desktop_agent import server as server_mod
+
+    class _ChannelStub:
+        def __init__(self, channel_id: str, members: list[str]):
+            self.id = channel_id
+            self.members = members
+
+    class _ChannelManagerStateStub:
+        def __init__(self):
+            self.channels = {
+                "red": _ChannelStub("red", ["uuid1"]),
+                "blue": _ChannelStub("blue", []),
+            }
+
+        def list_channels(self):
+            return list(self.channels.values())
+
+        def get_channel_members(self, channel_id: str) -> list[str]:
+            if channel_id in self.channels:
+                return list(self.channels[channel_id].members)
+            return []
+
+    class _AppInstanceStub:
+        def __init__(self, app_id: str, instance_id: str, instance_uuid: str):
+            self.app_id = app_id
+            self.instance_id = instance_id
+            self.instance_uuid = instance_uuid
+
+    class _AppRegistryStub:
+        def __init__(self):
+            self.instances = {
+                "uuid1": _AppInstanceStub("app1", "inst1", "uuid1"),
+            }
+
+        def get_instance(self, instance_uuid: str):
+            return self.instances.get(instance_uuid)
+
+    class _CoreServicesBridgeStub:
+        def __init__(self):
+            self.plugin_registry = _PluginRegistryStub()
+            self.channel_manager = _ChannelManagerStateStub()
+            self.app_registry = _AppRegistryStub()
+
+        async def register_plugin(self, plugin: Any) -> None:
+            self.plugin_registry.register(plugin)
+
+        async def unregister_plugin(self, plugin: Any) -> None:
+            return
+
+    monkeypatch.setattr(server_mod, "core_services", _CoreServicesBridgeStub())
+
+    class _BridgeClientCapture:
+        def __init__(
+            self,
+            settings: Any,
+            *,
+            implementation_metadata_factory: Any,
+            channels_state_factory: Any,
+            request_handler: Any,
+        ):
+            self.channels_state_factory = channels_state_factory
+            self.captured_state: Optional[dict] = None
+
+        async def start(self) -> None:
+            self.captured_state = self.channels_state_factory()
+
+        async def stop(self) -> None:
+            return
+
+    monkeypatch.setattr(server_mod, "BridgeClient", _BridgeClientCapture)
+
+    storage = _StorageStub()
+    config = DesktopAgentConfig(
+        storage=cast(Any, storage),
+        launcher=cast(Any, _LauncherStub()),
+        auto_discover_plugins=False,
+        bridge_enabled=True,
+        bridge_requested_name="agent-1",
+    )
+
+    app = server_mod.create_app(config)
+
+    async with app.router.lifespan_context(app):
+        bridge_client = app.state.bridge_client
+        assert bridge_client is not None
+        captured = cast(Any, bridge_client).captured_state
+        assert captured is not None
+        assert captured["red"] == [
+            {
+                "desktopAgent": "agent-1",
+                "appId": "app1",
+                "instanceId": "inst1",
+                "instanceUuid": "uuid1",
+            }
+        ]
+        assert captured["blue"] == []
+
+
+@pytest.mark.asyncio
 async def test_server_lifespan_registers_plugins_and_handles_get_adapter_error(
     monkeypatch,
 ):

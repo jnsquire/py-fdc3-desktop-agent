@@ -33,6 +33,48 @@ def router_factory(connection_manager):
     return _make_router
 
 
+def make_apps(get_app_metadata=None, list_apps=None):
+    return SimpleNamespace(
+        get_app_metadata=AsyncMock(return_value=get_app_metadata)
+        if get_app_metadata is not None
+        else AsyncMock(return_value=None),
+        list_apps=AsyncMock(return_value=list_apps or []),
+    )
+
+
+def make_launch_configs(get_launch_config=None):
+    return SimpleNamespace(
+        get_launch_config=AsyncMock(return_value=get_launch_config)
+        if get_launch_config is not None
+        else AsyncMock(return_value=None)
+    )
+
+
+def make_storage(apps=None, launch_configs=None):
+    return SimpleNamespace(
+        apps=apps or make_apps(), launch_configs=launch_configs or make_launch_configs()
+    )
+
+
+def make_launcher(launch_app=None):
+    return SimpleNamespace(
+        launch_app=AsyncMock(return_value=launch_app)
+        if launch_app is not None
+        else AsyncMock()
+    )
+
+
+def make_core(context_router=None, intent_resolver=None, app_registry=None):
+    return SimpleNamespace(
+        context_router=context_router
+        or SimpleNamespace(broadcast_context=Mock(return_value=[])),
+        intent_resolver=intent_resolver
+        or SimpleNamespace(resolve_intent=Mock(), deliver_intent_event=Mock()),
+        app_registry=app_registry
+        or SimpleNamespace(get_connected_instances_for_app=Mock()),
+    )
+
+
 @pytest.mark.asyncio
 async def test_bridge_router_broadcast_request_fanouts_and_returns_none(
     router_factory, connection_manager
@@ -62,18 +104,14 @@ async def test_bridge_router_broadcast_request_fanouts_and_returns_none(
 
 @pytest.mark.asyncio
 async def test_bridge_router_open_request_success_builds_open_response(router_factory):
-    apps = SimpleNamespace(
-        get_app_metadata=AsyncMock(return_value=SimpleNamespace(app_id="app-1"))
+    apps = make_apps(get_app_metadata=SimpleNamespace(app_id="app-1"))
+    launch_configs = make_launch_configs(
+        get_launch_config=SimpleNamespace(app_id="app-1")
     )
-    launch_configs = SimpleNamespace(
-        get_launch_config=AsyncMock(return_value=SimpleNamespace(app_id="app-1"))
-    )
-    storage = SimpleNamespace(apps=apps, launch_configs=launch_configs)
+    storage = make_storage(apps=apps, launch_configs=launch_configs)
 
-    launcher = SimpleNamespace(
-        launch_app=AsyncMock(
-            return_value=SimpleNamespace(success=True, instance_id="inst-1")
-        )
+    launcher = make_launcher(
+        launch_app=SimpleNamespace(success=True, instance_id="inst-1")
     )
 
     router = router_factory(storage=storage, launcher=launcher)
@@ -101,11 +139,11 @@ async def test_bridge_router_open_request_success_builds_open_response(router_fa
 async def test_bridge_router_open_request_app_not_found_returns_error_payload(
     router_factory,
 ):
-    apps = SimpleNamespace(get_app_metadata=AsyncMock(return_value=None))
-    launch_configs = SimpleNamespace(get_launch_config=AsyncMock(return_value=None))
-    storage = SimpleNamespace(apps=apps, launch_configs=launch_configs)
+    apps = make_apps(get_app_metadata=None)
+    launch_configs = make_launch_configs(get_launch_config=None)
+    storage = make_storage(apps=apps, launch_configs=launch_configs)
 
-    launcher = SimpleNamespace(launch_app=AsyncMock())
+    launcher = make_launcher()
 
     router = router_factory(storage=storage, launcher=launcher)
 
@@ -131,12 +169,11 @@ async def test_bridge_router_raise_intent_request_delivers_intent_event_and_retu
         intent="ViewChart",
     )
 
-    core = SimpleNamespace(
-        intent_resolver=SimpleNamespace(
-            resolve_intent=Mock(return_value=resolution),
-            deliver_intent_event=Mock(return_value=["inst-123"]),
-        )
+    intent_resolver = SimpleNamespace(
+        resolve_intent=Mock(return_value=resolution),
+        deliver_intent_event=Mock(return_value=["inst-123"]),
     )
+    core = make_core(intent_resolver=intent_resolver)
 
     router = router_factory(core=core)
 
@@ -162,18 +199,16 @@ async def test_bridge_router_raise_intent_request_delivers_intent_event_and_retu
 async def test_bridge_router_get_app_metadata_request_success_returns_metadata_payload(
     router_factory,
 ):
-    apps = SimpleNamespace(
-        get_app_metadata=AsyncMock(
-            return_value=SimpleNamespace(
-                app_id="app-1",
-                name="App One",
-                version="1.2.3",
-                description="desc",
-                icons=[{"src": "https://example/icon.png"}],
-            )
+    apps = make_apps(
+        get_app_metadata=SimpleNamespace(
+            app_id="app-1",
+            name="App One",
+            version="1.2.3",
+            description="desc",
+            icons=[{"src": "https://example/icon.png"}],
         )
     )
-    storage = SimpleNamespace(apps=apps)
+    storage = make_storage(apps=apps)
 
     router = router_factory(storage=storage)
 
@@ -234,16 +269,15 @@ async def test_bridge_router_get_app_metadata_request_missing_or_unknown_returns
 async def test_bridge_router_find_instances_request_returns_identifiers_for_connected_instances(
     router_factory,
 ):
-    core = SimpleNamespace(
-        app_registry=SimpleNamespace(
-            get_connected_instances_for_app=Mock(
-                return_value=[
-                    SimpleNamespace(app_id="app-1", instance_id="i-1"),
-                    SimpleNamespace(app_id="app-1", instance_id="i-2"),
-                ]
-            )
+    app_registry = SimpleNamespace(
+        get_connected_instances_for_app=Mock(
+            return_value=[
+                SimpleNamespace(app_id="app-1", instance_id="i-1"),
+                SimpleNamespace(app_id="app-1", instance_id="i-2"),
+            ]
         )
     )
+    core = make_core(app_registry=app_registry)
 
     router = router_factory(core=core)
 
@@ -293,8 +327,8 @@ async def test_bridge_router_find_instances_request_missing_app_id_returns_empty
 async def test_bridge_router_find_intent_request_returns_error_when_missing_intent(
     router_factory,
 ):
-    apps = SimpleNamespace(list_apps=AsyncMock(return_value=[]))
-    storage = SimpleNamespace(apps=apps)
+    apps = make_apps(list_apps=[])
+    storage = make_storage(apps=apps)
 
     router = router_factory(storage=storage)
 
@@ -316,21 +350,19 @@ async def test_bridge_router_find_intent_request_returns_error_when_missing_inte
 async def test_bridge_router_find_intent_request_returns_error_when_no_matching_apps(
     router_factory,
 ):
-    apps = SimpleNamespace(
-        list_apps=AsyncMock(
-            return_value=[
-                SimpleNamespace(
-                    app_id="a1",
-                    name="A1",
-                    version="1",
-                    description=None,
-                    icons=None,
-                    intents=["Other"],
-                )
-            ]
-        )
+    apps = make_apps(
+        list_apps=[
+            SimpleNamespace(
+                app_id="a1",
+                name="A1",
+                version="1",
+                description=None,
+                icons=None,
+                intents=["Other"],
+            )
+        ]
     )
-    storage = SimpleNamespace(apps=apps)
+    storage = make_storage(apps=apps)
 
     router = router_factory(storage=storage)
 
@@ -351,29 +383,27 @@ async def test_bridge_router_find_intent_request_returns_error_when_no_matching_
 async def test_bridge_router_find_intent_request_returns_app_intent_for_matches(
     router_factory,
 ):
-    apps = SimpleNamespace(
-        list_apps=AsyncMock(
-            return_value=[
-                SimpleNamespace(
-                    app_id="a1",
-                    name="A1",
-                    version="1",
-                    description="d1",
-                    icons=[{"src": "x"}],
-                    intents=["ViewChart"],
-                ),
-                SimpleNamespace(
-                    app_id="a2",
-                    name="A2",
-                    version="2",
-                    description="d2",
-                    icons=None,
-                    intents=["Other", "ViewChart"],
-                ),
-            ]
-        )
+    apps = make_apps(
+        list_apps=[
+            SimpleNamespace(
+                app_id="a1",
+                name="A1",
+                version="1",
+                description="d1",
+                icons=[{"src": "x"}],
+                intents=["ViewChart"],
+            ),
+            SimpleNamespace(
+                app_id="a2",
+                name="A2",
+                version="2",
+                description="d2",
+                icons=None,
+                intents=["Other", "ViewChart"],
+            ),
+        ]
     )
-    storage = SimpleNamespace(apps=apps)
+    storage = make_storage(apps=apps)
 
     router = router_factory(storage=storage)
 

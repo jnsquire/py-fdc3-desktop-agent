@@ -6,12 +6,23 @@ import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable, Dict, Literal, Optional
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    Literal,
+    Optional,
+    List,
+    Mapping,
+    Protocol,
+)
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from websockets.asyncio.client import ClientConnection, connect
 
 from fdc3.models.identifiers import AppIdentifier
+from fdc3.models.identifiers import BaseImplementationMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +46,28 @@ class BridgeConnectionSettings:
 
 
 ConnectFunc = Callable[[str], Awaitable[ClientConnection]]
+
+
+class ImplementationMetadataFactory(Protocol):
+    def __call__(
+        self,
+    ) -> (
+        Mapping[str, Any] | BaseImplementationMetadata
+    ):  # pragma: no cover - typing helper
+        ...
+
+
+class ChannelsStateFactory(Protocol):
+    def __call__(
+        self,
+    ) -> Mapping[str, List[Mapping[str, Any]]]:  # pragma: no cover - typing helper
+        ...
+
+
+class RequestHandlerProtocol(Protocol):
+    def __call__(
+        self, msg: Mapping[str, Any]
+    ) -> Awaitable[Optional[Mapping[str, Any]]]: ...
 
 
 class BridgeMeta(BaseModel):
@@ -76,8 +109,8 @@ class BridgeHandshakePayload(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     requestedName: str
-    implementationMetadata: Dict[str, Any]
-    channelsState: Dict[str, list[dict]] = Field(default_factory=dict)
+    implementationMetadata: Mapping[str, Any]
+    channelsState: Mapping[str, List[Mapping[str, Any]]] = Field(default_factory=dict)
 
 
 class BridgeHandshake(BridgeMessage):
@@ -126,15 +159,18 @@ class BridgeClient:
         self,
         settings: BridgeConnectionSettings,
         *,
-        implementation_metadata_factory: Callable[[], Dict[str, Any]],
-        channels_state_factory: Callable[[], Dict[str, list[dict]]],
-        request_handler: Callable[[dict], Awaitable[Optional[dict]]],
+        implementation_metadata_factory: ImplementationMetadataFactory,
+        channels_state_factory: ChannelsStateFactory,
+        request_handler: RequestHandlerProtocol,
         connect_func: Optional[ConnectFunc] = None,
     ):
         self._settings = settings
-        self._implementation_metadata_factory = implementation_metadata_factory
-        self._channels_state_factory = channels_state_factory
-        self._request_handler = request_handler
+        # Factories and handlers — keep runtime flexibility but tighten hints
+        self._implementation_metadata_factory: ImplementationMetadataFactory = (
+            implementation_metadata_factory
+        )
+        self._channels_state_factory: ChannelsStateFactory = channels_state_factory
+        self._request_handler: RequestHandlerProtocol = request_handler
         self._connect: ConnectFunc = connect_func or (lambda url: connect(url))
 
         self._ws: Optional[ClientConnection] = None
@@ -255,11 +291,32 @@ class BridgeClient:
 
         # Step 3: send handshake
         handshake_request_uuid = _make_uuid()
+
+        def _normalize_impl_metadata(raw: Any) -> dict:
+            # Accept either a Pydantic model or a raw mapping; ensure required
+            # fields exist and `optionalFeatures` is a mapping.
+            if isinstance(raw, BaseImplementationMetadata):
+                return raw.model_dump()
+            md = dict(raw or {})
+            md.setdefault("fdc3Version", "0.0")
+            md.setdefault("optionalFeatures", {})
+            try:
+                return BaseImplementationMetadata.model_validate(md).model_dump()
+            except ValidationError:
+                # Fallback: ensure minimal shape
+                return {
+                    "fdc3Version": md.get("fdc3Version", "0.0"),
+                    "provider": md.get("provider", ""),
+                    "optionalFeatures": md.get("optionalFeatures", {}),
+                }
+
+        impl_meta = _normalize_impl_metadata(self._implementation_metadata_factory())
+
         handshake = BridgeHandshake(
             type="handshake",
             payload=BridgeHandshakePayload(
                 requestedName=self._settings.requested_name,
-                implementationMetadata=self._implementation_metadata_factory(),
+                implementationMetadata=impl_meta,
                 channelsState=self._channels_state_factory(),
             ),
             meta=BridgeMeta(
@@ -267,6 +324,7 @@ class BridgeClient:
                 timestamp=_utc_now_iso(),
             ),
         )
+
         await ws.send(handshake.model_dump_json())
 
         # Start recv loop (handles connectedAgentsUpdate and BMP messages)

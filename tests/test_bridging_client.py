@@ -1,11 +1,15 @@
 import asyncio
 import json
 from collections.abc import Awaitable, Callable
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 import pytest
 
-from fdc3.desktop_agent.bridging.client import BridgeClient, BridgeConnectionSettings
+from fdc3.desktop_agent.bridging.client import (
+    BridgeClient,
+    BridgeConnectionSettings,
+    RequestHandlerProtocol,
+)
 
 
 class FakeWebSocket:
@@ -50,6 +54,41 @@ async def _wait_for(predicate: Callable[[], bool], timeout: float = 1.0) -> None
         await asyncio.sleep(0.01)
 
 
+def impl_meta_factory():
+    return {"provider": "test"}
+
+
+def channels_state_factory():
+    return {}
+
+
+async def _noop_request_handler(msg: dict) -> None:
+    await asyncio.sleep(0, result=None)
+
+
+noop_request_handler = _noop_request_handler
+
+
+def make_client(
+    settings,
+    ws,
+    *,
+    request_handler: Optional[Callable] = None,
+    connect_func: Optional[Callable] = None,
+):
+    async def _connect(url: str):
+        return ws
+
+    handler = request_handler or noop_request_handler
+    return BridgeClient(
+        settings,
+        implementation_metadata_factory=impl_meta_factory,
+        channels_state_factory=channels_state_factory,
+        request_handler=cast(RequestHandlerProtocol, handler),
+        connect_func=connect_func or _connect,
+    )
+
+
 @pytest.mark.asyncio
 async def test_bridge_client_connect_and_handshake_sends_handshake_and_sets_assigned_name():
     settings = BridgeConnectionSettings(
@@ -76,11 +115,12 @@ async def test_bridge_client_connect_and_handshake_sends_handshake_and_sets_assi
         assert url == "ws://127.0.0.1:4475"
         return ws
 
-    client = BridgeClient(
+    client = make_client(
         settings,
-        implementation_metadata_factory=lambda: {"provider": "test"},
-        channels_state_factory=lambda: {},
-        request_handler=lambda msg: asyncio.sleep(0, result=None),
+        FakeWebSocket(),
+        request_handler=cast(
+            RequestHandlerProtocol, lambda msg: asyncio.sleep(0, result=None)
+        ),
         connect_func=connect_func,
     )
 
@@ -91,7 +131,10 @@ async def test_bridge_client_connect_and_handshake_sends_handshake_and_sets_assi
     handshake = json.loads(ws.sent[0])
     assert handshake["type"] == "handshake"
     assert handshake["payload"]["requestedName"] == "agent-requested"
-    assert handshake["payload"]["implementationMetadata"] == {"provider": "test"}
+    impl = handshake["payload"]["implementationMetadata"]
+    assert impl["provider"] == "test"
+    assert "fdc3Version" in impl
+    assert isinstance(impl.get("optionalFeatures"), dict)
     assert handshake["payload"]["channelsState"] == {}
     assert handshake["meta"]["requestUuid"]
 
@@ -144,11 +187,12 @@ async def test_bridge_client_send_agent_request_correlates_response_by_request_u
     async def connect_func(url: str):
         return ws
 
-    client = BridgeClient(
+    client = make_client(
         settings,
-        implementation_metadata_factory=lambda: {"provider": "test"},
-        channels_state_factory=lambda: {},
-        request_handler=lambda msg: asyncio.sleep(0, result=None),
+        FakeWebSocket(),
+        request_handler=cast(
+            RequestHandlerProtocol, lambda msg: asyncio.sleep(0, result=None)
+        ),
         connect_func=connect_func,
     )
 
@@ -207,12 +251,8 @@ async def test_bridge_client_forwards_inbound_request_to_handler_and_sends_respo
     async def connect_func(url: str):
         return ws
 
-    client = BridgeClient(
-        settings,
-        implementation_metadata_factory=lambda: {"provider": "test"},
-        channels_state_factory=lambda: {},
-        request_handler=request_handler,
-        connect_func=connect_func,
+    client = make_client(
+        settings, ws, request_handler=request_handler, connect_func=connect_func
     )
 
     await client._connect_and_handshake()
@@ -251,11 +291,12 @@ async def test_bridge_client_connect_and_handshake_raises_when_no_bridge_found()
     async def connect_func(url: str):
         raise RuntimeError("nope")
 
-    client = BridgeClient(
+    client = make_client(
         settings,
-        implementation_metadata_factory=lambda: {"provider": "test"},
-        channels_state_factory=lambda: {},
-        request_handler=lambda msg: asyncio.sleep(0, result=None),
+        FakeWebSocket(),
+        request_handler=cast(
+            RequestHandlerProtocol, lambda msg: asyncio.sleep(0, result=None)
+        ),
         connect_func=connect_func,
     )
 
@@ -279,11 +320,12 @@ async def test_bridge_client_connect_and_handshake_raises_on_invalid_hello():
     async def connect_func(url: str):
         return ws
 
-    client = BridgeClient(
+    client = make_client(
         settings,
-        implementation_metadata_factory=lambda: {"provider": "test"},
-        channels_state_factory=lambda: {},
-        request_handler=lambda msg: asyncio.sleep(0, result=None),
+        ws,
+        request_handler=cast(
+            RequestHandlerProtocol, lambda msg: asyncio.sleep(0, result=None)
+        ),
         connect_func=connect_func,
     )
 
@@ -312,11 +354,12 @@ async def test_bridge_client_connect_and_handshake_times_out_waiting_for_connect
     async def connect_func(url: str):
         return ws
 
-    client = BridgeClient(
+    client = make_client(
         settings,
-        implementation_metadata_factory=lambda: {"provider": "test"},
-        channels_state_factory=lambda: {},
-        request_handler=lambda msg: asyncio.sleep(0, result=None),
+        ws,
+        request_handler=cast(
+            RequestHandlerProtocol, lambda msg: asyncio.sleep(0, result=None)
+        ),
         connect_func=connect_func,
     )
 
@@ -370,11 +413,12 @@ async def test_bridge_client_recv_loop_raises_on_authentication_failed():
     async def connect_func(url: str):
         return ws
 
-    client = BridgeClient(
+    client = make_client(
         settings,
-        implementation_metadata_factory=lambda: {"provider": "test"},
-        channels_state_factory=lambda: {},
-        request_handler=lambda msg: asyncio.sleep(0, result=None),
+        ws,
+        request_handler=cast(
+            RequestHandlerProtocol, lambda msg: asyncio.sleep(0, result=None)
+        ),
         connect_func=connect_func,
     )
 
@@ -401,11 +445,12 @@ async def test_bridge_client_send_agent_request_raises_when_not_connected():
         request_timeout_seconds=0.2,
     )
 
-    client = BridgeClient(
+    client = make_client(
         settings,
-        implementation_metadata_factory=lambda: {"provider": "test"},
-        channels_state_factory=lambda: {},
-        request_handler=lambda msg: asyncio.sleep(0, result=None),
+        FakeWebSocket(),
+        request_handler=cast(
+            RequestHandlerProtocol, lambda msg: asyncio.sleep(0, result=None)
+        ),
         connect_func=lambda url: asyncio.sleep(0, result=None),
     )
 
@@ -433,7 +478,9 @@ async def test_bridge_client_send_request_no_wait_raises_when_not_connected():
         settings,
         implementation_metadata_factory=lambda: {"provider": "test"},
         channels_state_factory=lambda: {},
-        request_handler=lambda msg: asyncio.sleep(0, result=None),
+        request_handler=cast(
+            RequestHandlerProtocol, lambda msg: asyncio.sleep(0, result=None)
+        ),
         connect_func=lambda url: asyncio.sleep(0, result=None),
     )
 
@@ -470,11 +517,12 @@ async def test_bridge_client_send_agent_request_times_out_and_cleans_pending():
     async def connect_func(url: str):
         return ws
 
-    client = BridgeClient(
+    client = make_client(
         settings,
-        implementation_metadata_factory=lambda: {"provider": "test"},
-        channels_state_factory=lambda: {},
-        request_handler=lambda msg: asyncio.sleep(0, result=None),
+        ws,
+        request_handler=cast(
+            RequestHandlerProtocol, lambda msg: asyncio.sleep(0, result=None)
+        ),
         connect_func=connect_func,
     )
 
@@ -505,11 +553,12 @@ async def test_bridge_client_handle_response_unknown_request_uuid_is_ignored():
         request_timeout_seconds=0.2,
     )
 
-    client = BridgeClient(
+    client = make_client(
         settings,
-        implementation_metadata_factory=lambda: {"provider": "test"},
-        channels_state_factory=lambda: {},
-        request_handler=lambda msg: asyncio.sleep(0, result=None),
+        FakeWebSocket(),
+        request_handler=cast(
+            RequestHandlerProtocol, lambda msg: asyncio.sleep(0, result=None)
+        ),
         connect_func=lambda url: asyncio.sleep(0, result=None),
     )
 
@@ -535,11 +584,12 @@ async def test_bridge_client_stop_fails_all_pending_futures():
         request_timeout_seconds=0.2,
     )
 
-    client = BridgeClient(
+    client = make_client(
         settings,
-        implementation_metadata_factory=lambda: {"provider": "test"},
-        channels_state_factory=lambda: {},
-        request_handler=lambda msg: asyncio.sleep(0, result=None),
+        FakeWebSocket(),
+        request_handler=cast(
+            RequestHandlerProtocol, lambda msg: asyncio.sleep(0, result=None)
+        ),
         connect_func=lambda url: asyncio.sleep(0, result=None),
     )
 
@@ -564,10 +614,9 @@ async def test_bridge_client_stop_cancels_run_task_and_swallows_cancelled_error(
         request_timeout_seconds=0.2,
     )
 
-    client = BridgeClient(
+    client = make_client(
         settings,
-        implementation_metadata_factory=lambda: {"provider": "test"},
-        channels_state_factory=lambda: {},
+        FakeWebSocket(),
         request_handler=lambda msg: asyncio.sleep(0, result=None),
         connect_func=lambda url: asyncio.sleep(0, result=None),
     )
@@ -593,10 +642,9 @@ async def test_bridge_client_stop_ignores_ws_close_exception_and_still_fails_pen
         async def close(self):
             raise RuntimeError("close failed")
 
-    client = BridgeClient(
+    client = make_client(
         settings,
-        implementation_metadata_factory=lambda: {"provider": "test"},
-        channels_state_factory=lambda: {},
+        FakeWebSocket(),
         request_handler=lambda msg: asyncio.sleep(0, result=None),
         connect_func=lambda url: asyncio.sleep(0, result=None),
     )
@@ -627,12 +675,8 @@ async def test_bridge_client_run_loop_resets_state_and_fails_pending_on_disconne
     )
 
     ws = FakeWebSocket(incoming=[])
-    client = BridgeClient(
-        settings,
-        implementation_metadata_factory=lambda: {"provider": "test"},
-        channels_state_factory=lambda: {},
-        request_handler=lambda msg: asyncio.sleep(0, result=None),
-        connect_func=lambda url: asyncio.sleep(0, result=None),
+    client = make_client(
+        settings, ws, request_handler=lambda msg: asyncio.sleep(0, result=None)
     )
 
     calls: list[str] = []
@@ -672,10 +716,9 @@ async def test_bridge_client_run_loop_retries_after_error(monkeypatch):
         request_timeout_seconds=0.2,
     )
 
-    client = BridgeClient(
+    client = make_client(
         settings,
-        implementation_metadata_factory=lambda: {"provider": "test"},
-        channels_state_factory=lambda: {},
+        FakeWebSocket(),
         request_handler=lambda msg: asyncio.sleep(0, result=None),
         connect_func=lambda url: asyncio.sleep(0, result=None),
     )
