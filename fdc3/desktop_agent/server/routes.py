@@ -21,9 +21,7 @@ async def app_directory_page(request: Request):
 @router.get("/system-settings")
 async def system_settings_page(request: Request):
     """System configuration panel"""
-    return RedirectResponse(
-        url=str(request.url_for("ui", path="system_settings.html"))
-    )
+    return RedirectResponse(url=str(request.url_for("ui", path="system_settings.html")))
 
 
 @router.get("/diagnostics")
@@ -35,9 +33,7 @@ async def diagnostics_page(request: Request):
 @router.get("/channel-monitor")
 async def channel_monitor_page(request: Request):
     """Channel monitor UI for subscribing to channel events"""
-    return RedirectResponse(
-        url=str(request.url_for("ui", path="channel_monitor.html"))
-    )
+    return RedirectResponse(url=str(request.url_for("ui", path="channel_monitor.html")))
 
 
 @router.get("/channel-sequence")
@@ -51,6 +47,4 @@ async def channel_sequence_page(request: Request):
 @router.get("/public-channels")
 async def public_channels_page(request: Request):
     """Public channels management interface"""
-    return RedirectResponse(
-        url=str(request.url_for("ui", path="public_channels.html"))
-    )
+    return RedirectResponse(url=str(request.url_for("ui", path="public_channels.html")))

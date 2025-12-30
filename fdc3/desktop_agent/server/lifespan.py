@@ -1,14 +1,24 @@
 # Lifespan management for the FDC3 Desktop Agent server
 
+from __future__ import annotations
+
 import json
 import logging
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from typing import cast
+from typing import TYPE_CHECKING, Any, AsyncContextManager, cast
 
 from fastapi import FastAPI
 
 from ..bridging import BridgeClient
-from ..bridging.client import BridgeConnectionSettings, RequestHandlerProtocol
+from ..bridging.client import (
+    BridgeConnectionSettings,
+    RequestHandler,
+    ImplementationMetadataFactory,
+    ChannelsStateFactory,
+    ChannelMember,
+    ChannelsState,
+)
 from ..bridging.router import BridgeRequestRouter
 from ..core import core_services
 from ..distributed.factory import get_adapter
@@ -16,13 +26,22 @@ from ..tools import create_task_safe
 from ..version import __version__
 from .constants import SYSTEM_APP_METADATA
 
+if TYPE_CHECKING:
+    from ..config import DesktopAgentConfig
+    from ..handlers import DACPHandler, WebSocketConnectionManager
+    from ..launcher.interfaces import ProcessLauncher
+    from ..storage.interfaces import Storage
+    from .connection_manager import AgentClientConnectionManager
+
 logger = logging.getLogger(__name__)
 
 
-def create_implementation_metadata_factory(settings: BridgeConnectionSettings):
+def create_implementation_metadata_factory(
+    settings: BridgeConnectionSettings,
+) -> ImplementationMetadataFactory:
     """Create the implementation metadata factory for bridge handshake."""
 
-    def _implementation_metadata() -> dict:
+    def _implementation_metadata() -> dict[str, Any]:
         # Minimal ImplementationMetadata for bridging handshake.
         # Compute optional features based on available core services.
         # See FDC3 agent-bridging overview, BCP step 3.
@@ -41,23 +60,25 @@ def create_implementation_metadata_factory(settings: BridgeConnectionSettings):
             "optionalFeatures": optional_features,
         }
 
-    return _implementation_metadata
+    return cast(ImplementationMetadataFactory, _implementation_metadata)
 
 
-def create_channels_state_factory(settings: BridgeConnectionSettings):
+def create_channels_state_factory(
+    settings: BridgeConnectionSettings,
+) -> ChannelsStateFactory:
     """Create the channels state factory for bridge handshake."""
 
-    def _channels_state() -> dict:
+    def _channels_state() -> ChannelsState:
         # Provide a best-effort snapshot of current channel membership for
         # the bridging handshake. We include `instanceUuid` (internal) and
         # enrich with `appId`/`instanceId` when known.
-        state: dict[str, list[dict]] = {}
+        state: ChannelsState = {}
 
         channel_manager = core_services.channel_manager
         app_registry = getattr(core_services, "app_registry", None)
 
         for channel in channel_manager.list_channels():
-            members: list[dict] = []
+            members: list[ChannelMember] = []
             for instance_uuid in channel_manager.get_channel_members(channel.id):
                 instance_info = (
                     app_registry.get_instance(instance_uuid)
@@ -84,17 +105,17 @@ def create_channels_state_factory(settings: BridgeConnectionSettings):
 
         return state
 
-    return _channels_state
+    return cast(ChannelsStateFactory, _channels_state)
 
 
 def create_lifespan(
-    config,
-    storage,
-    launcher,
-    agent_client_manager,
-    instance_connection_manager,
-    dacp_handler,
-):
+    config: DesktopAgentConfig,
+    storage: Storage,
+    launcher: ProcessLauncher,
+    agent_client_manager: AgentClientConnectionManager,
+    instance_connection_manager: WebSocketConnectionManager,
+    dacp_handler: DACPHandler,
+) -> Callable[[FastAPI], AsyncContextManager[None]]:
     """Create the lifespan context manager for the FastAPI app.
 
     Args:
@@ -110,7 +131,7 @@ def create_lifespan(
     """
 
     @asynccontextmanager
-    async def lifespan(app: FastAPI):
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         """Lifespan handler to initialize and teardown resources."""
         # Startup
         logging.basicConfig(level=getattr(logging, config.log_level))
@@ -172,7 +193,7 @@ def create_lifespan(
                     settings
                 ),
                 channels_state_factory=create_channels_state_factory(settings),
-                request_handler=cast(RequestHandlerProtocol, router.handle),
+                request_handler=cast(RequestHandler, router.handle),
             )
             await bridge_client.start()
             app.state.bridge_client = bridge_client
