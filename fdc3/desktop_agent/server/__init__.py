@@ -1,8 +1,8 @@
 # FastAPI app, websocket handlers, GraphQL endpoint
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from strawberry.fastapi import GraphQLRouter
 import asyncio
 import json
@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 
 from ..api.graphql import schema, set_graphql_storage
 from fdc3.models.dacp.dacp import AgentEventMeta, AgentEvent, AgentEventPayload
-from ..core import CoreServices
+from ..core import core_services
 from ..distributed.factory import get_adapter
 from ..storage import SqliteStorage
 from ..storage.interfaces import AppMetadata
@@ -27,6 +27,13 @@ from ..handlers import (
 from ..tools import create_task_safe
 from ..config import DesktopAgentConfig
 from ..version import __version__
+from ..bridging import BridgeClient
+from ..bridging.client import (
+    BridgeConnectionSettings,
+    RequestHandlerProtocol,
+)
+from typing import cast
+from ..bridging.router import BridgeRequestRouter
 
 logger = logging.getLogger(__name__)
 
@@ -162,7 +169,8 @@ def create_app(config: Optional[DesktopAgentConfig] = None) -> FastAPI:
     launcher = config.launcher or SubprocessLauncher(
         agent_url=config.computed_agent_url
     )
-    core_services = CoreServices()
+    # Use the global singleton core_services so handlers, GraphQL, plugins,
+    # and any background components (e.g. bridging) share the same state.
 
     # Access control
     access_control = AccessControlManager()
@@ -179,13 +187,11 @@ def create_app(config: Optional[DesktopAgentConfig] = None) -> FastAPI:
         access_control, config.allowed_origins
     )
     wcp_handler = WCPHandler(storage)
+    # bridge client is created in lifespan (needs event loop); injected into handler.
     dacp_handler = DACPHandler(storage, launcher, instance_connection_manager)
 
     # WCP session state
     wcp_sessions: Dict[str, dict] = {}
-
-    # Templates (use absolute path for ASGI mounting compatibility)
-    templates = Jinja2Templates(directory=str(config.templates_dir))
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -223,6 +229,98 @@ def create_app(config: Optional[DesktopAgentConfig] = None) -> FastAPI:
         for plugin in all_plugins:
             await core_services.register_plugin(plugin)
             logger.info(f"Registered plugin: {plugin.name}")
+
+        # Desktop Agent Bridging (experimental)
+        app.state.bridge_client = None
+        if config.bridge_enabled:
+            settings = BridgeConnectionSettings(
+                host=config.bridge_host,
+                port_start=config.bridge_port_start,
+                port_end=config.bridge_port_end,
+                requested_name=config.bridge_requested_name,
+                retry_seconds=config.bridge_connect_retry_seconds,
+                request_timeout_seconds=config.bridge_request_timeout_seconds,
+            )
+
+            def _implementation_metadata() -> dict:
+                # Minimal ImplementationMetadata for bridging handshake.
+                # Compute optional features based on available core services.
+                # See FDC3 agent-bridging overview, BCP step 3.
+                optional_features = {
+                    "OriginatingAppMetadata": hasattr(core_services, "app_registry")
+                    and getattr(core_services, "app_registry") is not None,
+                    "UserChannelMembershipAPIs": hasattr(
+                        core_services, "channel_manager"
+                    )
+                    and getattr(core_services, "channel_manager") is not None,
+                    "DesktopAgentBridging": True,
+                }
+
+                return {
+                    "fdc3Version": "2.2",
+                    "provider": "py-fdc3-desktop-agent",
+                    "providerVersion": __version__,
+                    "optionalFeatures": optional_features,
+                }
+
+            def _channels_state() -> dict:
+                # Provide a best-effort snapshot of current channel membership for
+                # the bridging handshake. We include `instanceUuid` (internal) and
+                # enrich with `appId`/`instanceId` when known.
+                state: dict[str, list[dict]] = {}
+
+                channel_manager = core_services.channel_manager
+                app_registry = getattr(core_services, "app_registry", None)
+
+                for channel in channel_manager.list_channels():
+                    members: list[dict] = []
+                    for instance_uuid in channel_manager.get_channel_members(
+                        channel.id
+                    ):
+                        instance_info = (
+                            app_registry.get_instance(instance_uuid)
+                            if app_registry is not None
+                            else None
+                        )
+                        if instance_info is not None:
+                            members.append(
+                                {
+                                    "desktopAgent": settings.requested_name,
+                                    "appId": instance_info.app_id,
+                                    "instanceId": instance_info.instance_id,
+                                    "instanceUuid": instance_info.instance_uuid,
+                                }
+                            )
+                        else:
+                            members.append(
+                                {
+                                    "desktopAgent": settings.requested_name,
+                                    "instanceUuid": instance_uuid,
+                                }
+                            )
+                    state[channel.id] = members
+
+                return state
+
+            router = BridgeRequestRouter(
+                storage=storage,
+                launcher=launcher,
+                connection_manager=instance_connection_manager,
+                core_services=core_services,
+                local_desktop_agent_name=None,
+            )
+
+            bridge_client = BridgeClient(
+                settings,
+                implementation_metadata_factory=_implementation_metadata,
+                channels_state_factory=_channels_state,
+                request_handler=cast(RequestHandlerProtocol, router.handle),
+            )
+            await bridge_client.start()
+            app.state.bridge_client = bridge_client
+
+            # Inject into handler so outbound calls can be bridged.
+            dacp_handler.bridge_client = bridge_client
 
         # Initialize distributed adapter
         adapter = config.distributed_adapter
@@ -282,6 +380,13 @@ def create_app(config: Optional[DesktopAgentConfig] = None) -> FastAPI:
             yield
         finally:
             # Shutdown
+            try:
+                bridge_client = getattr(app.state, "bridge_client", None)
+                if bridge_client is not None:
+                    await bridge_client.stop()
+            except Exception:
+                logger.exception("Error stopping bridge client")
+
             adapter = getattr(app.state, "distributed_adapter", None)
             sub_id = getattr(app.state, "distributed_subscription_id", None)
             if adapter:
@@ -328,46 +433,65 @@ def create_app(config: Optional[DesktopAgentConfig] = None) -> FastAPI:
         lifespan=lifespan,
     )
 
+    # UI pages (static HTML)
+    # Mount the templates directory as static files and keep the historical
+    # friendly URLs (/admin, /diagnostics, etc.) as redirects.
+    app.mount(
+        "/ui",
+        StaticFiles(directory=str(config.templates_dir), html=False),
+        name="ui",
+    )
+
     # Initialize GraphQL with storage
     set_graphql_storage(storage)
     graphql_app = GraphQLRouter(schema)
     app.include_router(graphql_app, prefix="/graphql")
 
-    # Admin routes
-    @app.get("/admin", response_class=HTMLResponse)
+    # Admin routes (redirect to mounted static HTML)
+    @app.get("/admin")
     async def admin_page(request: Request):
         """Admin page for managing launch configurations"""
-        return templates.TemplateResponse(request, "admin.html", {})
+        return RedirectResponse(url=str(request.url_for("ui", path="admin.html")))
 
-    @app.get("/app-directory", response_class=HTMLResponse)
+    @app.get("/app-directory")
     async def app_directory_page(request: Request):
         """App directory management interface"""
-        return templates.TemplateResponse(request, "app_directory.html", {})
+        return RedirectResponse(
+            url=str(request.url_for("ui", path="app_directory.html"))
+        )
 
-    @app.get("/system-settings", response_class=HTMLResponse)
+    @app.get("/system-settings")
     async def system_settings_page(request: Request):
         """System configuration panel"""
-        return templates.TemplateResponse(request, "system_settings.html", {})
+        return RedirectResponse(
+            url=str(request.url_for("ui", path="system_settings.html"))
+        )
 
-    @app.get("/diagnostics", response_class=HTMLResponse)
+    @app.get("/diagnostics")
     async def diagnostics_page(request: Request):
         """System diagnostics and health checks"""
-        return templates.TemplateResponse(request, "diagnostics.html", {})
+        return RedirectResponse(url=str(request.url_for("ui", path="diagnostics.html")))
 
-    @app.get("/channel-monitor", response_class=HTMLResponse)
+    @app.get("/channel-monitor")
     async def channel_monitor_page(request: Request):
         """Channel monitor UI for subscribing to channel events"""
-        return templates.TemplateResponse(request, "channel_monitor.html", {})
+        return RedirectResponse(
+            url=str(request.url_for("ui", path="channel_monitor.html"))
+        )
 
-    @app.get("/channel-sequence", response_class=HTMLResponse)
+    @app.get("/channel-sequence")
     async def channel_sequence_page(request: Request):
         """Sequence diagram view for channel traffic (uses GraphQL subscription)."""
-        return templates.TemplateResponse(request, "sequence_diagram.html", {})
+        return RedirectResponse(
+            url=str(request.url_for("ui", path="sequence_diagram.html"))
+        )
 
-    @app.get("/public-channels", response_class=HTMLResponse)
+    @app.get("/public-channels")
     async def public_channels_page(request: Request):
         """Public channels management interface"""
-        return templates.TemplateResponse(request, "public_channels.html", {})
+        return RedirectResponse(
+            url=str(request.url_for("ui", path="public_channels.html"))
+        )
 
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket):

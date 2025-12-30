@@ -146,6 +146,73 @@ def test_get_adapter_etcd_fallback_relative_import_failure_returns_noop(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_get_adapter_etcd_candidate_missing_attr_then_relative_import_success(
+    monkeypatch,
+):
+    """Cover branch where candidate import succeeds but lacks EtcdAdapter."""
+    mod_name = "fdc3.desktop_agent.distributed.etcd_adapter"
+
+    class FakeEtcdRel(DistributedLogAdapter):
+        async def start(self):
+            return
+
+        async def stop(self):
+            return
+
+        async def publish(self, topic: str, message) -> None:
+            return
+
+        async def subscribe(self, topic: str, callback):
+            return "etcd-rel-sub"
+
+        async def unsubscribe(self, subscription_id: str) -> None:
+            return
+
+    # Relative import should succeed from sys.modules
+    rel_mod = types.ModuleType(mod_name)
+    setattr(rel_mod, "EtcdAdapter", FakeEtcdRel)
+    sys.modules[mod_name] = rel_mod
+
+    # Candidate import returns a module missing EtcdAdapter -> getattr raises
+    imported_mod = types.ModuleType(mod_name)
+
+    monkeypatch.setenv("FDC3_DISTRIBUTED_ADAPTER", "ETCD")  # ensure .lower() path
+    try:
+        with patch("importlib.import_module", return_value=imported_mod):
+            adapter = factory.get_adapter()
+            assert isinstance(adapter, FakeEtcdRel)
+            assert await adapter.subscribe("t", lambda *_: None) == "etcd-rel-sub"
+    finally:
+        del sys.modules[mod_name]
+
+
+def test_get_adapter_etcd_candidate_ctor_raises_then_relative_import_failure_returns_noop(
+    monkeypatch,
+):
+    """Cover branch where EtcdAdapter exists but instantiation raises."""
+    mod_name = "fdc3.desktop_agent.distributed.etcd_adapter"
+
+    imported_mod = types.ModuleType(mod_name)
+
+    class BoomEtcd:
+        def __init__(self):
+            raise RuntimeError("boom")
+
+    setattr(imported_mod, "EtcdAdapter", BoomEtcd)
+
+    # Ensure the relative import also fails by providing a module without EtcdAdapter.
+    sys.modules[mod_name] = types.ModuleType(mod_name)
+
+    monkeypatch.setenv("FDC3_DISTRIBUTED_ADAPTER", "etcd")
+    try:
+        with patch("importlib.import_module", return_value=imported_mod):
+            adapter = factory.get_adapter()
+            assert type(adapter).__name__ == "NoopAdapter"
+    finally:
+        del sys.modules[mod_name]
+
+
+@pytest.mark.asyncio
 async def test_get_adapter_consul_candidate_missing_attr_then_relative_import_success(
     monkeypatch,
 ):

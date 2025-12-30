@@ -27,10 +27,47 @@ from fdc3.models.dacp.dacp import (
     AddIntentListenerRequest,
     AddIntentListenerResponse,
     AddIntentListenerResponsePayload,
+    AddEventListenerRequest,
+    AddEventListenerResponse,
+    AddEventListenerResponsePayload,
+    RemoveEventListenerRequest,
+    RemoveEventListenerResponse,
+    RemoveEventListenerResponsePayload,
+    FDC3EventMessage,
+    FDC3EventMessagePayload,
+    GetInfoRequest,
+    GetInfoResponse,
+    GetInfoResponsePayload,
+    GetAppMetadataRequest,
+    GetAppMetadataResponse,
+    GetAppMetadataResponsePayload,
+    GetUserChannelsRequest,
+    GetUserChannelsResponse,
+    GetUserChannelsResponsePayload,
+    GetCurrentChannelRequest,
+    GetCurrentChannelResponse,
+    GetCurrentChannelResponsePayload,
+    JoinUserChannelRequest,
+    JoinUserChannelResponse,
+    JoinUserChannelResponsePayload,
+    LeaveCurrentChannelRequest,
+    LeaveCurrentChannelResponse,
+    LeaveCurrentChannelResponsePayload,
+    FindIntentRequest,
+    FindIntentResponse,
+    FindIntentResponsePayload,
+    FindIntentsByContextRequest,
+    FindIntentsByContextResponse,
+    FindIntentsByContextResponsePayload,
+    FindInstancesRequest,
+    FindInstancesResponse,
+    FindInstancesResponsePayload,
     RaiseIntentRequest,
     RaiseIntentResponse,
     RaiseIntentResponsePayload,
     RaiseIntentForContextRequest,
+    RaiseIntentForContextResponse,
+    RaiseIntentForContextResponsePayload,
     IntentEvent,
     IntentEventPayload,
     ContextListenerUnsubscribeRequest,
@@ -61,15 +98,35 @@ from ..storage import Storage
 from ..launcher.interfaces import ProcessLauncher
 from ..api import IntentResolution
 from fdc3.models.identifiers import AppIdentifier
+from fdc3.models.identifiers import IntentResolution as WireIntentResolution
+from fdc3.models.identifiers import AppIntent, IntentMetadata, AppMetadata
+from fdc3.models.identifiers import ImplementationMetadata
+from fdc3.models.identifiers import (
+    Channel as WireChannel,
+    DisplayMetadata as WireDisplayMetadata,
+)
+from fdc3.models.identifiers import FDC3Event, FDC3EventType
 from fdc3.models.primitives import RequestUuid, ListenerUuid
 from .connection_manager import WebSocketConnectionManager
 from .system_intent import SystemIntentHandler
+from ..api import DisplayMetadata
+from ..version import __version__
+from fdc3.desktop_agent.api import OpenError
 
 logger = logging.getLogger(__name__)
 
 
 class DACPHandler:
     """Handles DACP (Desktop Agent Communication Protocol) messages"""
+
+    DEFAULT_USER_CHANNELS: list[tuple[str, str, str]] = [
+        ("user:red", "Red", "0xFF0000"),
+        ("user:orange", "Orange", "0xFFA500"),
+        ("user:yellow", "Yellow", "0xFFFF00"),
+        ("user:green", "Green", "0x00FF00"),
+        ("user:blue", "Blue", "0x0000FF"),
+        ("user:purple", "Purple", "0x800080"),
+    ]
 
     def __init__(
         self,
@@ -81,6 +138,12 @@ class DACPHandler:
         self.launcher = launcher
         self.connection_manager = connection_manager
         self.system_intent_handler = SystemIntentHandler()
+        # Optional Desktop Agent Bridging client (set by server lifespan).
+        self.bridge_client = None
+
+    @staticmethod
+    def _meta_from_request(request: Any) -> AgentResponseMeta:
+        return AgentResponseMeta(requestUuid=request.meta.requestUuid)
 
     async def _send_model(self, websocket: WebSocket, model) -> None:
         """Helper method to send a Pydantic model as JSON over WebSocket"""
@@ -122,7 +185,9 @@ class DACPHandler:
 
         # Dispatch to typed handlers based on parsed model type
         if isinstance(parsed, OpenRequest):
-            await self._handle_open(parsed, websocket)
+            await self._handle_open(
+                parsed, websocket, session_id=session_id, wcp_sessions=wcp_sessions
+            )
         elif isinstance(parsed, BroadcastRequest):
             await self._handle_broadcast(parsed, session_id, wcp_sessions)
         elif isinstance(parsed, AddContextListenerRequest):
@@ -135,6 +200,30 @@ class DACPHandler:
             )
         elif isinstance(parsed, IntentListenerUnsubscribeRequest):
             await self._handle_intent_listener_unsubscribe(parsed, websocket)
+        elif isinstance(parsed, GetInfoRequest):
+            await self._handle_get_info(parsed, session_id, wcp_sessions, websocket)
+        elif isinstance(parsed, GetAppMetadataRequest):
+            await self._handle_get_app_metadata(parsed, websocket)
+        elif isinstance(parsed, GetUserChannelsRequest):
+            await self._handle_get_user_channels(parsed, websocket)
+        elif isinstance(parsed, GetCurrentChannelRequest):
+            await self._handle_get_current_channel(
+                parsed, session_id, wcp_sessions, websocket
+            )
+        elif isinstance(parsed, JoinUserChannelRequest):
+            await self._handle_join_user_channel(
+                parsed, session_id, wcp_sessions, websocket
+            )
+        elif isinstance(parsed, LeaveCurrentChannelRequest):
+            await self._handle_leave_current_channel(
+                parsed, session_id, wcp_sessions, websocket
+            )
+        elif isinstance(parsed, FindIntentRequest):
+            await self._handle_find_intent(parsed, websocket)
+        elif isinstance(parsed, FindIntentsByContextRequest):
+            await self._handle_find_intents_by_context(parsed, websocket)
+        elif isinstance(parsed, FindInstancesRequest):
+            await self._handle_find_instances(parsed, websocket)
         elif isinstance(parsed, RegisterExternalHandlerRequest):
             await self._handle_register_external_handler(
                 parsed, session_id, wcp_sessions, websocket
@@ -146,7 +235,9 @@ class DACPHandler:
         elif isinstance(parsed, ExternalIntentResultRequest):
             await self._handle_external_intent_result(parsed)
         elif isinstance(parsed, RaiseIntentRequest):
-            await self._handle_raise_intent(parsed, websocket)
+            await self._handle_raise_intent(
+                parsed, websocket, session_id=session_id, wcp_sessions=wcp_sessions
+            )
         elif isinstance(parsed, RaiseIntentForContextRequest):
             await self._handle_raise_intent_for_context(parsed, websocket)
         elif isinstance(parsed, IntentResultRequest):
@@ -155,14 +246,615 @@ class DACPHandler:
             await self._handle_raise_intent_result_response(parsed)
         elif isinstance(parsed, ContextListenerUnsubscribeRequest):
             await self._handle_context_listener_unsubscribe(parsed, websocket)
+        elif isinstance(parsed, AddEventListenerRequest):
+            await self._handle_add_event_listener(
+                parsed, session_id, wcp_sessions, websocket
+            )
+        elif isinstance(parsed, RemoveEventListenerRequest):
+            await self._handle_remove_event_listener(parsed, websocket)
         elif isinstance(parsed, HeartbeatAcknowledgmentRequest):
             await self._handle_heartbeat_acknowledgment(parsed)
         else:
             logger.warning(f"Unknown DACP message type: {msg_type}")
 
-    async def _handle_open(self, request: OpenRequest, websocket: WebSocket):
+    async def _emit_user_channel_changed_event(
+        self, *, instance_uuid: str, current_channel_id: str | None
+    ) -> None:
+        listeners = core_services.listener_store.get_event_listeners(
+            FDC3EventType.USER_CHANNEL_CHANGED.value, instance_uuid=instance_uuid
+        )
+        if not listeners:
+            return
+
+        event = FDC3EventMessage(
+            type="fdc3Event",
+            payload=FDC3EventMessagePayload(
+                event=FDC3Event(
+                    type=FDC3EventType.USER_CHANNEL_CHANGED,
+                    details={"currentChannelId": current_channel_id},
+                )
+            ),
+            meta=AgentEventMeta(),
+        )
+
+        try:
+            await self.connection_manager.send_to_instance(
+                instance_uuid, event.model_dump_json()
+            )
+        except Exception:
+            logger.debug(
+                "Failed to send USER_CHANNEL_CHANGED event to instance %s",
+                instance_uuid,
+                exc_info=True,
+            )
+
+    async def _handle_get_info(
+        self,
+        request: GetInfoRequest,
+        session_id: str,
+        wcp_sessions: Dict[str, Any],
+        websocket: WebSocket,
+    ) -> None:
+        identity = (wcp_sessions.get(session_id) or {}).get("identity") or {}
+        app_id = identity.get("appId") or "unknown"
+        instance_id = identity.get("instanceId")
+
+        # Best-effort: enrich app metadata from storage if available.
+        name = None
+        version = None
+        description = None
+        icons = None
+        if app_id and app_id != "unknown":
+            try:
+                meta = await self.storage.apps.get_app_metadata(app_id)
+            except Exception:
+                logger.debug(
+                    "getInfo: failed to load app metadata from storage", exc_info=True
+                )
+                meta = None
+
+            if meta is not None:
+                name = getattr(meta, "name", None)
+                version = getattr(meta, "version", None)
+                description = getattr(meta, "description", None)
+                icons = getattr(meta, "icons", None)
+
+        impl = ImplementationMetadata(
+            fdc3Version="2.2",
+            provider="py-fdc3-desktop-agent",
+            providerVersion=__version__,
+            optionalFeatures={
+                # We do not currently expose originating app metadata on
+                # context/intent delivery payloads.
+                "OriginatingAppMetadata": False,
+                "UserChannelMembershipAPIs": True,
+                # Bridging is optional and only available when configured.
+                "DesktopAgentBridging": self.bridge_client is not None,
+            },
+            appMetadata=AppMetadata(
+                appId=app_id,
+                instanceId=instance_id,
+                name=name,
+                version=version,
+                description=description,
+                icons=icons,
+            ),
+        )
+
+        response = GetInfoResponse(
+            type="getInfoResponse",
+            payload=GetInfoResponsePayload(implementationMetadata=impl),
+            meta=self._meta_from_request(request),
+        )
+        await self._send_model(websocket, response)
+
+    async def _handle_get_app_metadata(
+        self, request: GetAppMetadataRequest, websocket: WebSocket
+    ) -> None:
+        app_id = request.payload.app.appId
+        if not app_id:
+            response = AgentResponse(
+                type="getAppMetadataResponse",
+                payload=ErrorResponsePayload(error=OpenError.AppNotFound.value),
+                meta=self._meta_from_request(request),
+            )
+            await self._send_model(websocket, response)
+            return
+
+        try:
+            meta = await self.storage.apps.get_app_metadata(app_id)
+        except Exception:
+            logger.debug(
+                "getAppMetadata: failed to load app metadata from storage",
+                exc_info=True,
+            )
+            meta = None
+
+        if not meta:
+            response = AgentResponse(
+                type="getAppMetadataResponse",
+                payload=ErrorResponsePayload(error=OpenError.AppNotFound.value),
+                meta=self._meta_from_request(request),
+            )
+            await self._send_model(websocket, response)
+            return
+
+        app_meta = AppMetadata(
+            appId=getattr(meta, "app_id", None)
+            or getattr(meta, "appId", None)
+            or app_id,
+            name=getattr(meta, "name", None),
+            version=getattr(meta, "version", None),
+            description=getattr(meta, "description", None),
+            icons=getattr(meta, "icons", None),
+        )
+
+        response = GetAppMetadataResponse(
+            type="getAppMetadataResponse",
+            payload=GetAppMetadataResponsePayload(appMetadata=app_meta),
+            meta=self._meta_from_request(request),
+        )
+        await self._send_model(websocket, response)
+
+    def _ensure_default_user_channels(self) -> None:
+        """Ensure a baseline set of user channels exists.
+
+        This is a best-effort convenience for clients that expect user channels
+        to be available without prior configuration.
+        """
+        try:
+            existing = [
+                c
+                for c in core_services.channel_manager.list_channels()
+                if getattr(c, "type", None) == "user"
+            ]
+        except Exception:
+            existing = []
+
+        if existing:
+            return
+
+        for channel_id, name, color in self.DEFAULT_USER_CHANNELS:
+            if core_services.channel_manager.get_channel(channel_id) is None:
+                core_services.channel_manager.create_channel(
+                    channel_id,
+                    "user",
+                    display_metadata=DisplayMetadata(name=name, color=color),
+                )
+
+    @staticmethod
+    def _extract_storage_app_id(meta: object) -> str | None:
+        return getattr(meta, "app_id", None) or getattr(meta, "appId", None)
+
+    @staticmethod
+    def _wire_app_metadata(app_id: str, meta: object | None) -> AppMetadata:
+        return AppMetadata(
+            appId=app_id,
+            name=getattr(meta, "name", None) if meta is not None else None,
+            version=getattr(meta, "version", None) if meta is not None else None,
+            description=getattr(meta, "description", None)
+            if meta is not None
+            else None,
+            icons=getattr(meta, "icons", None) if meta is not None else None,
+        )
+
+    @staticmethod
+    def _wire_channel(channel) -> WireChannel:
+        display = getattr(channel, "display_metadata", None)
+        if display is not None:
+            dm = WireDisplayMetadata(
+                name=getattr(display, "name", None),
+                color=getattr(display, "color", None),
+                glyph=getattr(display, "glyph", None),
+            )
+        else:
+            dm = None
+        return WireChannel(
+            id=getattr(channel, "id"), type=getattr(channel, "type"), displayMetadata=dm
+        )
+
+    async def _handle_get_user_channels(
+        self, request: GetUserChannelsRequest, websocket: WebSocket
+    ) -> None:
+        self._ensure_default_user_channels()
+        channels = [
+            self._wire_channel(c)
+            for c in core_services.channel_manager.list_channels()
+            if getattr(c, "type", None) == "user"
+        ]
+
+        response = GetUserChannelsResponse(
+            type="getUserChannelsResponse",
+            payload=GetUserChannelsResponsePayload(channels=channels),
+            meta=self._meta_from_request(request),
+        )
+        await self._send_model(websocket, response)
+
+    async def _handle_get_current_channel(
+        self,
+        request: GetCurrentChannelRequest,
+        session_id: str,
+        wcp_sessions: Dict[str, Any],
+        websocket: WebSocket,
+    ) -> None:
+        instance_uuid = wcp_sessions[session_id]["identity"]["instanceUuid"]
+        current = core_services.channel_manager.get_current_channel(instance_uuid)
+        response = GetCurrentChannelResponse(
+            type="getCurrentChannelResponse",
+            payload=GetCurrentChannelResponsePayload(
+                channel=(self._wire_channel(current) if current is not None else None)
+            ),
+            meta=self._meta_from_request(request),
+        )
+        await self._send_model(websocket, response)
+
+    async def _handle_join_user_channel(
+        self,
+        request: JoinUserChannelRequest,
+        session_id: str,
+        wcp_sessions: Dict[str, Any],
+        websocket: WebSocket,
+    ) -> None:
+        self._ensure_default_user_channels()
+
+        raw_id = request.payload.channelId
+        channel_id = raw_id if ":" in raw_id else f"user:{raw_id}"
+
+        channel = core_services.channel_manager.get_channel(channel_id)
+        if channel is None or getattr(channel, "type", None) != "user":
+            response = AgentResponse(
+                type="joinUserChannelResponse",
+                payload=ErrorResponsePayload(error="NoChannelFound"),
+                meta=self._meta_from_request(request),
+            )
+            await self._send_model(websocket, response)
+            return
+
+        instance_uuid = wcp_sessions[session_id]["identity"]["instanceUuid"]
+        core_services.channel_manager.join_channel(instance_uuid, channel_id)
+
+        response = JoinUserChannelResponse(
+            type="joinUserChannelResponse",
+            payload=JoinUserChannelResponsePayload(channel=self._wire_channel(channel)),
+            meta=self._meta_from_request(request),
+        )
+        await self._send_model(websocket, response)
+        await self._emit_user_channel_changed_event(
+            instance_uuid=instance_uuid, current_channel_id=channel_id
+        )
+
+    async def _handle_leave_current_channel(
+        self,
+        request: LeaveCurrentChannelRequest,
+        session_id: str,
+        wcp_sessions: Dict[str, Any],
+        websocket: WebSocket,
+    ) -> None:
+        instance_uuid = wcp_sessions[session_id]["identity"]["instanceUuid"]
+        core_services.channel_manager.leave_current_channel(instance_uuid)
+
+        response = LeaveCurrentChannelResponse(
+            type="leaveCurrentChannelResponse",
+            payload=LeaveCurrentChannelResponsePayload(),
+            meta=self._meta_from_request(request),
+        )
+        await self._send_model(websocket, response)
+        await self._emit_user_channel_changed_event(
+            instance_uuid=instance_uuid, current_channel_id=None
+        )
+
+    async def _handle_add_event_listener(
+        self,
+        request: AddEventListenerRequest,
+        session_id: str,
+        wcp_sessions: Dict[str, Any],
+        websocket: WebSocket,
+    ) -> None:
+        instance_uuid = wcp_sessions[session_id]["identity"]["instanceUuid"]
+        listener = core_services.listener_store.add_event_listener(
+            ListenerUuid(), instance_uuid, request.payload.eventType
+        )
+
+        response = AddEventListenerResponse(
+            type="addEventListenerResponse",
+            payload=AddEventListenerResponsePayload(
+                listenerUuid=listener.listener_uuid
+            ),
+            meta=self._meta_from_request(request),
+        )
+        await self._send_model(websocket, response)
+
+    async def _handle_remove_event_listener(
+        self, request: RemoveEventListenerRequest, websocket: WebSocket
+    ) -> None:
+        core_services.listener_store.remove_listener(request.payload.listenerUuid.root)
+        response = RemoveEventListenerResponse(
+            type="removeEventListenerResponse",
+            payload=RemoveEventListenerResponsePayload(),
+            meta=self._meta_from_request(request),
+        )
+        await self._send_model(websocket, response)
+
+    async def _handle_find_intent(
+        self, request: FindIntentRequest, websocket: WebSocket
+    ):
+        """Handle findIntent request.
+
+        This is a best-effort implementation based on the app directory (static
+        metadata) and currently registered intent listeners (runtime).
+        """
+        try:
+            intent = request.payload.intent
+            app_ids: set[str] = set()
+            app_meta_by_id: dict[str, object] = {}
+
+            # From app directory
+            try:
+                listed = await self.storage.apps.list_apps()
+            except Exception:
+                listed = []
+
+            for meta in listed or []:
+                app_id = self._extract_storage_app_id(meta)
+                intents = getattr(meta, "intents", None) or []
+                if app_id and intent in intents:
+                    app_ids.add(app_id)
+                    app_meta_by_id[app_id] = meta
+
+            # From runtime listeners
+            try:
+                listeners = (
+                    core_services.listener_store.get_intent_listeners_for_intent(intent)
+                )
+            except Exception:
+                listeners = []
+
+            for listener in listeners:
+                instance_uuid = getattr(listener, "instance_uuid", None)
+                if not instance_uuid:
+                    continue
+                inst = core_services.app_registry.get_instance(instance_uuid)
+                if inst is not None and getattr(inst, "app_id", None):
+                    app_ids.add(inst.app_id)
+
+            target = request.payload.target
+            if target is not None:
+                target_app_id = target.appId
+                target_instance_id = target.instanceId
+                if target_instance_id:
+                    instances = core_services.app_registry.get_instances_for_app(
+                        target_app_id
+                    )
+                    if not any(
+                        getattr(i, "instance_id", None) == target_instance_id
+                        for i in instances
+                    ):
+                        response = AgentResponse(
+                            type="findIntentResponse",
+                            payload=ErrorResponsePayload(
+                                error="TargetInstanceUnavailable"
+                            ),
+                            meta=self._meta_from_request(request),
+                        )
+                        await self._send_model(websocket, response)
+                        return
+
+                if target_app_id not in app_ids:
+                    # If app is known in directory, allow it; otherwise treat as unavailable.
+                    try:
+                        known = await self.storage.apps.get_app_metadata(target_app_id)
+                    except Exception:
+                        known = None
+                    if not known:
+                        response = AgentResponse(
+                            type="findIntentResponse",
+                            payload=ErrorResponsePayload(error="TargetAppUnavailable"),
+                            meta=self._meta_from_request(request),
+                        )
+                        await self._send_model(websocket, response)
+                        return
+                    app_ids = {target_app_id}
+
+            if not app_ids:
+                response = AgentResponse(
+                    type="findIntentResponse",
+                    payload=ErrorResponsePayload(error="NoAppsFound"),
+                    meta=self._meta_from_request(request),
+                )
+                await self._send_model(websocket, response)
+                return
+
+            apps: list[AppMetadata] = []
+            for app_id in sorted(app_ids):
+                meta = app_meta_by_id.get(app_id)
+                apps.append(self._wire_app_metadata(app_id, meta))
+
+            app_intent = AppIntent(intent=IntentMetadata(name=intent), apps=apps)
+            response = FindIntentResponse(
+                type="findIntentResponse",
+                payload=FindIntentResponsePayload(appIntent=app_intent),
+                meta=self._meta_from_request(request),
+            )
+            await self._send_model(websocket, response)
+        except Exception:
+            logger.exception("Error handling findIntent")
+            response = AgentResponse(
+                type="findIntentResponse",
+                payload=ErrorResponsePayload(error="ResolverUnavailable"),
+                meta=self._meta_from_request(request),
+            )
+            await self._send_model(websocket, response)
+
+    async def _handle_find_intents_by_context(
+        self, request: FindIntentsByContextRequest, websocket: WebSocket
+    ):
+        """Handle findIntentsByContext request.
+
+        This agent does not yet maintain intent<->context type mappings.
+        As a best-effort, return intents declared by the app directory and
+        by currently registered intent listeners (ignoring compatibility).
+        """
+        try:
+            intent_to_apps: dict[str, set[str]] = {}
+            app_meta_by_id: dict[str, object] = {}
+
+            # Directory intents
+            try:
+                listed = await self.storage.apps.list_apps()
+            except Exception:
+                listed = []
+            for meta in listed or []:
+                app_id = self._extract_storage_app_id(meta)
+                if not app_id:
+                    continue
+                intents = getattr(meta, "intents", None) or []
+                app_meta_by_id[app_id] = meta
+                for intent in intents:
+                    intent_to_apps.setdefault(intent, set()).add(app_id)
+
+            # Runtime listeners
+            try:
+                listeners = getattr(
+                    core_services.listener_store, "intent_listeners", {}
+                )
+            except Exception:
+                listeners = {}
+            for listener in (listeners or {}).values():
+                intent = getattr(listener, "intent", None)
+                instance_uuid = getattr(listener, "instance_uuid", None)
+                if not intent or not instance_uuid:
+                    continue
+                inst = core_services.app_registry.get_instance(instance_uuid)
+                if inst is not None and getattr(inst, "app_id", None):
+                    intent_to_apps.setdefault(intent, set()).add(inst.app_id)
+
+            app_intents: list[AppIntent] = []
+            for intent in sorted(intent_to_apps.keys()):
+                apps: list[AppMetadata] = []
+                for app_id in sorted(intent_to_apps[intent]):
+                    meta = app_meta_by_id.get(app_id)
+                    apps.append(self._wire_app_metadata(app_id, meta))
+                if apps:
+                    app_intents.append(
+                        AppIntent(intent=IntentMetadata(name=intent), apps=apps)
+                    )
+
+            if not app_intents:
+                response = AgentResponse(
+                    type="findIntentsByContextResponse",
+                    payload=ErrorResponsePayload(error="NoAppsFound"),
+                    meta=self._meta_from_request(request),
+                )
+                await self._send_model(websocket, response)
+                return
+
+            response = FindIntentsByContextResponse(
+                type="findIntentsByContextResponse",
+                payload=FindIntentsByContextResponsePayload(appIntents=app_intents),
+                meta=self._meta_from_request(request),
+            )
+            await self._send_model(websocket, response)
+        except Exception:
+            logger.exception("Error handling findIntentsByContext")
+            response = AgentResponse(
+                type="findIntentsByContextResponse",
+                payload=ErrorResponsePayload(error="ResolverUnavailable"),
+                meta=self._meta_from_request(request),
+            )
+            await self._send_model(websocket, response)
+
+    async def _handle_find_instances(
+        self, request: FindInstancesRequest, websocket: WebSocket
+    ):
+        """Handle findInstances request.
+
+        Returns the list of currently known runtime instances for the given appId.
+        """
+        try:
+            app_id = request.payload.app.appId
+            requested_instance_id = request.payload.app.instanceId
+            instances = core_services.app_registry.get_instances_for_app(app_id)
+
+            result: list[AppIdentifier] = []
+            for inst in instances:
+                inst_id = getattr(inst, "instance_id", None)
+                if requested_instance_id and inst_id != requested_instance_id:
+                    continue
+                if inst_id is None:
+                    continue
+                result.append(
+                    AppIdentifier(appId=app_id, instanceId=inst_id, desktopAgent=None)
+                )
+
+            response = FindInstancesResponse(
+                type="findInstancesResponse",
+                payload=FindInstancesResponsePayload(instances=result),
+                meta=self._meta_from_request(request),
+            )
+            await self._send_model(websocket, response)
+        except Exception:
+            logger.exception("Error handling findInstances")
+            response = AgentResponse(
+                type="findInstancesResponse",
+                payload=ErrorResponsePayload(error="ResolverUnavailable"),
+                meta=self._meta_from_request(request),
+            )
+            await self._send_model(websocket, response)
+
+    async def _handle_open(
+        self,
+        request: OpenRequest,
+        websocket: WebSocket,
+        *,
+        session_id: str | None = None,
+        wcp_sessions: Dict[str, Any] | None = None,
+    ):
         """Handle open request - launch the specified app"""
         try:
+            # If the request targets a remote Desktop Agent (Agent Bridging), forward it.
+            target_da = getattr(request.payload.app, "desktopAgent", None)
+            if target_da and getattr(self, "bridge_client", None) is not None:
+                bridge = self.bridge_client
+                if bridge is not None and getattr(bridge, "is_connected", False):
+                    identity = {}
+                    if session_id is not None and wcp_sessions is not None:
+                        identity = (wcp_sessions.get(session_id) or {}).get(
+                            "identity"
+                        ) or {}
+                    source_identity = AppIdentifier(
+                        appId=identity.get("appId") or "unknown",
+                        instanceId=identity.get("instanceId"),
+                        desktopAgent=None,
+                    )
+
+                    bridge_payload = {
+                        "app": request.payload.app.model_dump(),
+                        "context": request.payload.context,
+                    }
+                    bridge_resp = await bridge.send_agent_request(
+                        request_type="openRequest",
+                        payload=bridge_payload,
+                        source=source_identity,
+                        destination=request.payload.app,
+                    )
+                    payload = bridge_resp.get("payload") or {}
+                    if payload.get("error"):
+                        response = AgentResponse(
+                            type="openResponse",
+                            payload=ErrorResponsePayload(
+                                error=str(payload.get("error"))
+                            ),
+                            meta=self._meta_from_request(request),
+                        )
+                    else:
+                        response = OpenResponse(
+                            type="openResponse",
+                            payload=OpenResponsePayload(),
+                            meta=self._meta_from_request(request),
+                        )
+                    await self._send_model(websocket, response)
+                    return
+
             app_id = request.payload.app.appId
 
             # Check if app exists in directory
@@ -171,7 +863,7 @@ class DACPHandler:
                 response = AgentResponse(
                     type="openResponse",
                     payload=ErrorResponsePayload(error="AppNotFound"),
-                    meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                    meta=self._meta_from_request(request),
                 )
                 await self._send_model(websocket, response)
                 return
@@ -195,7 +887,7 @@ class DACPHandler:
                     response = OpenResponse(
                         type="openResponse",
                         payload=OpenResponsePayload(),
-                        meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                        meta=self._meta_from_request(request),
                     )
                     await self._send_model(websocket, response)
                     return
@@ -204,7 +896,7 @@ class DACPHandler:
                 response = OpenResponse(
                     type="openResponse",
                     payload=OpenResponsePayload(),
-                    meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                    meta=self._meta_from_request(request),
                 )
                 await self._send_model(websocket, response)
                 return
@@ -215,7 +907,7 @@ class DACPHandler:
                 response = AgentResponse(
                     type="openResponse",
                     payload=ErrorResponsePayload(error="AppNotFound"),
-                    meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                    meta=self._meta_from_request(request),
                 )
                 await self._send_model(websocket, response)
                 return
@@ -230,7 +922,7 @@ class DACPHandler:
                     response = AgentResponse(
                         type="openResponse",
                         payload=ErrorResponsePayload(error="ErrorOnLaunch"),
-                        meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                        meta=self._meta_from_request(request),
                     )
                     await self._send_model(websocket, response)
                     return
@@ -251,7 +943,7 @@ class DACPHandler:
                     response = OpenResponse(
                         type="openResponse",
                         payload=OpenResponsePayload(),
-                        meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                        meta=self._meta_from_request(request),
                     )
                 else:
                     core_services.app_registry.unregister_instance(
@@ -260,13 +952,13 @@ class DACPHandler:
                     response = AgentResponse(
                         type="openResponse",
                         payload=ErrorResponsePayload(error="AppTimeout"),
-                        meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                        meta=self._meta_from_request(request),
                     )
             else:
                 response = AgentResponse(
                     type="openResponse",
                     payload=ErrorResponsePayload(error="ErrorOnLaunch"),
-                    meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                    meta=self._meta_from_request(request),
                 )
 
             await self._send_model(websocket, response)
@@ -278,7 +970,7 @@ class DACPHandler:
                 response = AgentResponse(
                     type="openResponse",
                     payload=ErrorResponsePayload(error="AppLaunchFailed"),
-                    meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                    meta=self._meta_from_request(request),
                 )
                 await self._send_model(websocket, response)
             except Exception:
@@ -289,6 +981,25 @@ class DACPHandler:
     ):
         """Handle broadcast request"""
         source_instance_uuid = wcp_sessions[session_id]["identity"]["instanceUuid"]
+
+        # Forward to Desktop Agent Bridge (best-effort). The bridge won't echo
+        # back to this agent, so we still deliver locally.
+        try:
+            bridge = getattr(self, "bridge_client", None)
+            if bridge is not None and getattr(bridge, "is_connected", False):
+                source_identity = wcp_sessions[session_id]["identity"]
+                await bridge.send_request_no_wait(
+                    request_type="broadcastRequest",
+                    payload={"context": request.payload.context},
+                    source=AppIdentifier(
+                        appId=source_identity["appId"],
+                        instanceId=source_identity.get("instanceId"),
+                        desktopAgent=None,
+                    ),
+                )
+        except Exception:
+            # Best-effort: local broadcast must still succeed.
+            pass
 
         targets = core_services.context_router.broadcast_context(
             request.payload.context, source_instance_uuid
@@ -324,7 +1035,7 @@ class DACPHandler:
             payload=AddContextListenerResponsePayload(
                 listenerUuid=listener.listener_uuid
             ),
-            meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+            meta=self._meta_from_request(request),
         )
         await self._send_model(websocket, response)
 
@@ -347,7 +1058,7 @@ class DACPHandler:
             payload=AddIntentListenerResponsePayload(
                 listenerUuid=listener.listener_uuid
             ),
-            meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+            meta=self._meta_from_request(request),
         )
         await self._send_model(websocket, response)
 
@@ -360,14 +1071,85 @@ class DACPHandler:
         response = IntentListenerUnsubscribeResponse(
             type="intentListenerUnsubscribeResponse",
             payload=IntentListenerUnsubscribeResponsePayload(),
-            meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+            meta=self._meta_from_request(request),
         )
         await self._send_model(websocket, response)
 
     async def _handle_raise_intent(
-        self, request: RaiseIntentRequest, websocket: WebSocket
+        self,
+        request: RaiseIntentRequest,
+        websocket: WebSocket,
+        *,
+        session_id: str | None = None,
+        wcp_sessions: Dict[str, Any] | None = None,
     ):
         """Handle raise intent request"""
+        # Agent bridging: if a target is provided with a remote desktopAgent, forward.
+        try:
+            target = request.payload.target
+            target_da = getattr(target, "desktopAgent", None) if target else None
+            bridge = getattr(self, "bridge_client", None)
+            if (
+                target_da
+                and bridge is not None
+                and getattr(bridge, "is_connected", False)
+            ):
+                source_identity: AppIdentifier
+                if getattr(request.meta, "source", None) is not None:
+                    src = request.meta.source
+                    source_identity = (
+                        src
+                        if isinstance(src, AppIdentifier)
+                        else AppIdentifier.model_validate(src)
+                    )
+                else:
+                    identity = {}
+                    if session_id is not None and wcp_sessions is not None:
+                        identity = (wcp_sessions.get(session_id) or {}).get(
+                            "identity"
+                        ) or {}
+                    source_identity = AppIdentifier(
+                        appId=identity.get("appId") or "unknown",
+                        instanceId=identity.get("instanceId"),
+                        desktopAgent=None,
+                    )
+
+                bridge_resp = await bridge.send_agent_request(
+                    request_type="raiseIntentRequest",
+                    payload={
+                        "intent": request.payload.intent,
+                        "context": request.payload.context,
+                        "app": target.model_dump() if target else None,
+                    },
+                    source=source_identity,
+                    destination=target,
+                )
+
+                payload = bridge_resp.get("payload") or {}
+                if payload.get("error"):
+                    response = AgentResponse(
+                        type="raiseIntentResponse",
+                        payload=ErrorResponsePayload(error=str(payload.get("error"))),
+                        meta=self._meta_from_request(request),
+                    )
+                else:
+                    intent_resolution_raw = payload.get("intentResolution")
+                    intent_resolution = WireIntentResolution.model_validate(
+                        intent_resolution_raw
+                    )
+                    response = RaiseIntentResponse(
+                        type="raiseIntentResponse",
+                        payload=RaiseIntentResponsePayload(
+                            intentResolution=intent_resolution
+                        ),
+                        meta=self._meta_from_request(request),
+                    )
+                await self._send_model(websocket, response)
+                return
+        except Exception:
+            # Fall back to local resolution.
+            pass
+
         # Check if this is a system intent first
         if self.system_intent_handler.is_system_intent(request.payload.intent):
             response = await self.system_intent_handler.handle_system_intent(
@@ -407,7 +1189,7 @@ class DACPHandler:
                 payload=RaiseIntentResponsePayload(
                     intentResolution=resolution.model_dump()
                 ),
-                meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                meta=self._meta_from_request(request),
             )
             await self._send_model(websocket, response)
 
@@ -433,7 +1215,7 @@ class DACPHandler:
             response = AgentResponse(
                 type="raiseIntentResponse",
                 payload=ErrorResponsePayload(error="NoAppsFound"),
-                meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                meta=self._meta_from_request(request),
             )
             await self._send_model(websocket, response)
 
@@ -441,13 +1223,95 @@ class DACPHandler:
         self, request: RaiseIntentForContextRequest, websocket: WebSocket
     ):
         """Handle raise intent for context request"""
-        # Not implemented - return error
-        response = AgentResponse(
-            type="raiseIntentForContextResponse",
-            payload=ErrorResponsePayload(error="NotImplemented"),
-            meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
-        )
-        await self._send_model(websocket, response)
+        try:
+            # This agent does not yet track intent<->contextType compatibility.
+            # Implement a minimal resolver:
+            # - If there are no intent listeners, return NoAppsFound.
+            # - If there are multiple distinct intents available, return ResolverUnavailable
+            #   (we have no user intent resolver UI).
+            intent_listeners = getattr(
+                core_services.listener_store, "intent_listeners", {}
+            )
+            # Build a sorted list of intent names (coerce to str for type-safety)
+            available_intents = sorted(
+                {
+                    str(getattr(listener, "intent", ""))
+                    for listener in intent_listeners.values()
+                    if getattr(listener, "intent", None)
+                }
+            )
+
+            if not available_intents:
+                response = AgentResponse(
+                    type="raiseIntentForContextResponse",
+                    payload=ErrorResponsePayload(error="NoAppsFound"),
+                    meta=self._meta_from_request(request),
+                )
+                await self._send_model(websocket, response)
+                return
+
+            if len(available_intents) != 1:
+                response = AgentResponse(
+                    type="raiseIntentForContextResponse",
+                    payload=ErrorResponsePayload(error="ResolverUnavailable"),
+                    meta=self._meta_from_request(request),
+                )
+                await self._send_model(websocket, response)
+                return
+
+            intent = available_intents[0]
+            resolution: IntentResolution | None = (
+                core_services.intent_resolver.resolve_intent(
+                    intent, request.payload.context, request.payload.target
+                )
+            )
+
+            if not resolution:
+                response = AgentResponse(
+                    type="raiseIntentForContextResponse",
+                    payload=ErrorResponsePayload(error="NoAppsFound"),
+                    meta=self._meta_from_request(request),
+                )
+                await self._send_model(websocket, response)
+                return
+
+            intent_resolution = WireIntentResolution.model_validate(
+                resolution.model_dump()
+            )
+            response = RaiseIntentForContextResponse(
+                type="raiseIntentForContextResponse",
+                payload=RaiseIntentForContextResponsePayload(
+                    intentResolution=intent_resolution
+                ),
+                meta=self._meta_from_request(request),
+            )
+            await self._send_model(websocket, response)
+
+            # Send intent event to listeners (mirrors raiseIntent behavior)
+            targets = core_services.intent_resolver.deliver_intent_event(
+                intent, request.payload.context, request.meta.source
+            )
+            for target_uuid in targets:
+                event = IntentEvent(
+                    type="intentEvent",
+                    payload=IntentEventPayload(
+                        intent=intent,
+                        context=request.payload.context,
+                        originatingApp=request.meta.source,
+                    ),
+                    meta=AgentEventMeta(),
+                )
+                await self.connection_manager.send_to_instance(
+                    target_uuid, event.model_dump_json()
+                )
+        except Exception:
+            logger.exception("Error handling raiseIntentForContext")
+            response = AgentResponse(
+                type="raiseIntentForContextResponse",
+                payload=ErrorResponsePayload(error="ResolverUnavailable"),
+                meta=self._meta_from_request(request),
+            )
+            await self._send_model(websocket, response)
 
     async def _handle_intent_result_request(
         self, request: IntentResultRequest, websocket: WebSocket
@@ -458,7 +1322,7 @@ class DACPHandler:
         response = IntentResultResponse(
             type="intentResultResponse",
             payload=IntentResultResponsePayload(),
-            meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+            meta=self._meta_from_request(request),
         )
         await self._send_model(websocket, response)
 
@@ -477,7 +1341,7 @@ class DACPHandler:
         response = ContextListenerUnsubscribeResponse(
             type="contextListenerUnsubscribeResponse",
             payload=ContextListenerUnsubscribeResponsePayload(),
-            meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+            meta=self._meta_from_request(request),
         )
         await self._send_model(websocket, response)
 
@@ -518,9 +1382,7 @@ class DACPHandler:
                         return AgentResponse(
                             type="raiseIntentResponse",
                             payload=ErrorResponsePayload(error=result.error),
-                            meta=AgentResponseMeta(
-                                requestUuid=request.meta.requestUuid
-                            ),
+                            meta=self._meta_from_request(request),
                         )
 
                     # Plugin handled successfully
@@ -537,7 +1399,7 @@ class DACPHandler:
                         payload=RaiseIntentResponsePayload(
                             intentResolution=resolution.model_dump()
                         ),
-                        meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                        meta=self._meta_from_request(request),
                     )
 
             except Exception as e:
@@ -579,7 +1441,7 @@ class DACPHandler:
                 payload=RegisterExternalHandlerResponsePayload(
                     handler_uuid=handler_uuid
                 ),
-                meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                meta=self._meta_from_request(request),
             )
             logger.debug(
                 "Sending registerExternalHandlerResponse: handler_uuid=%s requestUuid=%s",
@@ -592,7 +1454,7 @@ class DACPHandler:
             err = AgentResponse(
                 type="registerExternalHandlerResponse",
                 payload=ErrorResponsePayload(error="InternalError"),
-                meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                meta=self._meta_from_request(request),
             )
             await self._send_model(websocket, err)
 
@@ -611,7 +1473,7 @@ class DACPHandler:
 
             # Send success response using Pydantic model
             response = UnregisterExternalHandlerResponse(
-                meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                meta=self._meta_from_request(request),
             )
             await websocket.send_text(response.model_dump_json())
         except Exception:
@@ -619,7 +1481,7 @@ class DACPHandler:
             err = AgentResponse(
                 type="unregisterExternalHandlerResponse",
                 payload=ErrorResponsePayload(error="InternalError"),
-                meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+                meta=self._meta_from_request(request),
             )
             await self._send_model(websocket, err)
 
@@ -711,5 +1573,5 @@ class DACPHandler:
             payload=RaiseIntentResponsePayload(
                 intentResolution=resolution.model_dump()
             ),
-            meta=AgentResponseMeta(requestUuid=request.meta.requestUuid),
+            meta=self._meta_from_request(request),
         )

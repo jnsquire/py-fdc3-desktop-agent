@@ -15,6 +15,66 @@ This document summarizes current implementation choices and how to change them.
 
 - MessagePort: the implementation does not proxy a native MessagePort object; instead, the standard WCP message types are serialized into JSON and sent over the WebSocket. If you need an explicit MessagePort bridge, add a small client-side postMessage shim that maps MessagePort messages to WCP envelopes and vice versa.
 
+## Desktop Agent Bridging (experimental BCP/BMP)
+
+This agent includes an experimental implementation of FDC3 Desktop Agent Bridging.
+
+### High-level design
+
+- A background `BridgeClient` connects to a Desktop Agent Bridge over WebSocket.
+- Connection uses the recommended bridge port discovery range (default 4475-4575) and retries periodically.
+- On connection, the client completes the BCP handshake:
+  - waits for `hello`
+  - sends `handshake` including:
+    - `requestedName`
+    - `implementationMetadata`
+    - `channelsState`
+  - waits for `connectedAgentsUpdate` assigning a local name.
+- After handshake:
+  - BMP request/response correlation is performed via `meta.requestUuid`.
+  - Inbound bridge-forwarded requests are handled by an injected `BridgeRequestRouter`.
+
+Key modules:
+
+- `fdc3/desktop_agent/bridging/client.py` — BCP/BMP client
+- `fdc3/desktop_agent/bridging/router.py` — handles requests received from the bridge
+- `fdc3/desktop_agent/server/__init__.py` — wires the bridge client into the FastAPI lifespan
+
+### Configuration
+
+Bridging is controlled by `DesktopAgentConfig` (or environment variables):
+
+- `bridge_enabled` / `FDC3_BRIDGE_ENABLED` (default false)
+- `bridge_host` / `FDC3_BRIDGE_HOST` (default 127.0.0.1)
+- `bridge_port_start` / `FDC3_BRIDGE_PORT_START` (default 4475)
+- `bridge_port_end` / `FDC3_BRIDGE_PORT_END` (default 4575)
+- `bridge_requested_name` / `FDC3_BRIDGE_REQUESTED_NAME` (default hostname)
+- `bridge_connect_retry_seconds` / `FDC3_BRIDGE_CONNECT_RETRY_SECONDS` (default 5)
+- `bridge_request_timeout_seconds` / `FDC3_BRIDGE_REQUEST_TIMEOUT_SECONDS` (default 3)
+
+### Supported bridged operations
+
+Outbound (this agent -> bridge):
+
+- `broadcast` is forwarded to the bridge as `broadcastRequest` (best-effort; local delivery still occurs).
+- `raiseIntent` is forwarded when the target includes `desktopAgent` (remote desktop agent).
+
+Inbound (bridge -> this agent):
+
+- `broadcastRequest` (fan-out to local listeners/channel members)
+- `openRequest`
+- `getAppMetadataRequest`
+- `findInstancesRequest`
+- `findIntentRequest`
+- `findIntentsByContextRequest` (currently returns an empty result rather than guessing)
+- `raiseIntentRequest`
+
+### Current limitations
+
+- Bridging is best-effort and does not block the agent startup if the bridge is unavailable.
+- `channelsState` is currently reported as an empty map during handshake (no cross-agent channel state sync yet).
+- Channel membership APIs are local-only; there is no bridged join/leave or cross-agent channel selector at this time.
+
 ## `implementationMetadata` policy
 
 - Current behavior: the `WCP5ValidateAppIdentityResponse` now includes a populated `implementationMetadata` object assembled from two sources:
