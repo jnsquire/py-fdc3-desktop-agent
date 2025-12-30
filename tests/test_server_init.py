@@ -130,6 +130,7 @@ async def test_server_lifespan_bridge_channels_state_factory_populates_state(
     monkeypatch,
 ):
     from fdc3.desktop_agent import server as server_mod
+    from fdc3.desktop_agent.server import lifespan as lifespan_mod
 
     class _ChannelStub:
         def __init__(self, channel_id: str, members: list[str]):
@@ -178,7 +179,7 @@ async def test_server_lifespan_bridge_channels_state_factory_populates_state(
         async def unregister_plugin(self, plugin: Any) -> None:
             return
 
-    monkeypatch.setattr(server_mod, "core_services", _CoreServicesBridgeStub())
+    monkeypatch.setattr(lifespan_mod, "core_services", _CoreServicesBridgeStub())
 
     class _BridgeClientCapture:
         def __init__(
@@ -198,7 +199,7 @@ async def test_server_lifespan_bridge_channels_state_factory_populates_state(
         async def stop(self) -> None:
             return
 
-    monkeypatch.setattr(server_mod, "BridgeClient", _BridgeClientCapture)
+    monkeypatch.setattr(lifespan_mod, "BridgeClient", _BridgeClientCapture)
 
     storage = _StorageStub()
     config = DesktopAgentConfig(
@@ -233,8 +234,10 @@ async def test_server_lifespan_registers_plugins_and_handles_get_adapter_error(
 ):
     # Patch core_services for deterministic plugin tracking
     from fdc3.desktop_agent import server as server_mod
+    from fdc3.desktop_agent.server import lifespan as lifespan_mod
+    from fdc3.desktop_agent.server import app_factory as app_factory_mod
 
-    monkeypatch.setattr(server_mod, "core_services", _CoreServicesStub())
+    monkeypatch.setattr(lifespan_mod, "core_services", _CoreServicesStub())
 
     class AgentClientManagerBoom:
         def __init__(self):
@@ -251,15 +254,15 @@ async def test_server_lifespan_registers_plugins_and_handles_get_adapter_error(
             raise RuntimeError("close_all failed")
 
     monkeypatch.setattr(
-        server_mod, "AgentClientConnectionManager", AgentClientManagerBoom
+        app_factory_mod, "AgentClientConnectionManager", AgentClientManagerBoom
     )
     monkeypatch.setattr(
-        server_mod, "WebSocketConnectionManager", InstanceConnManagerBoom
+        app_factory_mod, "WebSocketConnectionManager", InstanceConnManagerBoom
     )
 
     # Force adapter discovery failure (covers the get_adapter() exception branch)
     monkeypatch.setattr(
-        server_mod, "get_adapter", lambda: (_ for _ in ()).throw(RuntimeError("boom"))
+        lifespan_mod, "get_adapter", lambda: (_ for _ in ()).throw(RuntimeError("boom"))
     )
 
     storage = _StorageStub()
@@ -292,8 +295,9 @@ async def test_server_lifespan_registers_plugins_and_handles_get_adapter_error(
 @pytest.mark.asyncio
 async def test_server_lifespan_distributed_adapter_event_handling(monkeypatch):
     from fdc3.desktop_agent import server as server_mod
+    from fdc3.desktop_agent.server import lifespan as lifespan_mod
 
-    monkeypatch.setattr(server_mod, "core_services", _CoreServicesStub())
+    monkeypatch.setattr(lifespan_mod, "core_services", _CoreServicesStub())
 
     adapter = _DistributedAdapterStub()
     storage = _StorageStub()
@@ -353,8 +357,9 @@ async def test_server_lifespan_distributed_adapter_start_failure_sets_state_none
     monkeypatch,
 ):
     from fdc3.desktop_agent import server as server_mod
+    from fdc3.desktop_agent.server import lifespan as lifespan_mod
 
-    monkeypatch.setattr(server_mod, "core_services", _CoreServicesStub())
+    monkeypatch.setattr(lifespan_mod, "core_services", _CoreServicesStub())
 
     adapter = _DistributedAdapterStub(fail_start=True)
     storage = _StorageStub()
@@ -375,8 +380,9 @@ async def test_server_lifespan_distributed_adapter_start_failure_sets_state_none
 
 def test_server_template_routes_render(monkeypatch):
     from fdc3.desktop_agent import server as server_mod
+    from fdc3.desktop_agent.server import lifespan as lifespan_mod
 
-    monkeypatch.setattr(server_mod, "get_adapter", lambda: None)
+    monkeypatch.setattr(lifespan_mod, "get_adapter", lambda: None)
 
     storage = _StorageStub()
     config = DesktopAgentConfig(
@@ -463,6 +469,8 @@ async def test_agent_client_connection_manager_paths():
 @pytest.mark.asyncio
 async def test_websocket_endpoint_denied_by_access_control(monkeypatch):
     from fdc3.desktop_agent import server as server_mod
+    from fdc3.desktop_agent.server import app_factory as app_factory_mod
+    from fdc3.desktop_agent.server import lifespan as lifespan_mod
 
     class DenyAccess:
         def __init__(self, *args, **kwargs):
@@ -471,8 +479,8 @@ async def test_websocket_endpoint_denied_by_access_control(monkeypatch):
         async def validate_connection(self, websocket: WebSocket, headers: Any) -> bool:
             return False
 
-    monkeypatch.setattr(server_mod, "AccessControlHandler", DenyAccess)
-    monkeypatch.setattr(server_mod, "get_adapter", lambda: None)
+    monkeypatch.setattr(app_factory_mod, "AccessControlHandler", DenyAccess)
+    monkeypatch.setattr(lifespan_mod, "get_adapter", lambda: None)
 
     config = DesktopAgentConfig(
         storage=cast(Any, _StorageStub()),
@@ -501,6 +509,9 @@ async def test_websocket_endpoint_denied_by_access_control(monkeypatch):
 @pytest.mark.asyncio
 async def test_websocket_endpoint_heartbeat_send_error(monkeypatch):
     from fdc3.desktop_agent import server as server_mod
+    from fdc3.desktop_agent.server import app_factory as app_factory_mod
+    from fdc3.desktop_agent.server import lifespan as lifespan_mod
+    from fdc3.desktop_agent.server import websocket as websocket_mod
 
     class AllowAccess:
         def __init__(self, *args, **kwargs):
@@ -528,11 +539,11 @@ async def test_websocket_endpoint_heartbeat_send_error(monkeypatch):
     async def fast_sleep(_seconds: float) -> None:
         return
 
-    monkeypatch.setattr(server_mod, "AccessControlHandler", AllowAccess)
-    monkeypatch.setattr(server_mod, "WCPHandler", WCPStub)
-    monkeypatch.setattr(server_mod, "DACPHandler", DACPStub)
-    monkeypatch.setattr(server_mod.asyncio, "sleep", fast_sleep)
-    monkeypatch.setattr(server_mod, "get_adapter", lambda: None)
+    monkeypatch.setattr(app_factory_mod, "AccessControlHandler", AllowAccess)
+    monkeypatch.setattr(app_factory_mod, "WCPHandler", WCPStub)
+    monkeypatch.setattr(app_factory_mod, "DACPHandler", DACPStub)
+    monkeypatch.setattr(websocket_mod.asyncio, "sleep", fast_sleep)
+    monkeypatch.setattr(lifespan_mod, "get_adapter", lambda: None)
 
     config = DesktopAgentConfig(
         storage=cast(Any, _StorageStub()),
