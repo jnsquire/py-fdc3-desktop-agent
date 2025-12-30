@@ -12,14 +12,17 @@ import asyncio
 import threading
 import json
 import uuid
+import logging
 from typing import Any, Callable, Dict, Optional
 
 from .adapter import DistributedLogAdapter
 
 try:
-    import aiohttp
+    import aiohttp  # type:ignore[unresolved-import]
 except Exception:  # pragma: no cover - optional dependency
     aiohttp = None
+
+logger = logging.getLogger(__name__)
 
 
 class ConsulAdapter(DistributedLogAdapter):
@@ -40,15 +43,23 @@ class ConsulAdapter(DistributedLogAdapter):
 
     async def start(self) -> None:
         if self._session is None:
-            self._session = aiohttp.ClientSession()
+            self._session = aiohttp.ClientSession()  # type: ignore[assignment]
         try:
             self._loop = asyncio.get_running_loop()
         except RuntimeError:
             self._loop = None
 
     async def stop(self) -> None:
-        for task in list(self._watch_tasks.values()):
+        # Cancel and await pending watch tasks
+        tasks = list(self._watch_tasks.values())
+        for task in tasks:
             task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.exception("Error while waiting for Consul watch task to finish")
         self._watch_tasks.clear()
         if self._session:
             await self._session.close()
@@ -69,23 +80,34 @@ class ConsulAdapter(DistributedLogAdapter):
         async def _watch_loop():
             # Simple blocking query using index parameter
             idx = None
+            seen_keys = set()
             while True:
                 params = {"recurse": "true", "wait": "300s"}
                 if idx is not None:
                     params["index"] = str(idx)
                 try:
-                    async with self._session.get(topic_prefix, params=params) as resp:
+                    async with self._session.get(topic_prefix, params=params) as resp:  # type: ignore[attr-defined]
                         if resp.status == 200:
                             body = await resp.json()
                             # Update index from headers if present
                             hdr = resp.headers.get("X-Consul-Index")
                             if hdr:
-                                idx = hdr
+                                try:
+                                    idx = int(hdr)
+                                except Exception:
+                                    idx = hdr
+
                             for item in body:
                                 try:
+                                    key = item.get("Key")
+                                    # Skip duplicate keys already emitted
+                                    if key in seen_keys:
+                                        continue
+
                                     value = item.get("Value")
                                     if value is None:
                                         continue
+
                                     # Consul KV returns base64-encoded values; aiohttp json decoder may decode already
                                     data = (
                                         json.loads(value)
@@ -94,6 +116,7 @@ class ConsulAdapter(DistributedLogAdapter):
                                     )
                                 except Exception:
                                     data = {"raw": item}
+
                                 try:
                                     # schedule callback on the captured loop to avoid
                                     # blocking the watch coroutine and to provide a
@@ -104,18 +127,48 @@ class ConsulAdapter(DistributedLogAdapter):
                                             target_loop = asyncio.get_running_loop()
                                         except RuntimeError:
                                             target_loop = None
+
+                                    def _invoke_cb():
+                                        try:
+                                            res = callback(data)
+                                            # If callback returned a coroutine, schedule it
+                                            if asyncio.iscoroutine(res):
+                                                asyncio.create_task(res)
+                                        except Exception:
+                                            logger.exception(
+                                                "ConsulAdapter callback raised an exception"
+                                            )
+
                                     if target_loop is not None:
-                                        target_loop.call_soon(callback, data)
+                                        try:
+                                            # thread-safe scheduling onto the target loop
+                                            target_loop.call_soon_threadsafe(_invoke_cb)
+                                        except Exception:
+                                            logger.exception(
+                                                "Failed to schedule ConsulAdapter callback on loop, invoking directly"
+                                            )
+                                            _invoke_cb()
                                     else:
                                         # fallback: call directly
-                                        callback(data)
+                                        _invoke_cb()
+
+                                    if key is not None:
+                                        seen_keys.add(key)
                                 except Exception:
-                                    pass
+                                    logger.exception(
+                                        "Error invoking callback for consul watch"
+                                    )
                         else:
+                            logger.warning(
+                                "Consul responded with status %s for prefix %s",
+                                resp.status,
+                                topic_prefix,
+                            )
                             await asyncio.sleep(1)
                 except asyncio.CancelledError:
                     return
                 except Exception:
+                    logger.exception("Error in Consul watch loop, backing off briefly")
                     await asyncio.sleep(1)
 
         from ..tools import create_task_safe
@@ -130,3 +183,11 @@ class ConsulAdapter(DistributedLogAdapter):
             task = self._watch_tasks.pop(subscription_id, None)
         if task:
             task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.exception(
+                    "Error while waiting for unsubscribed Consul watch task to finish"
+                )

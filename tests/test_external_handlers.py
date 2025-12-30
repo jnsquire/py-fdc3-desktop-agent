@@ -2,6 +2,7 @@ import asyncio
 import json
 import pytest
 from typing import cast
+from unittest.mock import MagicMock
 from fastapi import WebSocket
 from fdc3.models.dacp.external_models import (
     RegisterExternalHandlerRequest,
@@ -96,7 +97,10 @@ async def test_dacp_register_and_forward(tmp_path):
 
     reg_request = RegisterExternalHandlerRequest.model_validate(reg_msg)
     await handler._handle_register_external_handler(
-        reg_request, session_id, wcp_sessions, cast(WebSocket, ws)
+        reg_request,
+        session_id=session_id,
+        wcp_sessions=wcp_sessions,
+        websocket=cast(WebSocket, ws),
     )
 
     # Parse response
@@ -144,7 +148,8 @@ async def test_dacp_register_and_forward(tmp_path):
         "payload": {"request_uuid": req_uuid, "result": {"ok": True}},
     }
     result_request = ExternalIntentResultRequest.model_validate(result_msg)
-    await handler._handle_external_intent_result(result_request)
+    ws = MagicMock()
+    await handler._handle_external_intent_result(result_request, websocket=ws)
 
     # await task completion
     res = await asyncio.wait_for(task, timeout=1.0)
@@ -158,7 +163,10 @@ async def test_dacp_register_and_forward(tmp_path):
     }
     unreg_request = UnregisterExternalHandlerRequest.model_validate(unreg_msg)
     await handler._handle_unregister_external_handler(
-        unreg_request, session_id, wcp_sessions, cast(WebSocket, ws)
+        unreg_request,
+        session_id=session_id,
+        wcp_sessions=wcp_sessions,
+        websocket=cast(WebSocket, ws),
     )
 
     # Ensure removed
@@ -219,9 +227,9 @@ async def test_register_invalid_payload_and_forward_failure():
     good_request = RegisterExternalHandlerRequest.model_validate(good_reg_msg)
     await handler._handle_register_external_handler(
         good_request,
-        session_id,
-        wcp_sessions,
-        cast(WebSocket, ws),
+        session_id=session_id,
+        wcp_sessions=wcp_sessions,
+        websocket=cast(WebSocket, ws),
     )
     assert ws.last is not None
     resp = json.loads(ws.last)
@@ -250,7 +258,10 @@ async def test_register_invalid_payload_and_forward_failure():
     }
     unreg_request = UnregisterExternalHandlerRequest.model_validate(unreg_msg)
     await handler._handle_unregister_external_handler(
-        unreg_request, session_id, wcp_sessions, cast(WebSocket, ws)
+        unreg_request,
+        session_id=session_id,
+        wcp_sessions=wcp_sessions,
+        websocket=cast(WebSocket, ws),
     )
     # ack was sent
     assert ws.last is not None

@@ -12,19 +12,10 @@ import json
 import logging
 import uuid
 from datetime import datetime
-from typing import (
-    Any,
-    Dict,
-    List,
-    Optional,
-    Union,
-    Callable,
-    Awaitable,
-    Tuple,
-)
+from typing import Any, Dict, List, Optional, Tuple
 from .events import EventEmitter
 
-from pydantic import ValidationError, BaseModel
+from pydantic import ValidationError
 from fdc3.client.models import (
     parse_message,
     Message,
@@ -39,50 +30,11 @@ from fdc3.client.models import (
     IntentResult,
     Broadcast,
 )
-from fdc3.models.dacp import (
-    ForwardedIntentMessage,
-    BroadcastEvent,
-    IntentEvent,
-)
 import urllib.parse
 import httpx
 from websockets.asyncio.client import connect, ClientConnection
 
 logger = logging.getLogger(__name__)
-
-
-class ForwardedIntentPayload(BaseModel):
-    request_uuid: Optional[str] = None
-    intent: Optional[str] = None
-    context: Optional[Dict[str, Any]] = None
-    source: Optional[Dict[str, Any]] = None
-    timeout: Optional[int] = None
-
-
-class ListenerUuidDict(BaseModel):
-    root: str
-
-
-class AddListenerResponsePayload(BaseModel):
-    listenerUuid: Optional[Union[str, ListenerUuidDict]] = None
-
-
-class BroadcastEventPayload(BaseModel):
-    context: Optional[Dict[str, Any]] = None
-    instanceUuid: Optional[str] = None
-
-
-class IntentEventPayload(BaseModel):
-    intent: Optional[str] = None
-    context: Optional[Dict[str, Any]] = None
-    originatingApp: Optional[Dict[str, Any]] = None
-
-
-ForwardedIntentHandler = Callable[[ForwardedIntentMessage], Union[Awaitable[Any], Any]]
-
-BroadcastHandler = Callable[[BroadcastEvent], Union[Awaitable[Any], Any]]
-
-IntentEventHandler = Callable[[IntentEvent], Union[Awaitable[Any], Any]]
 
 
 class FDC3Client:
@@ -261,8 +213,6 @@ class FDC3Client:
 
     async def _wcp_handshake(self) -> None:
         """Perform WCP handshake: WCP1Hello -> WCP3Handshake -> WCP4 -> WCP5."""
-        assert self._ws is not None
-
         connection_uuid = str(uuid.uuid4())
         self._instance_uuid = str(uuid.uuid4())
 
@@ -287,22 +237,15 @@ class FDC3Client:
     async def close(self) -> None:
         self._running = False
         # Cancel and await background tasks so they can clean up properly.
-        if self._recv_task:
-            self._recv_task.cancel()
-            try:
-                await self._recv_task
-            except asyncio.CancelledError:
-                pass
-            finally:
-                self._recv_task = None
-        if self._ping_task:
-            self._ping_task.cancel()
-            try:
-                await self._ping_task
-            except asyncio.CancelledError:
-                pass
-            finally:
-                self._ping_task = None
+        for task in (self._recv_task, self._ping_task):
+            if task:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        self._recv_task = None
+        self._ping_task = None
         if self._ws:
             try:
                 await self._ws.close()
@@ -318,11 +261,11 @@ class FDC3Client:
             await asyncio.sleep(self.ping_interval)
 
     async def _recv_loop(self) -> None:
-        assert self._ws is not None
+        ws = self._ensure_connected()
         try:
             while True:
                 try:
-                    raw = await self._ws.recv()
+                    raw = await ws.recv()
                 except Exception as exc:
                     # Connection closed or recv error
                     logger.debug("WebSocket recv error or closed: %s", exc)
@@ -376,30 +319,21 @@ class FDC3Client:
             self._handshake_complete.set()
 
         # DACP messages
-        elif t == "registerExternalHandlerResponse":
+        elif t in ("registerExternalHandlerResponse", "unregisterExternalHandlerResponse"):
             request_uuid = meta.get("requestUuid", "")
-            handler_uuid = payload.get("handler_uuid")
-            logger.debug(
-                f"Received registerExternalHandlerResponse: requestUuid={request_uuid} "
-                f"handler_uuid={handler_uuid} pending_keys={list(self._pending_responses.keys())}"
-            )
+            if t == "registerExternalHandlerResponse":
+                handler_uuid = payload.get("handler_uuid")
+                logger.debug(
+                    f"Received registerExternalHandlerResponse: requestUuid={request_uuid} "
+                    f"handler_uuid={handler_uuid} pending_keys={list(self._pending_responses.keys())}"
+                )
             if request_uuid:
-                if payload.get("error"):
-                    self._resolve_pending_response(
-                        request_uuid, error=payload.get("error")
-                    )
+                err = payload.get("error")
+                if err:
+                    self._resolve_pending_response(request_uuid, error=err)
                 else:
-                    self._resolve_pending_response(request_uuid, result=handler_uuid)
-
-        elif t == "unregisterExternalHandlerResponse":
-            request_uuid = meta.get("requestUuid", "")
-            if request_uuid:
-                if payload.get("error"):
-                    self._resolve_pending_response(
-                        request_uuid, error=payload.get("error")
-                    )
-                else:
-                    self._resolve_pending_response(request_uuid, result=None)
+                    result = payload.get("handler_uuid") if t == "registerExternalHandlerResponse" else None
+                    self._resolve_pending_response(request_uuid, result=result)
 
         elif t == "forwardedIntent":
             try:
@@ -484,7 +418,6 @@ class FDC3Client:
 
     async def _send_wcp4_validate(self, connection_uuid: str) -> None:
         """Send WCP4ValidateAppIdentity for self-registration."""
-        assert self._ws is not None
         wcp4 = WCP4ValidateAppIdentity(
             payload={
                 "appId": f"external-handler:{self.handler_id}",
@@ -667,8 +600,9 @@ class FDC3Client:
         await ws.send(msg.model_dump_json())
 
     async def run_forever(self) -> None:
+        """Block until the connection closes, then clean up."""
         try:
-            while self._running:
-                await asyncio.sleep(1)
+            if self._recv_task:
+                await self._recv_task
         finally:
             await self.close()

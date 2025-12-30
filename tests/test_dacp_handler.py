@@ -6,7 +6,7 @@ import json
 from types import SimpleNamespace
 from typing import Any, cast
 from contextlib import ExitStack
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -877,7 +877,7 @@ class TestDACPHandlerFindInstances:
             patch.object(handler, "_send_model", new_callable=AsyncMock) as send,
         ):
             cs.app_registry.get_instances_for_app.return_value = []
-            await handler._handle_find_instances(req, ws)
+            await handler._handle_find_instances(req, websocket=ws)
             sent = send.call_args.args[1]
             assert sent.type == "findInstancesResponse"
             assert sent.payload.instances == []
@@ -905,7 +905,7 @@ class TestDACPHandlerFindInstances:
                 SimpleNamespace(instance_id="i1"),
                 SimpleNamespace(instance_id="i2"),
             ]
-            await handler._handle_find_instances(req, ws)
+            await handler._handle_find_instances(req, websocket=ws)
             sent = send.call_args.args[1]
             assert sent.type == "findInstancesResponse"
             assert len(sent.payload.instances) == 1
@@ -936,7 +936,7 @@ class TestDACPHandlerFindIntent:
             patch.object(handler, "_send_model", new_callable=AsyncMock) as send,
         ):
             cs.listener_store.get_intent_listeners_for_intent.return_value = []
-            await handler._handle_find_intent(req, ws)
+            await handler._handle_find_intent(req, websocket=ws)
             sent = send.call_args.args[1]
             assert sent.type == "findIntentResponse"
             assert sent.payload.error == "NoAppsFound"
@@ -966,7 +966,7 @@ class TestDACPHandlerFindIntent:
             patch.object(handler, "_send_model", new_callable=AsyncMock) as send,
         ):
             cs.listener_store.get_intent_listeners_for_intent.return_value = []
-            await handler._handle_find_intent(req, ws)
+            await handler._handle_find_intent(req, websocket=ws)
             sent = send.call_args.args[1]
             assert sent.type == "findIntentResponse"
             assert sent.payload.appIntent.intent.name == "ViewChart"
@@ -997,7 +997,7 @@ class TestDACPHandlerFindIntentsByContext:
             patch.object(handler, "_send_model", new_callable=AsyncMock) as send,
         ):
             cs.listener_store.intent_listeners = {}
-            await handler._handle_find_intents_by_context(req, ws)
+            await handler._handle_find_intents_by_context(req, websocket=ws)
             sent = send.call_args.args[1]
             assert sent.type == "findIntentsByContextResponse"
             assert sent.payload.error == "NoAppsFound"
@@ -1027,7 +1027,7 @@ class TestDACPHandlerFindIntentsByContext:
             patch.object(handler, "_send_model", new_callable=AsyncMock) as send,
         ):
             cs.listener_store.intent_listeners = {}
-            await handler._handle_find_intents_by_context(req, ws)
+            await handler._handle_find_intents_by_context(req, websocket=ws)
             sent = send.call_args.args[1]
             assert sent.type == "findIntentsByContextResponse"
             names = sorted([ai.intent.name for ai in sent.payload.appIntents])
@@ -1162,7 +1162,7 @@ class TestDACPHandlerOpen:
             assert sent.payload.error == "AppNotFound"
 
     @pytest.mark.asyncio
-    async def test_open_exception_sends_app_launch_failed(self):
+    async def test_open_exception_sends_error_on_launch(self):
         handler, storage, _, _ = _handler()
         ws = _websocket()
 
@@ -1185,7 +1185,7 @@ class TestDACPHandlerOpen:
             await handler._handle_open(req, ws)
             sent = send.call_args.args[1]
             assert sent.type == "openResponse"
-            assert sent.payload.error == "AppLaunchFailed"
+            assert sent.payload.error == "ErrorOnLaunch"
 
     @pytest.mark.asyncio
     async def test_open_exception_and_send_fails_is_swallowed(self):
@@ -1349,6 +1349,7 @@ class TestDACPHandlerBroadcastAndListeners:
     @pytest.mark.asyncio
     async def test_broadcast_sends_events_to_targets(self):
         handler, _, _, connection_manager = _handler()
+        ws = _websocket()
         session_id, sessions = _wcp_sessions("src-uuid")
 
         from fdc3.models.dacp.dacp import BroadcastRequest
@@ -1364,7 +1365,9 @@ class TestDACPHandlerBroadcastAndListeners:
         with patch("fdc3.desktop_agent.handlers.dacp.core_services") as cs:
             cs.context_router.broadcast_context.return_value = ["t1", "t2"]
 
-            await handler._handle_broadcast(req, session_id, sessions)
+            await handler._handle_broadcast(
+                req, session_id=session_id, wcp_sessions=sessions, websocket=ws
+            )
 
         assert connection_manager.send_to_instance.await_count == 2
         args0 = connection_manager.send_to_instance.await_args_list[0].args
@@ -1401,7 +1404,7 @@ class TestDACPHandlerBroadcastAndListeners:
             )
 
             await handler._handle_add_context_listener(
-                add_req, session_id, sessions, ws
+                add_req, session_id=session_id, wcp_sessions=sessions, websocket=ws
             )
             sent = send.call_args.args[1]
             assert sent.payload.listenerUuid.root == "listener-1"
@@ -1413,7 +1416,7 @@ class TestDACPHandlerBroadcastAndListeners:
                     "meta": {"requestUuid": "req-2"},
                 }
             )
-            await handler._handle_context_listener_unsubscribe(unsub_req, ws)
+            await handler._handle_context_listener_unsubscribe(unsub_req, websocket=ws)
             cs.listener_store.remove_listener.assert_called_with("listener-1")
 
     @pytest.mark.asyncio
@@ -1445,7 +1448,9 @@ class TestDACPHandlerBroadcastAndListeners:
                 listener_uuid=listener_uuid
             )
 
-            await handler._handle_add_intent_listener(add_req, session_id, sessions, ws)
+            await handler._handle_add_intent_listener(
+                add_req, session_id=session_id, wcp_sessions=sessions, websocket=ws
+            )
             sent = send.call_args.args[1]
             assert sent.payload.listenerUuid.root == "listener-1"
 
@@ -1456,7 +1461,7 @@ class TestDACPHandlerBroadcastAndListeners:
                     "meta": {"requestUuid": "req-2"},
                 }
             )
-            await handler._handle_intent_listener_unsubscribe(unsub_req, ws)
+            await handler._handle_intent_listener_unsubscribe(unsub_req, websocket=ws)
             cs.listener_store.remove_listener.assert_called_with("listener-1")
 
 
@@ -1671,7 +1676,7 @@ class TestDACPHandlerRaiseIntent:
             patch.object(handler, "_send_model", new_callable=AsyncMock) as send,
         ):
             cs.listener_store.intent_listeners = {}
-            await handler._handle_raise_intent_for_context(req, ws)
+            await handler._handle_raise_intent_for_context(req, websocket=ws)
             sent = send.call_args.args[1]
             assert sent.type == "raiseIntentForContextResponse"
             assert sent.payload.error == "NoAppsFound"
@@ -1701,7 +1706,7 @@ class TestDACPHandlerRaiseIntent:
                 "l1": SimpleNamespace(intent="ViewChart"),
                 "l2": SimpleNamespace(intent="ViewNews"),
             }
-            await handler._handle_raise_intent_for_context(req, ws)
+            await handler._handle_raise_intent_for_context(req, websocket=ws)
             sent = send.call_args.args[1]
             assert sent.type == "raiseIntentForContextResponse"
             assert sent.payload.error == "ResolverUnavailable"
@@ -1743,7 +1748,7 @@ class TestDACPHandlerRaiseIntent:
             cs.intent_resolver.resolve_intent.return_value = resolution
             cs.intent_resolver.deliver_intent_event.return_value = ["t1"]
 
-            await handler._handle_raise_intent_for_context(req, ws)
+            await handler._handle_raise_intent_for_context(req, websocket=ws)
 
             sent = send.call_args.args[1]
             assert sent.type == "raiseIntentForContextResponse"
@@ -1784,9 +1789,9 @@ class TestDACPHandlerRaiseIntent:
         )
 
         with patch.object(handler, "_send_model", new_callable=AsyncMock) as send:
-            await handler._handle_intent_result_request(intent_req, ws)
-            await handler._handle_raise_intent_result_response(rir)
-            await handler._handle_heartbeat_acknowledgment(hb)
+            await handler._handle_intent_result_request(intent_req, websocket=ws)
+            await handler._handle_raise_intent_result_response(rir, websocket=ws)
+            await handler._handle_heartbeat_acknowledgment(hb, websocket=ws)
 
             sent = send.call_args.args[1]
             assert sent.type == "intentResultResponse"
@@ -1830,10 +1835,10 @@ class TestDACPHandlerExternalHandlers:
             cs.unregister_external_handler = AsyncMock(return_value=None)
 
             await handler._handle_register_external_handler(
-                reg, session_id, sessions, ws
+                reg, session_id=session_id, wcp_sessions=sessions, websocket=ws
             )
             await handler._handle_unregister_external_handler(
-                unreg, session_id, sessions, ws
+                unreg, session_id=session_id, wcp_sessions=sessions, websocket=ws
             )
 
         assert ws.send_text.await_count == 2
@@ -1865,7 +1870,7 @@ class TestDACPHandlerExternalHandlers:
         ):
             cs.register_external_handler = AsyncMock(side_effect=RuntimeError("boom"))
             await handler._handle_register_external_handler(
-                reg, session_id, sessions, ws
+                reg, session_id=session_id, wcp_sessions=sessions, websocket=ws
             )
 
             sent = send.call_args.args[1]
@@ -1894,7 +1899,7 @@ class TestDACPHandlerExternalHandlers:
         ):
             cs.unregister_external_handler = AsyncMock(side_effect=RuntimeError("boom"))
             await handler._handle_unregister_external_handler(
-                unreg, session_id, sessions, ws
+                unreg, session_id=session_id, wcp_sessions=sessions, websocket=ws
             )
 
             sent = send.call_args.args[1]
@@ -1919,7 +1924,8 @@ class TestDACPHandlerExternalHandlers:
         )
 
         with patch("fdc3.desktop_agent.handlers.dacp.core_services") as cs:
-            await handler._handle_external_intent_result(req)
+            ws = MagicMock()
+            await handler._handle_external_intent_result(req, websocket=ws)
             cs.resolve_pending_intent.assert_called_once()
 
     @pytest.mark.asyncio
@@ -1940,7 +1946,8 @@ class TestDACPHandlerExternalHandlers:
             patch("fdc3.desktop_agent.handlers.dacp.logger") as mock_logger,
         ):
             cs.resolve_pending_intent.side_effect = RuntimeError("boom")
-            await handler._handle_external_intent_result(req)
+            ws = MagicMock()
+            await handler._handle_external_intent_result(req, websocket=ws)
             mock_logger.exception.assert_called()
 
     @pytest.mark.asyncio
