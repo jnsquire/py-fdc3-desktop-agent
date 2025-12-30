@@ -75,9 +75,7 @@ ChannelsStateFactory = Callable[[], ChannelsState]
 
 
 # Type alias for request handler
-RequestHandler = Callable[
-    [Mapping[str, Any]], Awaitable[Optional[Mapping[str, Any]]]
-]
+RequestHandler = Callable[[Mapping[str, Any]], Awaitable[Optional[Mapping[str, Any]]]]
 
 
 class BridgeMeta(BaseModel):

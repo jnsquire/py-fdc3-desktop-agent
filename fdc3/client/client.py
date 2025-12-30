@@ -319,7 +319,10 @@ class FDC3Client:
             self._handshake_complete.set()
 
         # DACP messages
-        elif t in ("registerExternalHandlerResponse", "unregisterExternalHandlerResponse"):
+        elif t in (
+            "registerExternalHandlerResponse",
+            "unregisterExternalHandlerResponse",
+        ):
             request_uuid = meta.get("requestUuid", "")
             if t == "registerExternalHandlerResponse":
                 handler_uuid = payload.get("handler_uuid")
@@ -332,7 +335,11 @@ class FDC3Client:
                 if err:
                     self._resolve_pending_response(request_uuid, error=err)
                 else:
-                    result = payload.get("handler_uuid") if t == "registerExternalHandlerResponse" else None
+                    result = (
+                        payload.get("handler_uuid")
+                        if t == "registerExternalHandlerResponse"
+                        else None
+                    )
                     self._resolve_pending_response(request_uuid, result=result)
 
         elif t == "forwardedIntent":

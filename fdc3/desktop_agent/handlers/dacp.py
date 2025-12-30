@@ -166,7 +166,10 @@ class DACPHandler:
             BroadcastRequest: ("_handle_broadcast", True),
             AddContextListenerRequest: ("_handle_add_context_listener", True),
             AddIntentListenerRequest: ("_handle_add_intent_listener", True),
-            IntentListenerUnsubscribeRequest: ("_handle_intent_listener_unsubscribe", False),
+            IntentListenerUnsubscribeRequest: (
+                "_handle_intent_listener_unsubscribe",
+                False,
+            ),
             GetInfoRequest: ("_handle_get_info", True),
             GetAppMetadataRequest: ("_handle_get_app_metadata", False),
             GetUserChannelsRequest: ("_handle_get_user_channels", False),
@@ -177,13 +180,19 @@ class DACPHandler:
             FindIntentsByContextRequest: ("_handle_find_intents_by_context", False),
             FindInstancesRequest: ("_handle_find_instances", False),
             RegisterExternalHandlerRequest: ("_handle_register_external_handler", True),
-            UnregisterExternalHandlerRequest: ("_handle_unregister_external_handler", True),
+            UnregisterExternalHandlerRequest: (
+                "_handle_unregister_external_handler",
+                True,
+            ),
             ExternalIntentResultRequest: ("_handle_external_intent_result", False),
             RaiseIntentRequest: ("_handle_raise_intent", True),
             RaiseIntentForContextRequest: ("_handle_raise_intent_for_context", False),
             IntentResultRequest: ("_handle_intent_result_request", False),
             RaiseIntentResultResponse: ("_handle_raise_intent_result_response", False),
-            ContextListenerUnsubscribeRequest: ("_handle_context_listener_unsubscribe", False),
+            ContextListenerUnsubscribeRequest: (
+                "_handle_context_listener_unsubscribe",
+                False,
+            ),
             AddEventListenerRequest: ("_handle_add_event_listener", True),
             RemoveEventListenerRequest: ("_handle_remove_event_listener", False),
             HeartbeatAcknowledgmentRequest: ("_handle_heartbeat_acknowledgment", False),
@@ -531,7 +540,10 @@ class DACPHandler:
         channel = core_services.channel_manager.get_channel(channel_id)
         if channel is None or getattr(channel, "type", None) != "user":
             await self._send_error(
-                websocket, "joinUserChannelResponse", DACPError.NO_CHANNEL_FOUND, request
+                websocket,
+                "joinUserChannelResponse",
+                DACPError.NO_CHANNEL_FOUND,
+                request,
             )
             return
 

@@ -28,7 +28,6 @@ class FakeResp:
 
 class FakeSession:
     def __init__(self):
-
         # Use MagicMock (sync) so .get() returns an async context manager directly
         self._get = MagicMock()
         self._put = MagicMock()
@@ -110,7 +109,9 @@ async def test_stop_awaits_watch_tasks(monkeypatch):
     async def never_get(*args, **kwargs):
         await asyncio.sleep(3600)
 
-    sess._get.side_effect = [FakeResp(200, body=[])]  # will block on long wait inside adapter loop
+    sess._get.side_effect = [
+        FakeResp(200, body=[])
+    ]  # will block on long wait inside adapter loop
 
     called = asyncio.Event()
 
