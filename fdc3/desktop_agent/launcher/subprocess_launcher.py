@@ -1,6 +1,7 @@
 # Subprocess launcher implementation
 
 import asyncio
+import json
 import logging
 import os
 import uuid
@@ -56,7 +57,7 @@ class SubprocessLauncher(ProcessLauncher):
 
             # Add context if provided
             if context:
-                env["FDC3_CONTEXT"] = str(context)  # TODO: Proper JSON serialization
+                env["FDC3_CONTEXT"] = json.dumps(context)
 
             # Determine working directory
             cwd = launch_config.cwd if launch_config.cwd else None

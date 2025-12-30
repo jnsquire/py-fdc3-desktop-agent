@@ -789,13 +789,14 @@ class TestFDC3ClientRunForever:
         client = FDC3Client("ws://example.com")
         client._running = True
 
-        with (
-            patch.object(client, "close", new_callable=AsyncMock) as mock_close,
-            patch("asyncio.sleep", side_effect=[None, KeyboardInterrupt()]),
-        ):
-            with pytest.raises(KeyboardInterrupt):
-                await client.run_forever()
+        # Create a task that completes immediately to simulate recv_task finishing
+        async def instant_task():
+            pass
 
+        client._recv_task = asyncio.create_task(instant_task())
+
+        with patch.object(client, "close", new_callable=AsyncMock) as mock_close:
+            await client.run_forever()
             mock_close.assert_called_once()
 
 

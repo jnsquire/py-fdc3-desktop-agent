@@ -36,6 +36,22 @@ def _get_free_port(host: str = "127.0.0.1") -> int:
         return int(sock.getsockname()[1])
 
 
+async def _wait_for_port(host: str, port: int, timeout: float = 5.0) -> bool:
+    """Wait until a TCP port is accepting connections."""
+    deadline = asyncio.get_event_loop().time() + timeout
+    while asyncio.get_event_loop().time() < deadline:
+        try:
+            _, writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port), timeout=0.5
+            )
+            writer.close()
+            await writer.wait_closed()
+            return True
+        except (OSError, asyncio.TimeoutError):
+            await asyncio.sleep(0.05)
+    return False
+
+
 @pytest.mark.asyncio
 async def test_external_handler_registration_e2e():
     """End-to-end test: connect via WebSocket, do WCP handshake, register handler."""
@@ -85,6 +101,10 @@ async def test_external_handler_registration_e2e():
     # Wait for server startup without polling sleeps.
     if not await asyncio.to_thread(started.wait, 2.0):
         raise RuntimeError("Server did not signal startup in time")
+
+    # Wait for the port to actually be listening (lifespan completes before socket bind)
+    if not await _wait_for_port("127.0.0.1", port, timeout=5.0):
+        raise RuntimeError("Server port not accepting connections in time")
 
     try:
         # Connect WebSocket client

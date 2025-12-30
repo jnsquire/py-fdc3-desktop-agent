@@ -10,15 +10,14 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    Dict,
     Literal,
-    Optional,
-    List,
     Mapping,
-    Protocol,
+    Optional,
+    Union,
 )
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from typing_extensions import NotRequired, TypedDict
 from websockets.asyncio.client import ClientConnection, connect
 
 from fdc3.models.identifiers import AppIdentifier
@@ -47,27 +46,35 @@ class BridgeConnectionSettings:
 
 ConnectFunc = Callable[[str], Awaitable[ClientConnection]]
 
+# Type alias for implementation metadata return type
+ImplementationMetadata = Mapping[str, Any] | BaseImplementationMetadata
 
-class ImplementationMetadataFactory(Protocol):
-    def __call__(
-        self,
-    ) -> (
-        Mapping[str, Any] | BaseImplementationMetadata
-    ):  # pragma: no cover - typing helper
-        ...
+# Factory type alias for implementation metadata
+ImplementationMetadataFactory = Callable[[], ImplementationMetadata]
 
-
-class ChannelsStateFactory(Protocol):
-    def __call__(
-        self,
-    ) -> Mapping[str, List[Mapping[str, Any]]]:  # pragma: no cover - typing helper
-        ...
+# Type alias for AppIdentifier or dict representation
+AppIdentifierLike = Union[AppIdentifier, dict[str, Any]]
 
 
-class RequestHandlerProtocol(Protocol):
-    def __call__(
-        self, msg: Mapping[str, Any]
-    ) -> Awaitable[Optional[Mapping[str, Any]]]: ...
+class ChannelMember(TypedDict):
+    """A channel member entry for the bridging handshake channels state."""
+
+    desktopAgent: str
+    instanceUuid: str
+    appId: NotRequired[str]
+    instanceId: NotRequired[str]
+
+
+# Type alias for the full channels state mapping
+ChannelsState = Mapping[str, list[ChannelMember]]
+
+
+# Factory type alias for channels state
+ChannelsStateFactory = Callable[[], ChannelsState]
+
+
+# Type alias for request handler
+RequestHandler = Callable[[Mapping[str, Any]], Awaitable[Optional[Mapping[str, Any]]]]
 
 
 class BridgeMeta(BaseModel):
@@ -110,7 +117,7 @@ class BridgeHandshakePayload(BaseModel):
 
     requestedName: str
     implementationMetadata: Mapping[str, Any]
-    channelsState: Mapping[str, List[Mapping[str, Any]]] = Field(default_factory=dict)
+    channelsState: Mapping[str, list[ChannelMember]] = Field(default_factory=dict)
 
 
 class BridgeHandshake(BridgeMessage):
@@ -161,27 +168,24 @@ class BridgeClient:
         *,
         implementation_metadata_factory: ImplementationMetadataFactory,
         channels_state_factory: ChannelsStateFactory,
-        request_handler: RequestHandlerProtocol,
+        request_handler: RequestHandler,
         connect_func: Optional[ConnectFunc] = None,
     ):
         self._settings = settings
-        # Factories and handlers — keep runtime flexibility but tighten hints
-        self._implementation_metadata_factory: ImplementationMetadataFactory = (
-            implementation_metadata_factory
-        )
-        self._channels_state_factory: ChannelsStateFactory = channels_state_factory
-        self._request_handler: RequestHandlerProtocol = request_handler
-        self._connect: ConnectFunc = connect_func or (lambda url: connect(url))
+        self._implementation_metadata_factory = implementation_metadata_factory
+        self._channels_state_factory = channels_state_factory
+        self._request_handler = request_handler
+        self._connect: ConnectFunc = connect_func or connect
 
         self._ws: Optional[ClientConnection] = None
-        self._run_task: Optional[asyncio.Task] = None
-        self._recv_task: Optional[asyncio.Task] = None
+        self._run_task: Optional[asyncio.Task[None]] = None
+        self._recv_task: Optional[asyncio.Task[None]] = None
         self._stopping = asyncio.Event()
 
         self._assigned_name: Optional[str] = None
-        self._connected_agents: list[dict] = []
+        self._connected_agents: list[dict[str, Any]] = []
 
-        self._pending: Dict[str, asyncio.Future] = {}
+        self._pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
         self._pending_lock = asyncio.Lock()
 
         # Used to ensure atomic processing of connectedAgentsUpdate.
@@ -347,7 +351,7 @@ class BridgeClient:
         raise RuntimeError("Timed out waiting for connectedAgentsUpdate")
 
     @staticmethod
-    def _parse_json(raw: Any) -> dict:
+    def _parse_json(raw: Any) -> dict[str, Any]:
         if isinstance(raw, (bytes, bytearray)):
             raw = raw.decode("utf-8")
         if not isinstance(raw, str):
@@ -424,11 +428,11 @@ class BridgeClient:
         self,
         *,
         request_type: str,
-        payload: dict,
-        source: AppIdentifier | dict,
-        destination: Optional[AppIdentifier | dict] = None,
+        payload: dict[str, Any],
+        source: AppIdentifierLike,
+        destination: Optional[AppIdentifierLike] = None,
         timeout: Optional[float] = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Send an agentRequest message and await the (bridge-collated) response."""
         if self._ws is None:
             raise RuntimeError("NotConnectedToBridge")
@@ -438,25 +442,15 @@ class BridgeClient:
             timeout if timeout is not None else self._settings.request_timeout_seconds
         )
 
-        msg: dict = {
-            "type": request_type,
-            "payload": payload,
-            "meta": {
-                "requestUuid": req_uuid,
-                "timestamp": _utc_now_iso(),
-                "source": source.model_dump()
-                if isinstance(source, AppIdentifier)
-                else dict(source),
-            },
-        }
-        if destination is not None:
-            msg["meta"]["destination"] = (
-                destination.model_dump()
-                if isinstance(destination, AppIdentifier)
-                else dict(destination)
-            )
+        msg = self._build_request_message(
+            request_type=request_type,
+            payload=payload,
+            source=source,
+            destination=destination,
+            request_uuid=req_uuid,
+        )
 
-        fut = asyncio.get_running_loop().create_future()
+        fut: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
         async with self._pending_lock:
             self._pending[req_uuid] = fut
 
@@ -472,9 +466,9 @@ class BridgeClient:
         self,
         *,
         request_type: str,
-        payload: dict,
-        source: AppIdentifier | dict,
-        destination: Optional[AppIdentifier | dict] = None,
+        payload: dict[str, Any],
+        source: AppIdentifierLike,
+        destination: Optional[AppIdentifierLike] = None,
     ) -> str:
         """Send a request message that does not generate a response.
 
@@ -485,11 +479,33 @@ class BridgeClient:
             raise RuntimeError("NotConnectedToBridge")
 
         req_uuid = _make_uuid()
-        msg: dict = {
+        msg = self._build_request_message(
+            request_type=request_type,
+            payload=payload,
+            source=source,
+            destination=destination,
+            request_uuid=req_uuid,
+        )
+
+        # Validate + normalize before sending.
+        await self._ws.send(BridgeMessage.model_validate(msg).model_dump_json())
+        return req_uuid
+
+    @staticmethod
+    def _build_request_message(
+        *,
+        request_type: str,
+        payload: dict[str, Any],
+        source: AppIdentifierLike,
+        destination: Optional[AppIdentifierLike],
+        request_uuid: str,
+    ) -> dict[str, Any]:
+        """Build a bridge request message dict."""
+        msg: dict[str, Any] = {
             "type": request_type,
             "payload": payload,
             "meta": {
-                "requestUuid": req_uuid,
+                "requestUuid": request_uuid,
                 "timestamp": _utc_now_iso(),
                 "source": source.model_dump()
                 if isinstance(source, AppIdentifier)
@@ -502,11 +518,8 @@ class BridgeClient:
                 if isinstance(destination, AppIdentifier)
                 else dict(destination)
             )
-
-        # Validate + normalize before sending.
-        await self._ws.send(BridgeMessage.model_validate(msg).model_dump_json())
-        return req_uuid
+        return msg
 
 
-def make_desktop_agent_identifier(desktop_agent: str) -> dict:
+def make_desktop_agent_identifier(desktop_agent: str) -> dict[str, str]:
     return {"desktopAgent": desktop_agent}
