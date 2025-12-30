@@ -82,10 +82,26 @@ class AllowlistAccessPolicy(AccessControlPolicy):
 
 
 class AccessControlManager:
-    """Manages access control policies"""
+    """Manages access control policies.
 
-    def __init__(self, policy: Optional[AccessControlPolicy] = None):
-        self.policy = policy
+    Args:
+        policy: Optional explicit policy to use.
+        allowed_origins: Optional list of allowed origins. If provided and no
+            explicit policy is given, creates an AllowlistAccessPolicy.
+    """
+
+    def __init__(
+        self,
+        policy: Optional[AccessControlPolicy] = None,
+        *,
+        allowed_origins: Optional[List[str]] = None,
+    ):
+        if policy is not None:
+            self.policy = policy
+        elif allowed_origins:
+            self.policy = AllowlistAccessPolicy(allowed_origins)
+        else:
+            self.policy = None
 
     async def check_access(self, request: AccessRequest) -> AccessDecision:
         """Check access using the configured policy"""

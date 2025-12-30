@@ -12,7 +12,7 @@ from ..api.graphql import schema, set_graphql_storage
 from ..config import DesktopAgentConfig
 from ..storage import SqliteStorage
 from ..launcher import SubprocessLauncher
-from ..access_control import AccessControlManager, AllowlistAccessPolicy
+from ..access_control import AccessControlManager
 from ..handlers import (
     AccessControlHandler,
     WCPHandler,
@@ -66,10 +66,7 @@ def create_app(config: Optional[DesktopAgentConfig] = None) -> FastAPI:
     # and any background components (e.g. bridging) share the same state.
 
     # Access control
-    access_control = AccessControlManager()
-    if config.allowed_origins:
-        allowlist_policy = AllowlistAccessPolicy(config.allowed_origins)
-        access_control.set_policy(allowlist_policy)
+    access_control = AccessControlManager(allowed_origins=config.allowed_origins)
 
     # Connection managers
     instance_connection_manager = WebSocketConnectionManager()
