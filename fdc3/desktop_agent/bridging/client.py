@@ -12,13 +12,12 @@ from typing import (
     Callable,
     Literal,
     Mapping,
-    NotRequired,
     Optional,
-    TypedDict,
     Union,
 )
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from typing_extensions import NotRequired, TypedDict
 from websockets.asyncio.client import ClientConnection, connect
 
 from fdc3.models.identifiers import AppIdentifier
