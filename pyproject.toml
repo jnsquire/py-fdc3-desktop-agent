@@ -2,6 +2,12 @@
 requires = [
   "hatchling",
 
+  # The custom Hatch build hook (hatch_build.py) runs `mkdocs build` at build
+  # time when documentation sources are present, so these must be available
+  # under PEP 517 build isolation.
+  "mkdocs>=1.5",
+  "mkdocstrings[python]>=0.23",
+  "pymdown-extensions>=10.0",
 ]
 build-backend = "hatchling.build"
 

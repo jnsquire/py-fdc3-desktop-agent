@@ -34,11 +34,8 @@ python -m pytest
 
 Documentation overview:
 
-- Published site: https://jnsquire.github.io/py-fdc3-desktop-agent/
-- API Reference (generated): https://jnsquire.github.io/py-fdc3-desktop-agent/api/
-
-- Published site (link): <https://jnsquire.github.io/py-fdc3-desktop-agent/>
-- API Reference (generated link): <https://jnsquire.github.io/py-fdc3-desktop-agent/api/>
+- Published site: <https://jnsquire.github.io/py-fdc3-desktop-agent/>
+- API Reference (generated): <https://jnsquire.github.io/py-fdc3-desktop-agent/api/>
 
 - Configuration & running: [documentation/configuration.md](documentation/configuration.md) (published: https://jnsquire.github.io/py-fdc3-desktop-agent/configuration/)
 - Desktop Agent Bridging (experimental): [documentation/bridging.md](documentation/bridging.md) (published: https://jnsquire.github.io/py-fdc3-desktop-agent/bridging/)
