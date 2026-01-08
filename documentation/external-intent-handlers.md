@@ -125,7 +125,7 @@ External handlers use these message types:
 
 ## Example External Handler
 
-See [../examples/external_handler.py](../examples/external_handler.py) for a complete working example. Run it with:
+See the repository example at https://github.com/jnsquire/py-fdc3-desktop-agent/blob/main/examples/external_handler.py for a complete working example. Run it with:
 
 ```bash
 python -m examples.external_handler --agent-url ws://localhost:8000/ws --handler-id my-handler

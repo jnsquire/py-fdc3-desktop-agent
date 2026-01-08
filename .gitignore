@@ -14,4 +14,5 @@ dist/
 .pytest_cache/
 .mypy_cache/
 .cache/
+site/
 fdc3_agent.db

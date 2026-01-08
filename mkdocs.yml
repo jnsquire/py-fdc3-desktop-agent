@@ -1,0 +1,40 @@
+site_name: FDC3 Desktop Agent
+site_description: Documentation for the FDC3 Desktop Agent Python implementation
+site_author: Joel Squire
+site_url: https://jnsquire.github.io/py-fdc3-desktop-agent/
+
+docs_dir: documentation
+
+theme:
+  name: readthedocs
+
+markdown_extensions:
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_div_format
+
+extra_javascript:
+  - assets/mermaid.min.js
+  - assets/mermaid-init.js
+
+extra_css:
+  - assets/mermaid-zoom.css
+
+nav:
+  - Overview: index.md
+  - Configuration: configuration.md
+  - Bridging (experimental): bridging.md
+  - Embedding API: embedding-api.md
+  - Plugins: plugins.md
+  - External intent handlers: external-intent-handlers.md
+  - Docker deployment: docker.md
+  - System flowchart: system_flowchart.md
+  - FDC3 spec gap checklist: fdc3-spec-gap-checklist.md
+  - API Reference:
+      - Desktop Agent: api.md
+
+plugins:
+  - search
+  - mkdocstrings
