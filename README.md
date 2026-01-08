@@ -1,6 +1,7 @@
 # FDC3 Desktop Agent (Python)
 
-A Python implementation of an FDC3 Desktop Agent with WebSocket support for browser app connections.
+The Python FDC3 Desktop Agent implements the FDC3 Desktop Agent API and exposes managed WebSocket, GraphQL,
+and admin endpoints for browser-based applications.
 
 ## Quick Start
 
@@ -31,7 +32,10 @@ python -m pytest
 
 ## Documentation
 
-The README is intentionally kept short; the more detailed guides live in the repository documentation:
+Documentation overview:
+
+- Published site: https://jnsquire.github.io/py-fdc3-desktop-agent/
+- API Reference (generated): https://jnsquire.github.io/py-fdc3-desktop-agent/api/
 
 - Configuration & running: [documentation/configuration.md](documentation/configuration.md)
 - Desktop Agent Bridging (experimental): [documentation/bridging.md](documentation/bridging.md)
@@ -45,3 +49,5 @@ Additional references:
 - Implementation notes: [IMPLEMENTATION.md](IMPLEMENTATION.md)
 - System flowchart: [documentation/system_flowchart.md](documentation/system_flowchart.md)
 - FDC3 spec gap checklist: [documentation/fdc3-spec-gap-checklist.md](documentation/fdc3-spec-gap-checklist.md)
+
+The documentation site is powered by MkDocs. Rebuild the HTML output with `mkdocs build` and preview changes with `mkdocs serve`. `hatch build` now runs `mkdocs build` first so release artifacts always include a fresh site.

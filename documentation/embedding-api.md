@@ -1,12 +1,17 @@
 # Embedding API
 
-The FDC3 Desktop Agent can be embedded in other Python applications using the `create_app()` factory function. This allows you to:
+Embed the FDC3 Desktop Agent into an existing FastAPI/Starlette host so that both the agent surface (WebSocket, GraphQL,
+and admin UI) and your own routes share the same HTTP lifecycle and configuration context.
 
-- Run the agent alongside your existing FastAPI/Starlette application
-- Configure the agent programmatically instead of via environment variables
-- Inject custom storage, launcher, or distributed adapter implementations
+Embedding via the `create_app()` factory:
+
+- lets you run the agent alongside your existing FastAPI/Starlette application.
+- lets you configure the agent programmatically instead of relying solely on environment variables.
+- lets you substitute custom storage, launcher, or distributed adapter implementations that fit your deployment.
 
 ## Basic Usage
+
+The factory accepts an optional `DesktopAgentConfig` so you can rely on the same structured configuration that the standalone agent uses. The returned ASGI application can be mounted inside your FastAPI/Starlette host or served independently.
 
 ```python
 from fdc3.desktop_agent import create_app, DesktopAgentConfig
@@ -37,20 +42,21 @@ main_app = FastAPI(title="My Application")
 def root():
     return {"message": "Hello from main app"}
 
-# Mount the FDC3 agent at /fdc3
 fdc3_config = DesktopAgentConfig(db_path="my_app_fdc3.db")
 main_app.mount("/fdc3", create_app(fdc3_config))
 
-# Now available:
-# - Main app: http://localhost:8000/
-# - FDC3 WebSocket: ws://localhost:8000/fdc3/ws
-# - FDC3 GraphQL: http://localhost:8000/fdc3/graphql
-# - FDC3 Admin: http://localhost:8000/fdc3/admin
+With this configuration the main application still responds at `http://localhost:8000/`, while the embedded
+agent exposes its WebSocket, GraphQL, and admin endpoints beneath `/fdc3`:
+
+- Main app: http://localhost:8000/
+- FDC3 WebSocket: ws://localhost:8000/fdc3/ws
+- FDC3 GraphQL: http://localhost:8000/fdc3/graphql
+- FDC3 Admin: http://localhost:8000/fdc3/admin
 ```
 
 ## Configuration Options
 
-`DesktopAgentConfig` supports the following options:
+`DesktopAgentConfig` mirrors the environment variables used by the standalone agent so you can configure the embedded service programmatically. Use the table below to understand when to override specific settings:
 
 | Option                  | Type                        | Default              | Description                                                                             |
 | ----------------------- | --------------------------- | -------------------- | --------------------------------------------------------------------------------------- |

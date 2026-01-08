@@ -35,50 +35,43 @@ export FDC3_ALLOWED_ORIGINS="*"
 
 ## Running the Agent
 
-The agent can be started in different modes using uv run:
+Start the server with `python -m uvicorn fdc3.desktop_agent.server:app` (the `uv` shim shown below is optional and simply invokes the same command).
 
-### Development Mode (with auto-reload)
+### Development mode (with auto-reload)
 
 ```bash
-uv run uvicorn fdc3.desktop_agent.server:app --host localhost --port 8000 --reload --log-level info
+python -m uvicorn fdc3.desktop_agent.server:app --host localhost --port 8000 --reload --log-level info
 ```
 
-### Production Mode (multi-worker)
+### Production mode (multi-worker)
 
 ```bash
-uv run uvicorn fdc3.desktop_agent.server:app --host 0.0.0.0 --port 8000 --workers 4 --log-level warning
+python -m uvicorn fdc3.desktop_agent.server:app --host 0.0.0.0 --port 8000 --workers 4 --log-level warning
 ```
 
-### Debug Mode (verbose logging)
+### Debug mode (verbose logging)
 
 ```bash
-uv run uvicorn fdc3.desktop_agent.server:app --host localhost --port 8000 --reload --log-level debug
+python -m uvicorn fdc3.desktop_agent.server:app --host localhost --port 8000 --reload --log-level debug
 ```
 
-### Running Tests
+For quick iterations you can rerun the development command above with `--reload` enabled to receive instant restarts.
+
+### Running tests
 
 ```bash
-uv run python -m pytest tests/ -v
-```
-
-### Quick Development Start
-
-```bash
-uv run uvicorn fdc3.desktop_agent.server:app --reload
+python -m pytest tests/ -v
 ```
 
 ## Distributed Adapters (optional)
 
-This project supports optional distributed log adapters to relay channel events across multiple agent
-workers. Adapters are optional and require extra dependencies which are not installed by default.
+If you need to relay channel events across multiple agent instances, set `FDC3_DISTRIBUTED_ADAPTER` to one of the supported backends:
 
-- Select adapter with environment variable `FDC3_DISTRIBUTED_ADAPTER`:
+- `etcd` — publishes events to an etcd cluster (requires either `etcd3` or `etcd3gw`).
+- `consul` — stores events in Consul KV (requires `aiohttp`).
+- any other value, or omitting the variable, keeps the agent in local-only mode.
 
-  - `etcd` — use an etcd cluster (requires `etcd3` or `etcd3gw`)
-  - `consul` — use Consul KV (requires `aiohttp`)
-  - any other value or unset — no distributed adapter (local-only behavior)
-
-- Install optional extras via pip from the project root:
+Install the corresponding optional extras from the repository root:
 
 ```bash
 pip install .[etcd]
@@ -86,13 +79,10 @@ pip install .[etcd]
 pip install .[consul]
 ```
 
-- Or install both helpers together:
+To install both adapters simultaneously:
 
 ```bash
 pip install .[distributed]
 ```
 
-- Notes:
-  - Adapters are best-effort: failures to publish/subscribe will not stop local event delivery.
-  - `etcd` and `consul` adapters are prototypes; for production use validate adapter stability and
-    run the corresponding backend (etcd or Consul) in your environment.
+Adapters operate on a best-effort basis, so publish/subscribe failures do not stop local delivery. The `etcd` and `consul` adapters are experimental prototypes; verify their stability and ensure the backend service is running before relying on them in production.

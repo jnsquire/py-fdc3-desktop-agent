@@ -12,13 +12,14 @@ ENV PYTHONUNBUFFERED=1 \
 
 # Copy all necessary files
 COPY pyproject.toml ./
+COPY hatch_build.py ./
 COPY fdc3 ./fdc3
 COPY README.md ./
 
 # Install dependencies and the package in one layer
 # Using pyproject.toml to avoid version drift
 RUN pip install --upgrade pip "hatchling" && \
-    pip install -e .
+    FDC3_SKIP_DOCS_BUILD=1 pip install -e .
 
 # Pre-configure the agent with sensible defaults
 # NOTE: FDC3_ALLOWED_ORIGINS=* allows all origins for convenience

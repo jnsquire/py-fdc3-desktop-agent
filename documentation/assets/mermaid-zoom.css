@@ -1,0 +1,60 @@
+/*
+  Mermaid readability improvements:
+  - Make diagrams scrollable when wide
+  - Click-to-open lightbox for full-size viewing
+*/
+
+.mermaid {
+  max-width: 100%;
+  overflow: auto;
+  cursor: zoom-in;
+}
+
+.mermaid svg {
+  height: auto;
+  max-width: 100%;
+}
+
+/* Lightbox overlay */
+.mermaid-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.65);
+  display: none;
+}
+
+.mermaid-lightbox.is-open {
+  display: block;
+}
+
+.mermaid-lightbox__dialog {
+  position: absolute;
+  inset: 4vh 3vw;
+  background: #fff;
+  border-radius: 4px;
+  overflow: auto;
+  padding: 16px;
+}
+
+.mermaid-lightbox__content {
+  /* Keep the diagram centered-ish while still allowing scroll */
+  min-width: max-content;
+}
+
+.mermaid-lightbox__content svg {
+  display: block;
+  height: auto;
+}
+
+.mermaid-lightbox__hint {
+  position: absolute;
+  top: 10px;
+  right: 14px;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+body.mermaid-lightbox-open {
+  overflow: hidden;
+}

@@ -831,7 +831,6 @@ class DACPHandler:
                 DACPError.RESOLVER_UNAVAILABLE,
                 request,
             )
-            await self._send_model(websocket, response)
 
     async def _handle_open(
         self,
