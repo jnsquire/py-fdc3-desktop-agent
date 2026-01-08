@@ -1,7 +1,32 @@
 """Async client for connecting external intent handlers to the desktop agent.
 
-This module implements the `FDC3Client` used to connect external handlers
-to the desktop agent.
+The primary entry point is :class:`~fdc3.client.client.FDC3Client`, which
+implements the WebSocket Connection Protocol (WCP) handshake and provides
+helpers for registering an external handler, subscribing to context/intent
+notifications, and sending results.
+
+Typical usage:
+
+    ```python
+    import asyncio
+
+    from fdc3.client.client import FDC3Client
+
+
+    async def main() -> None:
+        async with FDC3Client("ws://localhost:8000/ws", handler_id="my-handler") as c:
+            await c.register_handler("my-handler", intents=["ViewChart"])
+
+            async def on_intent(msg):
+                # msg is a validated Pydantic model for known message types.
+                await c.send_intent_result(msg.meta["requestUuid"], result={"type": "fdc3.nothing"})
+
+            c.forwarded_intent_handlers.add(on_intent)
+            await c.run_forever()
+
+
+    asyncio.run(main())
+    ```
 """
 
 from __future__ import annotations
@@ -40,8 +65,17 @@ logger = logging.getLogger(__name__)
 class FDC3Client:
     """Client for external intent handlers to connect to the FDC3 desktop agent.
 
-    This client handles the WCP handshake, handler registration, and intent
-    forwarding/result protocol.
+    The client is designed for *external intent handler* processes that need to:
+
+    - establish a WebSocket connection to an agent;
+    - complete the WCP handshake;
+    - register/unregister an external handler and supported intents;
+    - receive forwarded intents and broadcasts via :class:`~fdc3.client.events.EventEmitter`.
+
+    Notes:
+        - This is an asyncio-based client.
+        - Message handlers registered on the public emitters receive validated
+          Pydantic models for known message types.
     """
 
     def __init__(
@@ -201,7 +235,15 @@ class FDC3Client:
         await self.close()
 
     async def connect(self) -> None:
-        """Connect to the agent and complete WCP handshake."""
+        """Connect to the agent and complete the WCP handshake.
+
+        After this returns successfully, :meth:`wait_for_handshake` should be
+        satisfied and request/response helper methods (e.g.
+        :meth:`register_handler`) can be used.
+
+        Raises:
+            Exception: If the websocket connection or handshake fails.
+        """
         logger.info(f"Connecting to agent at {self.agent_url}")
         self._ws = await connect(self.agent_url)
         self._running = True
@@ -235,6 +277,7 @@ class FDC3Client:
         # The handshake_complete event will be set when WCP5 is received
 
     async def close(self) -> None:
+        """Close the websocket connection and stop background tasks."""
         self._running = False
         # Cancel and await background tasks so they can clean up properly.
         for task in (self._recv_task, self._ping_task):
@@ -461,7 +504,21 @@ class FDC3Client:
         metadata: Optional[Dict[str, Any]] = None,
         timeout: float = 5.0,
     ) -> str:
-        """Register an external handler and return agent-assigned handler_uuid."""
+        """Register an external handler and return the agent-assigned handler UUID.
+
+        Args:
+            handler_id: A stable identifier for this handler.
+            intents: Intent names the handler can service.
+            priority: Higher values may win in resolver selection (agent-dependent).
+            metadata: Arbitrary handler metadata for discovery/UI.
+            timeout: Seconds to wait for the correlated response.
+
+        Returns:
+            The agent-assigned handler UUID.
+
+        See also:
+            Use :attr:`forwarded_intent_handlers` to receive forwarded intents.
+        """
         await self._ensure_handshake()
 
         msg = RegisterExternalHandler(
@@ -481,13 +538,22 @@ class FDC3Client:
     async def add_context_listener(
         self, context_type: Optional[str] = None, timeout: float = 5.0
     ) -> str:
-        """Register a context listener with the agent and return the listener UUID."""
+        """Register a context listener and return the listener UUID.
+
+        Args:
+            context_type: If provided, only contexts of this FDC3 type are delivered.
+            timeout: Seconds to wait for the correlated response.
+
+        Returns:
+            Listener UUID that can be passed to :meth:`remove_context_listener`.
+        """
         msg = AddContextListener(payload={"contextType": context_type})
         return await self._send_and_wait(msg, timeout=timeout)
 
     async def remove_context_listener(
         self, listener_uuid: str, timeout: float = 5.0
     ) -> None:
+        """Unsubscribe a previously-registered context listener."""
         msg = ContextListenerUnsubscribe(
             payload={"listenerUuid": {"root": listener_uuid}}
         )
@@ -499,12 +565,14 @@ class FDC3Client:
             )
 
     async def add_intent_listener(self, intent: str, timeout: float = 5.0) -> str:
+        """Register an intent listener and return its listener UUID."""
         msg = AddIntentListener(payload={"intent": intent})
         return await self._send_and_wait(msg, timeout=timeout)
 
     async def remove_intent_listener(
         self, listener_uuid: str, timeout: float = 5.0
     ) -> None:
+        """Unsubscribe a previously-registered intent listener."""
         msg = IntentListenerUnsubscribe(
             payload={"listenerUuid": {"root": listener_uuid}}
         )
@@ -540,6 +608,17 @@ class FDC3Client:
         result: Optional[Dict[str, Any]] = None,
         error: Optional[str] = None,
     ) -> None:
+        """Send a result for a previously forwarded intent.
+
+        Args:
+            request_uuid: The request UUID from the forwarded intent message meta.
+            result: Optional result payload.
+            error: Optional error string.
+
+        Notes:
+            Many handler processes call this from a callback registered via
+            :attr:`forwarded_intent_handlers`.
+        """
         ws = self._ensure_connected()
         payload: Dict[str, Any] = {"request_uuid": request_uuid}
         if result is not None:
@@ -607,7 +686,10 @@ class FDC3Client:
         await ws.send(msg.model_dump_json())
 
     async def run_forever(self) -> None:
-        """Block until the connection closes, then clean up."""
+        """Block until the connection closes, then clean up.
+
+        This is a convenience for long-running external handler processes.
+        """
         try:
             if self._recv_task:
                 await self._recv_task

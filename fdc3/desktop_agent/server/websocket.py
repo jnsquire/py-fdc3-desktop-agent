@@ -1,4 +1,14 @@
-# WebSocket endpoint handler for the FDC3 Desktop Agent server
+"""WebSocket endpoint handler for the FDC3 Desktop Agent server.
+
+This module implements the ASGI websocket loop used by the FastAPI app.
+
+Incoming messages start as WCP during handshake. After the session is
+validated, the connection transitions to DACP for the remainder of the
+connection.
+
+This is primarily an internal module; most embedding use-cases should
+use :func:`fdc3.desktop_agent.server.create_app`.
+"""
 
 import asyncio
 import json
@@ -23,6 +33,13 @@ async def websocket_endpoint(
     agent_client_manager: AgentClientConnectionManager,
 ):
     """WebSocket endpoint for FDC3 WCP and DACP communication.
+
+    The handler:
+
+    - validates the websocket origin/headers via the access-control layer;
+    - performs the WCP handshake;
+    - transitions to DACP message handling;
+    - performs best-effort cleanup on disconnect (registry/listeners/channel).
 
     Args:
         websocket: The WebSocket connection
