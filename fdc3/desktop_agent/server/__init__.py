@@ -1,15 +1,19 @@
-# FDC3 Desktop Agent Server
-#
-# This package provides the FastAPI application, WebSocket handlers, and
-# GraphQL endpoint for the FDC3 Desktop Agent.
-#
-# The server is organized into the following submodules:
-# - app_factory: FastAPI application factory (create_app)
-# - connection_manager: Agent client WebSocket connection management
-# - constants: System app metadata and other constants
-# - lifespan: Application lifespan management
-# - routes: HTTP route handlers
-# - websocket: WebSocket endpoint handler
+"""FDC3 Desktop Agent server package.
+
+This package provides the FastAPI application plus the WebSocket entrypoint
+that implements WCP/DACP messaging.
+
+Most users will interact with:
+
+- :func:`create_app` to embed the agent in another Python process.
+- :data:`app` for the default application instance.
+
+Submodules:
+    - ``app_factory``: FastAPI application factory.
+    - ``websocket``: WebSocket endpoint handler.
+    - ``routes``: HTTP route handlers.
+    - ``lifespan``: Application lifecycle management (startup/shutdown).
+"""
 
 import asyncio  # Re-exported for test monkeypatching
 

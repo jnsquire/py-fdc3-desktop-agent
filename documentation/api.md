@@ -1,5 +1,17 @@
 # API Reference
 
-Use `mkdocstrings` to render docstrings for the core package. The handler below covers the desktop agent entry points and major modules.
+## Desktop Agent
 
-::: fdc3.desktop_agent
+::: fdc3.desktop_agent.server
+
+::: fdc3.desktop_agent.cli
+
+::: fdc3.desktop_agent.config
+
+## Client
+
+::: fdc3.client.client
+
+## Models
+
+::: fdc3.models.identifiers
