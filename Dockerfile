@@ -12,6 +12,7 @@ ENV PYTHONUNBUFFERED=1 \
 
 # Copy all necessary files
 COPY pyproject.toml ./
+COPY hatch_build.py ./
 COPY fdc3 ./fdc3
 COPY README.md ./
 
