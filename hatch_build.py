@@ -22,11 +22,17 @@ class MkDocsBuildHook(BuildHookInterface):
                 self.__command = [sys.executable, "-m", "mkdocs", "build"]
             else:
                 if not isinstance(raw_command, list):
-                    raise TypeError("Option `command` for build hook `mkdocs` must be an array of strings")
+                    raise TypeError(
+                        "Option `command` for build hook `mkdocs` must be an array of strings"
+                    )
                 if not raw_command:
-                    raise ValueError("Option `command` for build hook `mkdocs` must not be empty")
+                    raise ValueError(
+                        "Option `command` for build hook `mkdocs` must not be empty"
+                    )
                 if not all(isinstance(part, str) for part in raw_command):
-                    raise TypeError("All entries in `command` for build hook `mkdocs` must be strings")
+                    raise TypeError(
+                        "All entries in `command` for build hook `mkdocs` must be strings"
+                    )
                 self.__command = raw_command
         return self.__command
 
