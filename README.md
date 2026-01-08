@@ -37,17 +37,20 @@ Documentation overview:
 - Published site: https://jnsquire.github.io/py-fdc3-desktop-agent/
 - API Reference (generated): https://jnsquire.github.io/py-fdc3-desktop-agent/api/
 
-- Configuration & running: [documentation/configuration.md](documentation/configuration.md)
-- Desktop Agent Bridging (experimental): [documentation/bridging.md](documentation/bridging.md)
-- Embedding API: [documentation/embedding-api.md](documentation/embedding-api.md)
-- Docker deployment: [documentation/docker.md](documentation/docker.md)
-- Plugin API: [documentation/plugins.md](documentation/plugins.md)
-- External intent handlers: [documentation/external-intent-handlers.md](documentation/external-intent-handlers.md)
+- Published site (link): <https://jnsquire.github.io/py-fdc3-desktop-agent/>
+- API Reference (generated link): <https://jnsquire.github.io/py-fdc3-desktop-agent/api/>
+
+- Configuration & running: [documentation/configuration.md](documentation/configuration.md) (published: https://jnsquire.github.io/py-fdc3-desktop-agent/configuration/)
+- Desktop Agent Bridging (experimental): [documentation/bridging.md](documentation/bridging.md) (published: https://jnsquire.github.io/py-fdc3-desktop-agent/bridging/)
+- Embedding API: [documentation/embedding-api.md](documentation/embedding-api.md) (published: https://jnsquire.github.io/py-fdc3-desktop-agent/embedding-api/)
+- Docker deployment: [documentation/docker.md](documentation/docker.md) (published: https://jnsquire.github.io/py-fdc3-desktop-agent/docker/)
+- Plugin API: [documentation/plugins.md](documentation/plugins.md) (published: https://jnsquire.github.io/py-fdc3-desktop-agent/plugins/)
+- External intent handlers: [documentation/external-intent-handlers.md](documentation/external-intent-handlers.md) (published: https://jnsquire.github.io/py-fdc3-desktop-agent/external-intent-handlers/)
 
 Additional references:
 
-- Implementation notes: [IMPLEMENTATION.md](IMPLEMENTATION.md)
-- System flowchart: [documentation/system_flowchart.md](documentation/system_flowchart.md)
-- FDC3 spec gap checklist: [documentation/fdc3-spec-gap-checklist.md](documentation/fdc3-spec-gap-checklist.md)
+- Implementation notes: [IMPLEMENTATION.md](IMPLEMENTATION.md) (published: https://jnsquire.github.io/py-fdc3-desktop-agent/IMPLEMENTATION/)
+- System flowchart: [documentation/system_flowchart.md](documentation/system_flowchart.md) (published: https://jnsquire.github.io/py-fdc3-desktop-agent/system_flowchart/)
+- FDC3 spec gap checklist: [documentation/fdc3-spec-gap-checklist.md](documentation/fdc3-spec-gap-checklist.md) (published: https://jnsquire.github.io/py-fdc3-desktop-agent/fdc3-spec-gap-checklist/)
 
-The documentation site is powered by MkDocs. Rebuild the HTML output with `mkdocs build` and preview changes with `mkdocs serve`. `hatch build` now runs `mkdocs build` first so release artifacts always include a fresh site.
+The documentation site is powered by MkDocs. Use `mkdocs build` to rebuild the HTML output and `mkdocs serve` to preview changes locally. The `hatch build` command runs `mkdocs build` first so release artifacts always include a fresh site.
