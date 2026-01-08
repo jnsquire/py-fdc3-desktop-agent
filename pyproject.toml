@@ -1,6 +1,10 @@
 [build-system]
 requires = [
   "hatchling",
+
+  # The custom Hatch build hook (hatch_build.py) runs `mkdocs build` at build
+  # time when documentation sources are present, so these must be available
+  # under PEP 517 build isolation.
   "mkdocs>=1.5",
   "mkdocstrings[python]>=0.23",
   "pymdown-extensions>=10.0",
@@ -30,7 +34,6 @@ dependencies = [
   "strawberry-graphql>=0.250",
   "jinja2>=3.0",
   "aiosqlite>=0.20",
-  "jinja2>=3.0",
 ]
 
 # Optional dependencies for distributed adapters

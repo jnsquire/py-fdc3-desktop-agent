@@ -23,12 +23,13 @@ Desktop Agent Bridging (experimental) is configurable via environment variables:
 - Once connected, the agent can:
     - forward `broadcast` messages to the bridge (best-effort; still delivered locally);
     - forward `raiseIntent` to a remote desktop agent when the request target includes `desktopAgent`.
+    - forward `getAppMetadata` to a remote desktop agent when the request target includes `desktopAgent`.
 - The agent can also accept requests forwarded from the bridge and service them locally.
 
 ## Reliability notes
 
 - Bridging is best-effort: the agent still starts even if the bridge is unavailable, and it continues to retry discovery until a connection is established.
-- `channelsState` is currently reported as an empty map during the handshake because channel-state synchronization is not implemented yet.
+- `channelsState` is currently reported as an empty map by default during the handshake because channel-state synchronization is not implemented yet.
 
 ## Enabling bridging
 
