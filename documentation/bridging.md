@@ -1,7 +1,7 @@
 # Desktop Agent Bridging (experimental)
 
-This agent supports the experimental FDC3 Desktop Agent Bridging protocols (BCP/BMP) to enable
-cross-desktop-agent discovery and request forwarding via a Desktop Agent Bridge.
+Use the bridging feature when your deployment requires discovery of, and request forwarding to, remote desktop agents through a bridge process.
+The agent supports the experimental FDC3 Desktop Agent Bridging protocols (BCP/BMP) to enable cross-desktop-agent discovery and request forwarding via a Desktop Agent Bridge.
 
 ## Configuration
 
@@ -25,10 +25,10 @@ Desktop Agent Bridging (experimental) is configurable via environment variables:
     - forward `raiseIntent` to a remote desktop agent when the request target includes `desktopAgent`.
 - The agent can also accept requests forwarded from the bridge and service them locally.
 
-Notes/limitations:
+## Reliability notes
 
-- Bridging is best-effort: the agent still starts if the bridge is down; it will retry until it connects.
-- `channelsState` is currently reported as an empty map during handshake (no channel state sync yet).
+- Bridging is best-effort: the agent still starts even if the bridge is unavailable, and it continues to retry discovery until a connection is established.
+- `channelsState` is currently reported as an empty map during the handshake because channel-state synchronization is not implemented yet.
 
 ## Enabling bridging
 

@@ -1,6 +1,7 @@
 # FDC3 Desktop Agent (Python)
 
-A Python implementation of an FDC3 Desktop Agent with WebSocket support for browser app connections.
+The Python FDC3 Desktop Agent implements the FDC3 Desktop Agent API and exposes managed WebSocket, GraphQL,
+and admin endpoints for browser-based applications.
 
 ## Quick Start
 
@@ -31,7 +32,7 @@ python -m pytest
 
 ## Documentation
 
-The README is intentionally kept short; the more detailed guides live in the repository documentation:
+Documentation overview:
 
 - Configuration & running: [documentation/configuration.md](documentation/configuration.md)
 - Desktop Agent Bridging (experimental): [documentation/bridging.md](documentation/bridging.md)
