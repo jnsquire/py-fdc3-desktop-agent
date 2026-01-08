@@ -5,7 +5,7 @@ This checklist captures remaining or partial areas vs the FDC3 Desktop Agent API
 ## DesktopAgent info/metadata
 
 - [x] Add a DACP-level `getInfo` (or equivalent) request/response for local apps.
-- [ ] Align `implementationMetadata` fields to the FDC3 `ImplementationMetadata` model (especially `optionalFeatures` coverage/semantics).
+- [ ] Align `implementationMetadata` fields to the FDC3 `ImplementationMetadata` model across surfaces (DACP, WCP, bridging handshake), especially `optionalFeatures` coverage/semantics.
 
 ## App metadata APIs
 
@@ -18,8 +18,8 @@ This checklist captures remaining or partial areas vs the FDC3 Desktop Agent API
 
 ## Events
 
-- [ ] Implement DesktopAgent event listener APIs (add/remove) and emit `USER_CHANNEL_CHANGED` events.
-- [ ] Decide mapping between internal `ChannelManager` events and FDC3 event payloads.
+- [x] Implement DesktopAgent event listener APIs (add/remove) and emit `USER_CHANNEL_CHANGED` events.
+- [x] Map internal channel membership changes to the FDC3 `USER_CHANNEL_CHANGED` event payload.
 
 ## Intents
 
@@ -28,6 +28,7 @@ This checklist captures remaining or partial areas vs the FDC3 Desktop Agent API
 
 ## Desktop Agent Bridging
 
-- [ ] Populate `channelsState` during bridge handshake (currently empty; no channel state sync).
+- [ ] Populate `channelsState` during bridge handshake (currently empty by default; no channel state sync).
 - [ ] Implement cross-agent channel behaviors (and private channel bridging flows, if required).
-- [ ] Add bridged equivalents for any newly added DACP APIs (e.g., `getAppMetadata`, events) as needed.
+- [x] Bridge `getAppMetadataRequest`/`getAppMetadataResponse`.
+- [ ] Bridge event listener APIs / `fdc3Event` delivery.
