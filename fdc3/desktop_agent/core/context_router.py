@@ -27,7 +27,15 @@ class ContextRouter:
             raise ValueError("Context must have a 'type' field")
 
         # Find context listeners
-        listeners = self.listener_store.get_context_listeners_for_type(context_type)
+        current_channel = self.channel_manager.get_current_channel(source_instance_uuid)
+        channel_id: str | None = None
+        if current_channel:
+            channel_id = current_channel.id
+            self.channel_manager.set_channel_context(channel_id, context)
+
+        listeners = self.listener_store.get_context_listeners_for_type(
+            context_type, channel_id=channel_id, include_global=True
+        )
         for listener in listeners:
             if listener.instance_uuid != source_instance_uuid:  # Avoid echo
                 targets.add(listener.instance_uuid)

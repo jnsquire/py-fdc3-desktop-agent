@@ -1,4 +1,6 @@
-from typing import Dict, List, Optional, Callable, Any
+import copy
+import uuid
+from typing import Dict, List, Optional, Callable, Any, Set
 import inspect
 import json
 import asyncio
@@ -35,7 +37,11 @@ class ChannelManager:
         self.event_subscriptions: Dict[
             str, Dict[str, Any]
         ] = {}  # subscription_id -> subscription info
+        self.private_channel_owners: Dict[str, str] = {}
+        self.private_channel_participants: Dict[str, Set[str]] = {}
+        self.private_channel_invites: Dict[str, Dict[str, Optional[str]]] = {}
         self.next_subscription_id = 1
+        self.channel_contexts: Dict[str, Dict[str, dict]] = {}
         # Optional distributed adapter to relay events across workers
         self.distributed_adapter: Optional[DistributedLogAdapter] = None
 
@@ -50,6 +56,70 @@ class ChannelManager:
         self._emit_event("created", channel_id)
         return channel
 
+    def create_private_channel(
+        self,
+        owner_instance_uuid: str,
+        channel_id: Optional[str] = None,
+        display_metadata: Optional[DisplayMetadata] = None,
+    ) -> ChannelInstance:
+        assigned_id = channel_id or f"private:{uuid.uuid4()}"
+        if assigned_id in self.channels:
+            raise ValueError("channel already exists")
+
+        channel = self.create_channel(assigned_id, "private", display_metadata)
+        channel.members.append(owner_instance_uuid)
+        self.private_channel_owners[assigned_id] = owner_instance_uuid
+        self.private_channel_participants[assigned_id] = {owner_instance_uuid}
+        self.private_channel_invites.pop(assigned_id, None)
+        return channel
+
+    def create_private_channel_invite(
+        self,
+        channel_id: str,
+        instance_uuid: Optional[str] = None,
+    ) -> str:
+        channel = self.get_channel(channel_id)
+        if channel is None or getattr(channel, "type", None) != "private":
+            raise ValueError("private channel not found")
+
+        token = uuid.uuid4().hex
+        invites = self.private_channel_invites.setdefault(channel_id, {})
+        invites[token] = instance_uuid
+        return token
+
+    def consume_private_channel_invite(
+        self, channel_id: str, token: str, instance_uuid: str
+    ) -> bool:
+        invites = self.private_channel_invites.get(channel_id)
+        if not invites or token not in invites:
+            return False
+
+        allowed_instance = invites[token]
+        if allowed_instance is not None and allowed_instance != instance_uuid:
+            return False
+
+        del invites[token]
+        if not invites:
+            self.private_channel_invites.pop(channel_id, None)
+        return True
+
+    def get_private_channel_state(self, channel_id: str) -> Optional[Dict[str, Any]]:
+        channel = self.get_channel(channel_id)
+        if channel is None or getattr(channel, "type", None) != "private":
+            return None
+
+        return {
+            "id": channel.id,
+            "owner": self.private_channel_owners.get(channel_id),
+            "members": channel.members.copy(),
+            "invites": [
+                {"token": token, "instanceId": inst}
+                for token, inst in self.private_channel_invites.get(
+                    channel_id, {}
+                ).items()
+            ],
+        }
+
     def get_channel(self, channel_id: str) -> Optional[ChannelInstance]:
         return self.channels.get(channel_id)
 
@@ -59,19 +129,31 @@ class ChannelManager:
             if instance_uuid in self.instance_channels:
                 old_channel_id = self.instance_channels[instance_uuid]
                 if old_channel_id in self.channels:
-                    self.channels[old_channel_id].members.remove(instance_uuid)
+                    members = self.channels[old_channel_id].members
+                    if instance_uuid in members:
+                        members.remove(instance_uuid)
                     self._emit_event("left", old_channel_id, instance_uuid)
 
             # Join new channel
             self.channels[channel_id].members.append(instance_uuid)
             self.instance_channels[instance_uuid] = channel_id
+            if getattr(self.channels[channel_id], "type", None) == "private":
+                self.private_channel_participants.setdefault(channel_id, set()).add(
+                    instance_uuid
+                )
             self._emit_event("joined", channel_id, instance_uuid)
 
     def leave_current_channel(self, instance_uuid: str):
         if instance_uuid in self.instance_channels:
             channel_id = self.instance_channels[instance_uuid]
             if channel_id in self.channels:
-                self.channels[channel_id].members.remove(instance_uuid)
+                members = self.channels[channel_id].members
+                if instance_uuid in members:
+                    members.remove(instance_uuid)
+                if getattr(self.channels[channel_id], "type", None) == "private":
+                    participants = self.private_channel_participants.get(channel_id)
+                    if participants:
+                        participants.discard(instance_uuid)
                 self._emit_event("left", channel_id, instance_uuid)
             del self.instance_channels[instance_uuid]
 
@@ -89,12 +171,59 @@ class ChannelManager:
     def list_channels(self) -> List[ChannelInstance]:
         return list(self.channels.values())
 
+    def get_private_channel_owner(self, channel_id: str) -> Optional[str]:
+        return self.private_channel_owners.get(channel_id)
+
+    def destroy_private_channel(self, channel_id: str) -> None:
+        channel = self.channels.pop(channel_id, None)
+        if channel is None:
+            return
+
+        self.private_channel_owners.pop(channel_id, None)
+        self.private_channel_participants.pop(channel_id, None)
+        self.private_channel_invites.pop(channel_id, None)
+        self.channel_contexts.pop(channel_id, None)
+
+        for instance_uuid in list(channel.members):
+            if self.instance_channels.get(instance_uuid) == channel_id:
+                del self.instance_channels[instance_uuid]
+
+        self._emit_event("destroyed", channel_id)
+
     def broadcast_to_channel(
         self, channel_id: str, context: Dict[str, Any], source_instance_uuid: str
     ):
         """Emit a broadcast event for a channel."""
         if channel_id in self.channels:
+            self.set_channel_context(channel_id, context)
             self._emit_event("broadcast", channel_id, source_instance_uuid, context)
+
+    def set_channel_context(self, channel_id: str, context: Dict[str, Any]) -> None:
+        if not context or not isinstance(context, dict):
+            return
+
+        context_type = context.get("type")
+        if not context_type:
+            return
+
+        stored = self.channel_contexts.setdefault(channel_id, {})
+        sanitized = copy.deepcopy(context)
+        stored[context_type] = sanitized
+        stored["__last__"] = sanitized
+
+    def get_channel_context(
+        self, channel_id: str, context_type: Optional[str] = None
+    ) -> Optional[dict]:
+        contexts = self.channel_contexts.get(channel_id)
+        if not contexts:
+            return None
+
+        if context_type is not None:
+            return contexts.get(context_type)
+        return contexts.get("__last__")
+
+    def clear_channel_context(self, channel_id: str) -> None:
+        self.channel_contexts.pop(channel_id, None)
 
     def get_channel_info(self, channel_id: str) -> Optional[Dict[str, Any]]:
         """Get channel information for GraphQL queries."""

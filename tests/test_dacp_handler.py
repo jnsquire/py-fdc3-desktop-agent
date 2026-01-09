@@ -164,6 +164,27 @@ class TestDACPHandlerParsingAndDispatch:
                     handler, "_handle_leave_current_channel", new_callable=AsyncMock
                 )
             )
+            h_jpc = stack.enter_context(
+                patch.object(
+                    handler,
+                    "_handle_join_private_channel",
+                    new_callable=AsyncMock,
+                )
+            )
+            h_lpc = stack.enter_context(
+                patch.object(
+                    handler,
+                    "_handle_leave_private_channel",
+                    new_callable=AsyncMock,
+                )
+            )
+            h_cpi = stack.enter_context(
+                patch.object(
+                    handler,
+                    "_handle_create_private_channel_invitation",
+                    new_callable=AsyncMock,
+                )
+            )
             h_fi = stack.enter_context(
                 patch.object(handler, "_handle_find_intent", new_callable=AsyncMock)
             )
@@ -389,6 +410,39 @@ class TestDACPHandlerParsingAndDispatch:
                 sessions,
                 ws,
             )
+            # joinPrivateChannel
+            await handler.handle_message(
+                {
+                    "type": "joinPrivateChannel",
+                    "payload": {"channelId": "private:example"},
+                    "meta": {"requestUuid": "r4k"},
+                },
+                session_id,
+                sessions,
+                ws,
+            )
+            # leavePrivateChannel
+            await handler.handle_message(
+                {
+                    "type": "leavePrivateChannel",
+                    "payload": {"channelId": "private:example"},
+                    "meta": {"requestUuid": "r4l"},
+                },
+                session_id,
+                sessions,
+                ws,
+            )
+            # createPrivateChannelInvitation
+            await handler.handle_message(
+                {
+                    "type": "createPrivateChannelInvitation",
+                    "payload": {"channelId": "private:example"},
+                    "meta": {"requestUuid": "r4m"},
+                },
+                session_id,
+                sessions,
+                ws,
+            )
             # intentListenerUnsubscribe
             await handler.handle_message(
                 {
@@ -491,6 +545,9 @@ class TestDACPHandlerParsingAndDispatch:
         assert h_gcc.await_count == 1
         assert h_juc.await_count == 1
         assert h_lcc.await_count == 1
+        assert h_jpc.await_count == 1
+        assert h_lpc.await_count == 1
+        assert h_cpi.await_count == 1
         assert h_ilu.await_count == 1
         assert h_ael.await_count == 1
         assert h_rel.await_count == 1
@@ -854,6 +911,482 @@ class TestDACPHandlerEventListeners:
         )
 
         connection_manager.send_to_instance.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_private_channel_event_listener_add_context_listener(self):
+        handler, _, _, connection_manager = _handler()
+        owner_ws = _websocket()
+        participant_ws = _websocket()
+
+        from fdc3.desktop_agent.core import core_services
+
+        cmgr = core_services.channel_manager
+        cmgr.channels.clear()
+        cmgr.instance_channels.clear()
+        cmgr.private_channel_owners.clear()
+        cmgr.private_channel_participants.clear()
+        ls = core_services.listener_store
+        ls.event_listeners.clear()
+        ls.listeners_by_instance.clear()
+
+        channel = cmgr.create_private_channel("owner-1")
+        cmgr.join_channel("owner-1", channel.id)
+        cmgr.join_channel("participant-1", channel.id)
+
+        await handler.handle_message(
+            {
+                "type": "privateChannelAddEventListener",
+                "payload": {
+                    "channelId": channel.id,
+                    "eventType": "onAddContextListener",
+                },
+                "meta": {"requestUuid": "r-pce"},
+            },
+            session_id="s-owner",
+            wcp_sessions={"s-owner": {"identity": {"instanceUuid": "owner-1"}}},
+            websocket=owner_ws,
+        )
+
+        connection_manager.send_to_instance.reset_mock()
+
+        await handler.handle_message(
+            {
+                "type": "addContextListener",
+                "payload": {"contextType": "fdc3.instrument"},
+                "meta": {"requestUuid": "r-add"},
+            },
+            session_id="s-part",
+            wcp_sessions={"s-part": {"identity": {"instanceUuid": "participant-1"}}},
+            websocket=participant_ws,
+        )
+
+        assert connection_manager.send_to_instance.await_count == 1
+        target_uuid, raw = connection_manager.send_to_instance.call_args.args
+        msg = json.loads(raw)
+        assert target_uuid == "owner-1"
+        assert msg["type"] == "privateChannelEvent"
+        assert msg["payload"]["eventType"] == "onAddContextListener"
+        assert msg["payload"]["channelId"] == channel.id
+        assert msg["payload"]["details"]["instanceUuid"] == "participant-1"
+        assert msg["payload"]["details"]["contextType"] == "fdc3.instrument"
+
+    @pytest.mark.asyncio
+    async def test_private_channel_event_listener_disconnect(self):
+        handler, _, _, connection_manager = _handler()
+        ws = _websocket()
+
+        from fdc3.desktop_agent.core import core_services
+
+        cmgr = core_services.channel_manager
+        cmgr.channels.clear()
+        cmgr.instance_channels.clear()
+        cmgr.private_channel_owners.clear()
+        cmgr.private_channel_participants.clear()
+        ls = core_services.listener_store
+        ls.event_listeners.clear()
+        ls.listeners_by_instance.clear()
+
+        channel = cmgr.create_private_channel("owner-2")
+        cmgr.join_channel("owner-2", channel.id)
+
+        await handler.handle_message(
+            {
+                "type": "privateChannelAddEventListener",
+                "payload": {
+                    "channelId": channel.id,
+                    "eventType": "onDisconnect",
+                },
+                "meta": {"requestUuid": "r-pce2"},
+            },
+            session_id="s-owner",
+            wcp_sessions={"s-owner": {"identity": {"instanceUuid": "owner-2"}}},
+            websocket=ws,
+        )
+
+        connection_manager.send_to_instance.reset_mock()
+
+        await handler.handle_message(
+            {
+                "type": "privateChannelDisconnect",
+                "payload": {"channelId": channel.id},
+                "meta": {"requestUuid": "r-disconnect"},
+            },
+            session_id="s-owner",
+            wcp_sessions={"s-owner": {"identity": {"instanceUuid": "owner-2"}}},
+            websocket=ws,
+        )
+
+        assert connection_manager.send_to_instance.await_count == 1
+        target_uuid, raw = connection_manager.send_to_instance.call_args.args
+        msg = json.loads(raw)
+        assert target_uuid == "owner-2"
+        assert msg["type"] == "privateChannelEvent"
+        assert msg["payload"]["eventType"] == "onDisconnect"
+        assert msg["payload"]["details"]["initiatorInstanceUuid"] == "owner-2"
+
+    @pytest.mark.asyncio
+    async def test_add_context_listener_receives_cached_context(self):
+        handler, _, _, connection_manager = _handler()
+        ws = _websocket()
+        session_id, sessions = _wcp_sessions("member-1")
+
+        from fdc3.desktop_agent.core import core_services
+
+        cmgr = core_services.channel_manager
+        cmgr.channels.clear()
+        cmgr.instance_channels.clear()
+        cmgr.private_channel_owners.clear()
+        cmgr.private_channel_participants.clear()
+        cmgr.channel_contexts.clear()
+        ls = core_services.listener_store
+        ls.context_listeners.clear()
+        ls.intent_listeners.clear()
+        ls.event_listeners.clear()
+        ls.listeners_by_instance.clear()
+
+        channel = cmgr.create_channel("user:test", "user")
+        cmgr.join_channel("member-1", channel.id)
+        cmgr.set_channel_context(
+            channel.id,
+            {"type": "fdc3.instrument", "id": {"ticker": "AAPL"}},
+        )
+
+        from fdc3.models.dacp.dacp import AddContextListenerRequest
+
+        req = AddContextListenerRequest.model_validate(
+            {
+                "type": "addContextListener",
+                "payload": {"contextType": "fdc3.instrument"},
+                "meta": {"requestUuid": "req-ctx"},
+            }
+        )
+
+        await handler._handle_add_context_listener(
+            req,
+            session_id=session_id,
+            wcp_sessions=sessions,
+            websocket=ws,
+        )
+
+        assert connection_manager.send_to_instance.await_count == 1
+        target_uuid, raw = connection_manager.send_to_instance.call_args.args
+        assert target_uuid == "member-1"
+        msg = json.loads(raw)
+        assert msg["type"] == "broadcastEvent"
+        assert msg["payload"]["context"]["id"]["ticker"] == "AAPL"
+
+    @pytest.mark.asyncio
+    async def test_get_current_context_returns_cached_context(self):
+        handler, _, _, _ = _handler()
+        ws = _websocket()
+        session_id, sessions = _wcp_sessions("member-2")
+
+        from fdc3.desktop_agent.core import core_services
+
+        cmgr = core_services.channel_manager
+        cmgr.channels.clear()
+        cmgr.instance_channels.clear()
+        cmgr.private_channel_owners.clear()
+        cmgr.private_channel_participants.clear()
+        cmgr.channel_contexts.clear()
+        ls = core_services.listener_store
+        ls.context_listeners.clear()
+        ls.intent_listeners.clear()
+        ls.event_listeners.clear()
+        ls.listeners_by_instance.clear()
+
+        channel = cmgr.create_channel("user:blue", "user")
+        cmgr.join_channel("member-2", channel.id)
+        cmgr.set_channel_context(
+            channel.id,
+            {"type": "fdc3.contact", "id": {"email": "foo@example.com"}},
+        )
+
+        from fdc3.models.dacp.dacp import GetCurrentContextRequest
+
+        req = GetCurrentContextRequest.model_validate(
+            {
+                "type": "getCurrentContext",
+                "payload": {},
+                "meta": {"requestUuid": "req-current"},
+            }
+        )
+
+        await handler._handle_get_current_context(
+            req,
+            session_id=session_id,
+            wcp_sessions=sessions,
+            websocket=ws,
+        )
+
+        payload = json.loads(ws.send_text.call_args.args[0])
+        assert payload["type"] == "getCurrentContextResponse"
+        assert payload["payload"]["context"]["id"]["email"] == "foo@example.com"
+
+
+class TestDACPHandlerPrivateChannelMembership:
+    @pytest.mark.asyncio
+    async def test_join_private_channel_adds_member(self):
+        handler, _, _, _ = _handler()
+        ws = _websocket()
+        session_id, sessions = _wcp_sessions("participant-1")
+
+        from fdc3.desktop_agent.core import core_services
+
+        cmgr = core_services.channel_manager
+        cmgr.channels.clear()
+        cmgr.instance_channels.clear()
+        cmgr.private_channel_owners.clear()
+        cmgr.private_channel_participants.clear()
+
+        channel = cmgr.create_private_channel("owner-1")
+        cmgr.join_channel("owner-1", channel.id)
+        token = cmgr.create_private_channel_invite(channel.id)
+
+        await handler.handle_message(
+            {
+                "type": "joinPrivateChannel",
+                "payload": {"channelId": channel.id, "invitationToken": token},
+                "meta": {"requestUuid": "r-join"},
+            },
+            session_id=session_id,
+            wcp_sessions=sessions,
+            websocket=ws,
+        )
+
+        payload = json.loads(ws.send_text.call_args.args[0])
+        assert payload["type"] == "joinPrivateChannelResponse"
+        assert payload["payload"]["channel"]["id"] == channel.id
+        assert cmgr.instance_channels.get("participant-1") == channel.id
+        assert "participant-1" in cmgr.channels[channel.id].members
+        assert "participant-1" in cmgr.private_channel_participants[channel.id]
+
+    @pytest.mark.asyncio
+    async def test_leave_private_channel_removes_member(self):
+        handler, _, _, _ = _handler()
+        ws = _websocket()
+        session_id, sessions = _wcp_sessions("participant-2")
+
+        from fdc3.desktop_agent.core import core_services
+
+        cmgr = core_services.channel_manager
+        cmgr.channels.clear()
+        cmgr.instance_channels.clear()
+        cmgr.private_channel_owners.clear()
+        cmgr.private_channel_participants.clear()
+
+        channel = cmgr.create_private_channel("owner-2")
+        cmgr.join_channel("owner-2", channel.id)
+        cmgr.join_channel("participant-2", channel.id)
+
+        ws.send_text.reset_mock()
+        await handler.handle_message(
+            {
+                "type": "leavePrivateChannel",
+                "payload": {"channelId": channel.id},
+                "meta": {"requestUuid": "r-leave"},
+            },
+            session_id=session_id,
+            wcp_sessions=sessions,
+            websocket=ws,
+        )
+
+        payload = json.loads(ws.send_text.call_args.args[0])
+        assert payload["type"] == "leavePrivateChannelResponse"
+        assert cmgr.instance_channels.get("participant-2") is None
+        assert "participant-2" not in cmgr.channels[channel.id].members
+        assert "participant-2" not in cmgr.private_channel_participants[channel.id]
+
+
+class TestDACPHandlerPrivateChannelInvites:
+    @pytest.mark.asyncio
+    async def test_owner_can_issue_invitation(self):
+        handler, _, _, _ = _handler()
+        owner_ws = _websocket()
+        session_id, sessions = _wcp_sessions("owner-invite")
+
+        from fdc3.desktop_agent.core import core_services
+        from fdc3.models.dacp.dacp import CreatePrivateChannelInvitationRequest
+
+        cmgr = core_services.channel_manager
+        cmgr.channels.clear()
+        cmgr.instance_channels.clear()
+        cmgr.private_channel_owners.clear()
+        cmgr.private_channel_participants.clear()
+        cmgr.private_channel_invites.clear()
+
+        channel = cmgr.create_private_channel("owner-invite")
+        cmgr.join_channel("owner-invite", channel.id)
+
+        req = CreatePrivateChannelInvitationRequest.model_validate(
+            {
+                "type": "createPrivateChannelInvitation",
+                "payload": {
+                    "channelId": channel.id,
+                    "instanceId": "participant-invite",
+                },
+                "meta": {"requestUuid": "r-private-invite"},
+            }
+        )
+
+        await handler._handle_create_private_channel_invitation(
+            req,
+            session_id=session_id,
+            wcp_sessions=sessions,
+            websocket=owner_ws,
+        )
+
+        assert owner_ws.send_text.await_count == 1
+        resp = json.loads(owner_ws.send_text.call_args.args[0])
+        token = resp["payload"]["invitationToken"]
+        assert token in cmgr.private_channel_invites[channel.id]
+
+    @pytest.mark.asyncio
+    async def test_non_owner_cannot_issue_invitation(self):
+        handler, _, _, _ = _handler()
+        participant_ws = _websocket()
+        owner_session_id, owner_sessions = _wcp_sessions("owner-invite")
+        participant_session_id, participant_sessions = _wcp_sessions(
+            "participant-invite"
+        )
+
+        from fdc3.desktop_agent.core import core_services
+        from fdc3.models.dacp.dacp import CreatePrivateChannelInvitationRequest
+
+        cmgr = core_services.channel_manager
+        cmgr.channels.clear()
+        cmgr.instance_channels.clear()
+        cmgr.private_channel_owners.clear()
+        cmgr.private_channel_participants.clear()
+        cmgr.private_channel_invites.clear()
+
+        channel = cmgr.create_private_channel("owner-invite")
+        cmgr.join_channel("owner-invite", channel.id)
+
+        req = CreatePrivateChannelInvitationRequest.model_validate(
+            {
+                "type": "createPrivateChannelInvitation",
+                "payload": {"channelId": channel.id},
+                "meta": {"requestUuid": "r-private-invite"},
+            }
+        )
+
+        await handler._handle_create_private_channel_invitation(
+            req,
+            session_id=participant_session_id,
+            wcp_sessions=participant_sessions,
+            websocket=participant_ws,
+        )
+
+        assert participant_ws.send_text.await_count == 1
+        resp = json.loads(participant_ws.send_text.call_args.args[0])
+        assert resp["type"] == "createPrivateChannelInvitationResponse"
+        assert resp["payload"]["error"] == "AccessDenied"
+
+    @pytest.mark.asyncio
+    async def test_join_private_channel_requires_invitation(self):
+        handler, _, _, _ = _handler()
+        ws = _websocket()
+        session_id, sessions = _wcp_sessions("participant-join")
+
+        from fdc3.desktop_agent.core import core_services
+
+        cmgr = core_services.channel_manager
+        cmgr.channels.clear()
+        cmgr.instance_channels.clear()
+        cmgr.private_channel_owners.clear()
+        cmgr.private_channel_participants.clear()
+        cmgr.private_channel_invites.clear()
+
+        channel = cmgr.create_private_channel("owner-invite")
+        cmgr.join_channel("owner-invite", channel.id)
+
+        await handler.handle_message(
+            {
+                "type": "joinPrivateChannel",
+                "payload": {"channelId": channel.id},
+                "meta": {"requestUuid": "r-join"},
+            },
+            session_id=session_id,
+            wcp_sessions=sessions,
+            websocket=ws,
+        )
+
+        payload = json.loads(ws.send_text.call_args.args[0])
+        assert payload["payload"]["error"] == "AccessDenied"
+
+    @pytest.mark.asyncio
+    async def test_join_private_channel_requires_matching_instance(self):
+        handler, _, _, _ = _handler()
+        ws = _websocket()
+        session_id, sessions = _wcp_sessions("participant-join")
+
+        from fdc3.desktop_agent.core import core_services
+
+        cmgr = core_services.channel_manager
+        cmgr.channels.clear()
+        cmgr.instance_channels.clear()
+        cmgr.private_channel_owners.clear()
+        cmgr.private_channel_participants.clear()
+        cmgr.private_channel_invites.clear()
+
+        channel = cmgr.create_private_channel("owner-invite")
+        cmgr.join_channel("owner-invite", channel.id)
+
+        token = cmgr.create_private_channel_invite(
+            channel.id, instance_uuid="other-instance"
+        )
+
+        await handler.handle_message(
+            {
+                "type": "joinPrivateChannel",
+                "payload": {"channelId": channel.id, "invitationToken": token},
+                "meta": {"requestUuid": "r-join"},
+            },
+            session_id=session_id,
+            wcp_sessions=sessions,
+            websocket=ws,
+        )
+
+        payload = json.loads(ws.send_text.call_args.args[0])
+        assert payload["payload"]["error"] == "AccessDenied"
+
+    @pytest.mark.asyncio
+    async def test_join_private_channel_with_valid_invite(self):
+        handler, _, _, _ = _handler()
+        ws = _websocket()
+        session_id, sessions = _wcp_sessions("participant-invite")
+
+        from fdc3.desktop_agent.core import core_services
+
+        cmgr = core_services.channel_manager
+        cmgr.channels.clear()
+        cmgr.instance_channels.clear()
+        cmgr.private_channel_owners.clear()
+        cmgr.private_channel_participants.clear()
+        cmgr.private_channel_invites.clear()
+
+        channel = cmgr.create_private_channel("owner-invite")
+        cmgr.join_channel("owner-invite", channel.id)
+
+        token = cmgr.create_private_channel_invite(channel.id)
+
+        await handler.handle_message(
+            {
+                "type": "joinPrivateChannel",
+                "payload": {"channelId": channel.id, "invitationToken": token},
+                "meta": {"requestUuid": "r-join"},
+            },
+            session_id=session_id,
+            wcp_sessions=sessions,
+            websocket=ws,
+        )
+
+        payload = json.loads(ws.send_text.call_args.args[0])
+        assert payload["type"] == "joinPrivateChannelResponse"
+        assert cmgr.instance_channels.get("participant-invite") == channel.id
+        assert "participant-invite" in cmgr.channels[channel.id].members
+        assert token not in cmgr.private_channel_invites.get(channel.id, {})
 
 
 class TestDACPHandlerFindInstances:

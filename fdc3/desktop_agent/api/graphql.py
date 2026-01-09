@@ -306,6 +306,7 @@ class Mutation:
             # Emit deleted event before removing
             core_services.channel_manager._emit_event("deleted", channel_id)
             del core_services.channel_manager.channels[channel_id]
+            core_services.channel_manager.clear_channel_context(channel_id)
             # Remove any instance associations with this channel
             instances_to_remove = [
                 inst_uuid
