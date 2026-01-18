@@ -93,20 +93,22 @@ async def main() -> None:
 
         def action_send(self) -> None:
             """Send on Enter (priority binding).
-            
+
             Attempts to schedule the send action using Textual's call_later if available,
             otherwise falls back to creating a task directly. Errors are logged in _safe_send.
             """
             app = cast(_SendApp, self.app)
             # Try to use Textual's call_later for proper event loop integration
-            if hasattr(self.app, 'call_later'):
+            if hasattr(self.app, "call_later"):
                 try:
-                    self.app.call_later(lambda: asyncio.create_task(self._safe_send(app)))
+                    self.app.call_later(
+                        lambda: asyncio.create_task(self._safe_send(app))
+                    )
                     return
                 except RuntimeError:
                     # call_later may fail if the app is not fully initialized or shutting down
                     pass
-            
+
             # Fallback: create task directly (may not integrate as well with Textual's event loop)
             try:
                 asyncio.create_task(self._safe_send(app))
@@ -116,7 +118,7 @@ async def main() -> None:
 
         def action_newline(self) -> None:
             """Insert a newline on Ctrl+N (fallback when Shift+Enter isn't distinguishable).
-            
+
             Silently ignores errors if the widget is read-only or not editable.
             """
             try:
@@ -127,7 +129,7 @@ async def main() -> None:
 
         async def _safe_send(self, app: _SendApp) -> None:
             """Safely execute the send action and log any errors.
-            
+
             This wrapper ensures that send failures are caught and displayed to the user
             in the message log. If logging fails, the error is silently ignored to avoid
             cascading failures.
@@ -137,10 +139,10 @@ async def main() -> None:
             except Exception as exc:
                 # Attempt to log the error to the messages widget
                 self._log_error(f"Send failed: {exc}")
-        
+
         def _log_error(self, message: str) -> None:
             """Log an error message to the messages widget.
-            
+
             Silently ignores failures to prevent cascading errors during error handling.
             """
             try:
