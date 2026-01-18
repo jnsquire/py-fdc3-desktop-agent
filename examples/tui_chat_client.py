@@ -99,7 +99,7 @@ async def main() -> None:
             """
             app = cast(_SendApp, self.app)
             # Try to use Textual's call_later for proper event loop integration
-            if hasattr(self.app, 'call_later') and callable(self.app.call_later):
+            if hasattr(self.app, 'call_later'):
                 try:
                     self.app.call_later(lambda: asyncio.create_task(self._safe_send(app)))
                     return
@@ -111,7 +111,7 @@ async def main() -> None:
             try:
                 asyncio.create_task(self._safe_send(app))
             except RuntimeError:
-                # Event loop may not be running; errors will be logged in _safe_send if it runs
+                # Event loop may not be running; task creation failed
                 pass
 
         def action_newline(self) -> None:
@@ -145,8 +145,8 @@ async def main() -> None:
             """
             try:
                 self.app.query_one("#messages", Log).write_line(message)
-            except (AttributeError, RuntimeError):
-                # Failed to access the messages widget (app may be shutting down)
+            except (AttributeError, RuntimeError, LookupError):
+                # Failed to access the messages widget (app may be shutting down or widget not found)
                 pass
 
     TextAreaWidget = ChatTextArea
