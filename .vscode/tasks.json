@@ -32,6 +32,65 @@
         "panel": "shared"
       },
       "problemMatcher": []
+    },
+    {
+      "label": "Docs: Build",
+      "type": "shell",
+      "group": "none",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe -m mkdocs build",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Docs: Serve",
+      "type": "shell",
+      "group": "none",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe -m mkdocs serve --dev-addr 127.0.0.1:8001",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Docs: Build + Serve",
+      "type": "shell",
+      "group": "none",
+      "dependsOn": ["Docs: Build", "Docs: Serve"],
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    },
+    {
+      "label": "Run Client: Alice",
+      "type": "shell",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe ${workspaceFolder}\\examples\\tui_chat_client.py --name Alice --channel demo",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Run Client: Bob",
+      "type": "shell",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe ${workspaceFolder}\\examples\\tui_chat_client.py --name Bob --channel demo",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Run Agent + Alice + Bob",
+      "dependsOn": ["Run Agent (dev)", "Run Client: Alice", "Run Client: Bob"],
+      "dependsOrder": "parallel"
     }
   ]
 }

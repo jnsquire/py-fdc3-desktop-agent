@@ -33,6 +33,7 @@ nav:
   - System flowchart: system_flowchart.md
   - FDC3 spec gap checklist: fdc3-spec-gap-checklist.md
   - API Reference:
+      - API Guide: api-guide.md
       - Desktop Agent: api.md
 
 plugins:
@@ -44,6 +45,8 @@ plugins:
             - .
           options:
             docstring_style: google
+            heading_level: 3
+            show_root_heading: true
             members_order: source
             show_signature_annotations: true
             show_symbol_type_heading: true

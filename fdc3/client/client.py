@@ -55,6 +55,31 @@ from fdc3.client.models import (
     IntentResult,
     Broadcast,
 )
+from fdc3.models.dacp.dacp import (
+    JoinUserChannelRequest,
+    LeaveCurrentChannelRequest,
+    CreatePrivateChannelRequest,
+    CreatePrivateChannelInvitationRequest,
+    JoinPrivateChannelRequest,
+    LeavePrivateChannelRequest,
+    PrivateChannelAddEventListenerRequest,
+)
+from fdc3.models.dacp import BroadcastEvent, ForwardedIntentMessage, IntentEvent
+from fdc3.models.dacp.dacp import (
+    JoinUserChannelRequestPayload,
+    CreatePrivateChannelRequestPayload,
+    CreatePrivateChannelInvitationRequestPayload,
+    JoinPrivateChannelRequestPayload,
+    LeavePrivateChannelRequestPayload,
+    PrivateChannelAddEventListenerRequestPayload,
+)
+from fdc3.models.dacp.enums import PrivateChannelEventListenerTypes
+from fdc3.models.identifiers import DisplayMetadata
+from fdc3.models.context_types import (
+    ChatMessageContext,
+    ChatRoomContext,
+    MessageContext,
+)
 import urllib.parse
 import httpx
 from websockets.asyncio.client import connect, ClientConnection
@@ -94,9 +119,14 @@ class FDC3Client:
         # Public event emitters — multiple handlers may subscribe via `.add()`
         # Handlers will receive validated Pydantic models for known message
         # types.
-        self.forwarded_intent_handlers: EventEmitter[Any] = EventEmitter()
-        self.broadcast_handlers: EventEmitter[Any] = EventEmitter()
-        self.intent_event_handlers: EventEmitter[Any] = EventEmitter()
+        self.forwarded_intent_handlers: EventEmitter[ForwardedIntentMessage] = (
+            EventEmitter()
+        )
+        self.broadcast_handlers: EventEmitter[BroadcastEvent] = EventEmitter()
+        self.intent_event_handlers: EventEmitter[IntentEvent] = EventEmitter()
+        self.private_channel_event_handlers: EventEmitter[Dict[str, Any]] = (
+            EventEmitter()
+        )
         # maps request_uuid -> (Future, loop)
         self._pending_responses: Dict[
             str, Tuple[asyncio.Future, asyncio.AbstractEventLoop]
@@ -126,6 +156,29 @@ class FDC3Client:
         if isinstance(value, dict) and value.get("root"):
             return value["root"]
         return value
+
+    @staticmethod
+    def _format_channel_id(raw: str) -> str:
+        """Ensure a channel id has a prefix (e.g., user:foo)."""
+        if ":" in raw:
+            return raw
+        return f"user:{raw}"
+
+    async def send_dacp_request(self, request, timeout: float = 5.0) -> Any:
+        """Send a DACP request model and wait for the correlated response."""
+        await self._ensure_handshake()
+        ws = self._ensure_connected()
+
+        request_uuid = getattr(request.meta.requestUuid, "root", None)
+        if not request_uuid:
+            request_uuid = str(request.meta.requestUuid)
+
+        fut = self._register_pending_response(request_uuid)
+        try:
+            await ws.send(request.model_dump_json())
+            return await asyncio.wait_for(fut, timeout=timeout)
+        finally:
+            self._clear_pending_response(request_uuid)
 
     # Pending response helpers
     def _register_pending_response(self, request_uuid: str) -> asyncio.Future:
@@ -385,6 +438,30 @@ class FDC3Client:
                     )
                     self._resolve_pending_response(request_uuid, result=result)
 
+        elif t in (
+            "joinUserChannelResponse",
+            "leaveCurrentChannelResponse",
+            "createPrivateChannelResponse",
+            "createPrivateChannelInvitationResponse",
+            "joinPrivateChannelResponse",
+            "leavePrivateChannelResponse",
+            "privateChannelAddEventListenerResponse",
+        ):
+            request_uuid = self._extract_listener_uuid(meta.get("requestUuid", ""))
+            payload = msg.payload or {}
+            error = payload.get("error") if isinstance(payload, dict) else None
+            if request_uuid:
+                if error:
+                    self._resolve_pending_response(request_uuid, error=error)
+                else:
+                    self._resolve_pending_response(request_uuid, result=payload)
+            return
+
+        elif t == "privateChannelEvent":
+            payload = msg.payload or {}
+            await self.private_channel_event_handlers.emit(payload)
+            return
+
         elif t == "forwardedIntent":
             try:
                 model = parse_message(msg)
@@ -411,6 +488,10 @@ class FDC3Client:
 
             if model is None:
                 logger.debug("No model mapping for forwardedIntent; dropping message")
+                return
+
+            if not isinstance(model, ForwardedIntentMessage):
+                logger.debug("Unexpected forwardedIntent model type: %s", type(model))
                 return
 
             await self.forwarded_intent_handlers.emit(model)
@@ -447,6 +528,10 @@ class FDC3Client:
                 logger.debug("No model mapping for broadcastEvent; dropping message")
                 return
 
+            if not isinstance(model, BroadcastEvent):
+                logger.debug("Unexpected broadcastEvent model type: %s", type(model))
+                return
+
             await self.broadcast_handlers.emit(model)
 
         elif t == "intentEvent":
@@ -459,6 +544,10 @@ class FDC3Client:
 
             if model is None:
                 logger.debug("No model mapping for intentEvent; dropping message")
+                return
+
+            if not isinstance(model, IntentEvent):
+                logger.debug("Unexpected intentEvent model type: %s", type(model))
                 return
 
             await self.intent_event_handlers.emit(model)
@@ -663,7 +752,204 @@ class FDC3Client:
             )
             resp.raise_for_status()
 
-    async def broadcast(self, context: Dict[str, Any]) -> None:
+    async def create_user_channel(
+        self,
+        channel_id: str,
+        *,
+        display_metadata: Optional[DisplayMetadata] = None,
+    ) -> None:
+        """Create a user channel via the agent GraphQL API."""
+        channel_id = self._format_channel_id(channel_id)
+        parsed = urllib.parse.urlparse(self.agent_url)
+        scheme = "https" if parsed.scheme == "wss" else "http"
+        base = f"{scheme}://{parsed.netloc}"
+
+        if display_metadata is None:
+            display_metadata = DisplayMetadata(name=channel_id, color="#000000")
+
+        mutation = (
+            "mutation CreateChannel($input: CreateChannelInput!) {"
+            " createChannel(input: $input) { id } }"
+        )
+
+        variables = {
+            "input": {
+                "channelId": channel_id,
+                "channelType": "user",
+                "displayMetadata": display_metadata.model_dump(exclude_none=True),
+            }
+        }
+
+        async with httpx.AsyncClient(base_url=base, timeout=10.0) as client:
+            resp = await client.post(
+                "/graphql", json={"query": mutation, "variables": variables}
+            )
+            resp.raise_for_status()
+
+    async def join_user_channel(
+        self,
+        channel_id: str,
+        *,
+        auto_create: bool = False,
+    ) -> Dict[str, Any]:
+        """Join a user channel, optionally auto-creating it if missing."""
+        channel_id = self._format_channel_id(channel_id)
+        request = JoinUserChannelRequest(
+            type="joinUserChannel",
+            payload=JoinUserChannelRequestPayload(channelId=channel_id),
+        )
+        try:
+            return await self.send_dacp_request(request)
+        except Exception as exc:
+            if auto_create and (
+                "NoChannelFound" in str(exc)
+                or "NoChannelFound" in getattr(exc, "args", [""])[0]
+            ):
+                await self.create_user_channel(channel_id)
+                return await self.send_dacp_request(request)
+            raise
+
+    async def leave_current_channel(self) -> None:
+        """Leave the currently joined channel."""
+        # LeaveCurrentChannelRequest requires the literal `type` field
+        request = LeaveCurrentChannelRequest(type="leaveCurrentChannel")
+        await self.send_dacp_request(request)
+
+    async def create_private_channel(
+        self, display_name: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Create a private channel and return the response payload."""
+        display_metadata = DisplayMetadata(name=display_name) if display_name else None
+        request = CreatePrivateChannelRequest(
+            type="createPrivateChannel",
+            payload=CreatePrivateChannelRequestPayload(
+                displayMetadata=display_metadata
+            ),
+        )
+        return await self.send_dacp_request(request)
+
+    async def create_private_channel_invite(
+        self, channel_id: str, instance_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Create a private channel invitation."""
+        request = CreatePrivateChannelInvitationRequest(
+            type="createPrivateChannelInvitation",
+            payload=CreatePrivateChannelInvitationRequestPayload(
+                channelId=channel_id, instanceId=instance_id
+            ),
+        )
+        return await self.send_dacp_request(request)
+
+    async def join_private_channel(self, channel_id: str, token: str) -> Dict[str, Any]:
+        """Join a private channel using an invitation token."""
+        request = JoinPrivateChannelRequest(
+            type="joinPrivateChannel",
+            payload=JoinPrivateChannelRequestPayload(
+                channelId=channel_id, invitationToken=token
+            ),
+        )
+        return await self.send_dacp_request(request)
+
+    async def leave_private_channel(self, channel_id: str) -> None:
+        """Leave a private channel."""
+        request = LeavePrivateChannelRequest(
+            type="leavePrivateChannel",
+            payload=LeavePrivateChannelRequestPayload(channelId=channel_id),
+        )
+        await self.send_dacp_request(request)
+
+    async def add_private_channel_event_listener(
+        self,
+        channel_id: str,
+        *,
+        event_type: Optional[PrivateChannelEventListenerTypes] = None,
+    ) -> Dict[str, Any]:
+        """Subscribe to private channel events for a channel."""
+        request = PrivateChannelAddEventListenerRequest(
+            type="privateChannelAddEventListener",
+            payload=PrivateChannelAddEventListenerRequestPayload(
+                channelId=channel_id, eventType=event_type
+            ),
+        )
+        return await self.send_dacp_request(request)
+
+    # ─── Chat helpers ──────────────────────────────────────────────────────
+    async def build_message(self, text: str) -> MessageContext:
+        """Build a minimal `fdc3.message` payload for a chat message."""
+        return MessageContext(type="fdc3.message", text={"text/plain": text})
+
+    async def get_chat_room(
+        self,
+        channel_id: str,
+        *,
+        provider_name: Optional[str] = None,
+        auto_create: bool = False,
+    ) -> ChatRoomContext:
+        """Return a `fdc3.chat.room` object for a given channel id.
+
+        If `auto_create` is True, attempt to ensure a corresponding user
+        channel exists on the agent (best-effort using `create_user_channel`).
+        """
+        if auto_create:
+            try:
+                await self.create_user_channel(channel_id)
+            except Exception:
+                # best-effort: ignore failures creating the user channel
+                pass
+
+        room: ChatRoomContext = ChatRoomContext(
+            type="fdc3.chat.room",
+            providerName=(provider_name or self.handler_id),
+            id={"channelId": channel_id},
+        )
+        return room
+
+    async def send_chat_message(
+        self,
+        text: str,
+        channel_id: str,
+        *,
+        provider_name: Optional[str] = None,
+        auto_create_room: bool = False,
+    ) -> None:
+        """Send a `fdc3.chat.message` to the agent by broadcasting the
+        appropriate context object.
+
+        This constructs the `chatRoom` and `message` objects and calls
+        :meth:`broadcast` with the resulting context.
+        """
+        room = await self.get_chat_room(
+            channel_id, provider_name=provider_name, auto_create=auto_create_room
+        )
+        message = await self.build_message(text)
+
+        ctx: ChatMessageContext = ChatMessageContext(
+            type="fdc3.chat.message",
+            chatRoom=room,
+            message=message,
+        )
+
+        # Broadcast expects a plain dict; convert from Pydantic model or TypedDict
+        md = getattr(ctx, "model_dump", None)
+        if callable(md):
+            try:
+                payload = md()
+            except Exception:
+                payload = {}
+        elif isinstance(ctx, dict):
+            payload = ctx
+        else:
+            try:
+                payload = dict(ctx)
+            except Exception:
+                payload = {}
+
+        if not isinstance(payload, dict):
+            payload = dict(payload)
+
+        await self.broadcast(payload)
+
+    async def broadcast(self, context: Any) -> None:
         """Send a DACP `broadcast` request to the agent to broadcast `context`.
 
         This will cause the agent to deliver the context to the channel the

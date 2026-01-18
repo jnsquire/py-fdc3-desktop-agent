@@ -177,6 +177,47 @@ class TestListenerStore:
         assert len(store.get_context_listeners("fdc3.instrument")) == 1
         assert len(store.get_intent_listeners_for_intent("ViewChart")) == 0
 
+    def test_event_listeners_channel_scoping(self):
+        """Event listeners should be scoped by channel_id when provided"""
+        store = ListenerStore()
+
+        store.add_event_listener(
+            ListenerUuid("uuid1"),
+            "inst-private",
+            "PRIVATE_EVENT",
+            channel_id="private:1",
+        )
+        store.add_event_listener(ListenerUuid("uuid2"), "inst-other", "PRIVATE_EVENT")
+
+        listeners = store.get_event_listeners("PRIVATE_EVENT", channel_id="private:1")
+        assert len(listeners) == 1
+        assert listeners[0].channel_id == "private:1"
+
+    def test_context_listeners_channel_filter(self):
+        """Context listeners should respect channel scoping"""
+        store = ListenerStore()
+
+        store.add_context_listener(
+            ListenerUuid("uuid1"), "inst-global", "fdc3.instrument"
+        )
+        store.add_context_listener(
+            ListenerUuid("uuid2"),
+            "inst-channel",
+            "fdc3.instrument",
+            channel_id="user:red",
+        )
+
+        listeners = store.get_context_listeners_for_type(
+            "fdc3.instrument", channel_id="user:red"
+        )
+        assert len(listeners) == 2
+
+        channel_only = store.get_context_listeners_for_type(
+            "fdc3.instrument", channel_id="user:red", include_global=False
+        )
+        assert len(channel_only) == 1
+        assert channel_only[0].channel_id == "user:red"
+
 
 class TestContextRouter:
     """Test ContextRouter functionality"""
@@ -434,3 +475,43 @@ class TestChannelManager:
         assert len(members) == 2
         assert "uuid1" in members
         assert "uuid2" in members
+
+    def test_create_private_channel(self):
+        """Test private channel creation"""
+        manager = ChannelManager()
+
+        channel = manager.create_private_channel("owner-uuid")
+        assert channel.type == "private"
+        assert channel.id.startswith("private:")
+        assert manager.get_private_channel_owner(channel.id) == "owner-uuid"
+        assert "owner-uuid" in channel.members
+
+    def test_destroy_private_channel(self):
+        """Test private channel cleanup"""
+        manager = ChannelManager()
+
+        channel = manager.create_private_channel("owner-uuid")
+        manager.destroy_private_channel(channel.id)
+
+        assert manager.get_channel(channel.id) is None
+        assert manager.get_private_channel_owner(channel.id) is None
+
+    def test_channel_context_tracking(self):
+        """Channels should cache the most recent context"""
+        manager = ChannelManager()
+
+        manager.create_channel("c1", "user")
+        manager.set_channel_context(
+            "c1", {"type": "fdc3.instrument", "id": {"ticker": "XYZ"}}
+        )
+
+        instrument_context = manager.get_channel_context("c1", "fdc3.instrument")
+        assert instrument_context is not None
+        assert instrument_context["id"]["ticker"] == "XYZ"
+
+        channel_context = manager.get_channel_context("c1")
+        assert channel_context is not None
+        assert channel_context["type"] == "fdc3.instrument"
+
+        manager.clear_channel_context("c1")
+        assert manager.get_channel_context("c1") is None
