@@ -10,7 +10,7 @@ Usage:
 
 Controls:
     Enter: send message
-    Ctrl+N: insert newline (Shift+Enter not always distinguishable in terminals)
+    Shift+Enter or Ctrl+N: insert newline (Shift+Enter may not be distinguishable in some terminals)
 
 Notes:
     - Public channels use the "user:" prefix (added automatically).
@@ -88,6 +88,7 @@ async def main() -> None:
         BINDINGS = [
             Binding("enter", "send", "Send", priority=True, show=False),
             Binding("ctrl+n", "newline", "Newline", show=False),
+            Binding("shift+enter", "newline", "Newline", show=False),
         ]
 
         def action_send(self) -> None:
@@ -184,7 +185,7 @@ async def main() -> None:
             self.channel_id = join_resp.get("channel", {}).get("id")
             messages.write_line(f"Joined {self.channel_id}")
             # Short help for key bindings
-            messages.write_line("Send: Enter | Newline: Ctrl+N")
+            messages.write_line("Send: Enter | Newline: Shift+Enter or Ctrl+N")
 
             async def on_broadcast(evt: BroadcastEvent) -> None:
                 ctx = evt.payload.context if hasattr(evt, "payload") else {}
