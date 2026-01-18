@@ -119,10 +119,14 @@ class FDC3Client:
         # Public event emitters — multiple handlers may subscribe via `.add()`
         # Handlers will receive validated Pydantic models for known message
         # types.
-        self.forwarded_intent_handlers: EventEmitter[ForwardedIntentMessage] = EventEmitter()
+        self.forwarded_intent_handlers: EventEmitter[ForwardedIntentMessage] = (
+            EventEmitter()
+        )
         self.broadcast_handlers: EventEmitter[BroadcastEvent] = EventEmitter()
         self.intent_event_handlers: EventEmitter[IntentEvent] = EventEmitter()
-        self.private_channel_event_handlers: EventEmitter[Dict[str, Any]] = EventEmitter()
+        self.private_channel_event_handlers: EventEmitter[Dict[str, Any]] = (
+            EventEmitter()
+        )
         # maps request_uuid -> (Future, loop)
         self._pending_responses: Dict[
             str, Tuple[asyncio.Future, asyncio.AbstractEventLoop]
