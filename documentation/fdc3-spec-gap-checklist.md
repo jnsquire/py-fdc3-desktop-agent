@@ -13,8 +13,15 @@ This checklist captures remaining or partial areas vs the FDC3 Desktop Agent API
 
 ## Channels
 
-- [ ] Implement private channel APIs (create/join/leave + any required invitations/handshake semantics).
-- [ ] Implement channel-object semantics exposed to apps (e.g., `getCurrentContext()` behavior), not just DesktopAgent membership.
+- [x] Implement private channel APIs (create/join/leave + any required invitations/handshake semantics).
+	- Extend DACP schemas and handler plumbing so apps can request channel creation, join by ID, and leave without requiring a global user channel switch.
+	- Ensure `ChannelManager` tracks private memberships/invitations, enforces owner-driven access, and exposes the data needed by bridging/CLI layers.
+	- Document the invitation/handshake flow (ownership guarantees, tokens or explicit invites) so clients know what information is required to join.
+- [x] Implement channel-object semantics exposed to apps (e.g., `getCurrentContext()` behavior), not just DesktopAgent membership.
+	- Cache and surface channel-bound contexts so `getCurrentContext()`/`addContextListener()` can work per channel instead of global default channel state.
+	- Wire those per-channel context listeners through the `ListenerStore` channel filters already used for `privateChannelEvent`, and ensure APIs respect channel scope.
+	- Validate that context delivery and `onUnsubscribe`/`onDisconnect` events are emitted for both user and private channels.
+- [x] Emit private channel lifecycle events (add/remove listeners, disconnect) through `privateChannelEvent` notifications.
 
 ## Events
 

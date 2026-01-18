@@ -93,6 +93,21 @@ async def websocket_endpoint(
                 if transition == "dacp":
                     dacp_active = True
                     heartbeat_task = asyncio.create_task(send_heartbeat())
+                    # Register the instance websocket in the DACP connection manager so
+                    # the handler can deliver messages to this instance via
+                    # `WebSocketConnectionManager.send_to_instance`.
+                    try:
+                        identity = wcp_sessions[session_id]["identity"]
+                        instance_uuid = identity["instanceUuid"]
+                        # Best-effort: not fatal if registration fails
+                        dacp_handler.connection_manager.add_connection(
+                            instance_uuid, websocket
+                        )
+                        logger.debug(
+                            f"Registered instance connection for {instance_uuid}"
+                        )
+                    except Exception:
+                        logger.exception("Failed to register instance connection")
             else:
                 await dacp_handler.handle_message(
                     message, session_id or "", wcp_sessions, websocket
@@ -111,6 +126,14 @@ async def websocket_endpoint(
             core_services.app_registry.unregister_instance(instance_uuid)
             core_services.listener_store.remove_listeners_for_instance(instance_uuid)
             core_services.channel_manager.leave_current_channel(instance_uuid)
+
+            # Remove registered instance connection so future sends don't attempt
+            # to deliver to a stale websocket.
+            try:
+                dacp_handler.connection_manager.remove_connection(instance_uuid)
+            except Exception:
+                logger.exception("Failed to remove instance connection")
+
             await agent_client_manager.disconnect(websocket, instance_uuid)
             del wcp_sessions[session_id]
         logger.info("WebSocket disconnected")

@@ -5,10 +5,11 @@ remain functionally equivalent.
 """
 
 from pydantic import BaseModel, Field, field_validator
-from typing import Optional, Literal, Union, List
+from typing import Optional, Literal, Union, List, Any
 from fdc3.models.identifiers import AppIdentifier
 from fdc3.models.identifiers import AppMetadata
 from fdc3.models.identifiers import AppIntent
+from fdc3.models.identifiers import DisplayMetadata
 from fdc3.models.identifiers import IntentResolution
 from fdc3.models.identifiers import Channel
 from fdc3.models.identifiers import ImplementationMetadata
@@ -20,6 +21,7 @@ from fdc3.models.primitives import (
     Timestamp,
     ListenerUuid,
 )
+from .enums import PrivateChannelEventListenerTypes
 
 # DACP Envelopes
 
@@ -148,6 +150,7 @@ class BroadcastEvent(BaseModel):
 # context listeners
 class AddContextListenerRequestPayload(BaseModel):
     contextType: Optional[str] = None
+    channelId: Optional[str] = None
 
 
 class AddContextListenerRequest(BaseModel):
@@ -239,6 +242,18 @@ class FDC3EventMessage(BaseModel):
     meta: AgentEventMeta = Field(default_factory=AgentEventMeta)
 
 
+class PrivateChannelEventPayload(BaseModel):
+    channelId: str
+    eventType: PrivateChannelEventListenerTypes
+    details: Optional[dict[str, Any]] = None
+
+
+class PrivateChannelEvent(BaseModel):
+    type: Literal["privateChannelEvent"]
+    payload: PrivateChannelEventPayload
+    meta: AgentEventMeta = Field(default_factory=AgentEventMeta)
+
+
 # user channel membership APIs
 class GetUserChannelsRequestPayload(BaseModel):
     pass
@@ -284,6 +299,30 @@ class GetCurrentChannelResponse(BaseModel):
     meta: AgentResponseMeta = Field(default_factory=AgentResponseMeta)
 
 
+# channel object APIs
+class GetCurrentContextRequestPayload(BaseModel):
+    contextType: Optional[str] = None
+    channelId: Optional[str] = None
+
+
+class GetCurrentContextRequest(BaseModel):
+    type: Literal["getCurrentContext"]
+    payload: GetCurrentContextRequestPayload = Field(
+        default_factory=GetCurrentContextRequestPayload
+    )
+    meta: AppRequestMeta = Field(default_factory=AppRequestMeta)
+
+
+class GetCurrentContextResponsePayload(BaseModel):
+    context: Optional[dict] = None
+
+
+class GetCurrentContextResponse(BaseModel):
+    type: Literal["getCurrentContextResponse"]
+    payload: GetCurrentContextResponsePayload
+    meta: AgentResponseMeta = Field(default_factory=AgentResponseMeta)
+
+
 class JoinUserChannelRequestPayload(BaseModel):
     channelId: str
 
@@ -324,6 +363,136 @@ class LeaveCurrentChannelResponse(BaseModel):
     type: Literal["leaveCurrentChannelResponse"]
     payload: LeaveCurrentChannelResponsePayload = Field(
         default_factory=LeaveCurrentChannelResponsePayload
+    )
+    meta: AgentResponseMeta = Field(default_factory=AgentResponseMeta)
+
+
+# private channel management
+class CreatePrivateChannelRequestPayload(BaseModel):
+    displayMetadata: Optional[DisplayMetadata] = None
+
+
+class CreatePrivateChannelRequest(BaseModel):
+    type: Literal["createPrivateChannel"]
+    payload: CreatePrivateChannelRequestPayload = Field(
+        default_factory=CreatePrivateChannelRequestPayload
+    )
+    meta: AppRequestMeta = Field(default_factory=AppRequestMeta)
+
+
+class CreatePrivateChannelResponsePayload(BaseModel):
+    channel: Channel
+
+
+class CreatePrivateChannelResponse(BaseModel):
+    type: Literal["createPrivateChannelResponse"]
+    payload: CreatePrivateChannelResponsePayload
+    meta: AgentResponseMeta = Field(default_factory=AgentResponseMeta)
+
+
+class CreatePrivateChannelInvitationRequestPayload(BaseModel):
+    channelId: str
+    instanceId: Optional[str] = None
+
+
+class CreatePrivateChannelInvitationRequest(BaseModel):
+    type: Literal["createPrivateChannelInvitation"]
+    payload: CreatePrivateChannelInvitationRequestPayload
+    meta: AppRequestMeta = Field(default_factory=AppRequestMeta)
+
+
+class CreatePrivateChannelInvitationResponsePayload(BaseModel):
+    invitationToken: str
+
+
+class CreatePrivateChannelInvitationResponse(BaseModel):
+    type: Literal["createPrivateChannelInvitationResponse"]
+    payload: CreatePrivateChannelInvitationResponsePayload
+    meta: AgentResponseMeta = Field(default_factory=AgentResponseMeta)
+
+
+class JoinPrivateChannelRequestPayload(BaseModel):
+    channelId: str
+    invitationToken: Optional[str] = None
+
+
+class JoinPrivateChannelRequest(BaseModel):
+    type: Literal["joinPrivateChannel"]
+    payload: JoinPrivateChannelRequestPayload
+    meta: AppRequestMeta = Field(default_factory=AppRequestMeta)
+
+
+class JoinPrivateChannelResponsePayload(BaseModel):
+    channel: Channel
+
+
+class JoinPrivateChannelResponse(BaseModel):
+    type: Literal["joinPrivateChannelResponse"]
+    payload: JoinPrivateChannelResponsePayload
+    meta: AgentResponseMeta = Field(default_factory=AgentResponseMeta)
+
+
+class LeavePrivateChannelRequestPayload(BaseModel):
+    channelId: str
+
+
+class LeavePrivateChannelRequest(BaseModel):
+    type: Literal["leavePrivateChannel"]
+    payload: LeavePrivateChannelRequestPayload
+    meta: AppRequestMeta = Field(default_factory=AppRequestMeta)
+
+
+class LeavePrivateChannelResponsePayload(BaseModel):
+    pass
+
+
+class LeavePrivateChannelResponse(BaseModel):
+    type: Literal["leavePrivateChannelResponse"]
+    payload: LeavePrivateChannelResponsePayload = Field(
+        default_factory=LeavePrivateChannelResponsePayload
+    )
+    meta: AgentResponseMeta = Field(default_factory=AgentResponseMeta)
+
+
+class PrivateChannelAddEventListenerRequestPayload(BaseModel):
+    channelId: str
+    eventType: Optional[PrivateChannelEventListenerTypes] = None
+
+
+class PrivateChannelAddEventListenerRequest(BaseModel):
+    type: Literal["privateChannelAddEventListener"]
+    payload: PrivateChannelAddEventListenerRequestPayload
+    meta: AppRequestMeta = Field(default_factory=AppRequestMeta)
+
+
+class PrivateChannelAddEventListenerResponsePayload(BaseModel):
+    listenerUuid: ListenerUuid
+
+
+class PrivateChannelAddEventListenerResponse(BaseModel):
+    type: Literal["privateChannelAddEventListenerResponse"]
+    payload: PrivateChannelAddEventListenerResponsePayload
+    meta: AgentResponseMeta = Field(default_factory=AgentResponseMeta)
+
+
+class PrivateChannelDisconnectRequestPayload(BaseModel):
+    channelId: str
+
+
+class PrivateChannelDisconnectRequest(BaseModel):
+    type: Literal["privateChannelDisconnect"]
+    payload: PrivateChannelDisconnectRequestPayload
+    meta: AppRequestMeta = Field(default_factory=AppRequestMeta)
+
+
+class PrivateChannelDisconnectResponsePayload(BaseModel):
+    pass
+
+
+class PrivateChannelDisconnectResponse(BaseModel):
+    type: Literal["privateChannelDisconnectResponse"]
+    payload: PrivateChannelDisconnectResponsePayload = Field(
+        default_factory=PrivateChannelDisconnectResponsePayload
     )
     meta: AgentResponseMeta = Field(default_factory=AgentResponseMeta)
 

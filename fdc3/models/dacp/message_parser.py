@@ -16,6 +16,7 @@ from .dacp import (
     GetAppMetadataRequest,
     GetUserChannelsRequest,
     GetCurrentChannelRequest,
+    GetCurrentContextRequest,
     JoinUserChannelRequest,
     LeaveCurrentChannelRequest,
     FindIntentRequest,
@@ -29,6 +30,12 @@ from .dacp import (
     AddEventListenerRequest,
     RemoveEventListenerRequest,
     HeartbeatAcknowledgmentRequest,
+    CreatePrivateChannelRequest,
+    CreatePrivateChannelInvitationRequest,
+    PrivateChannelAddEventListenerRequest,
+    PrivateChannelDisconnectRequest,
+    JoinPrivateChannelRequest,
+    LeavePrivateChannelRequest,
 )
 from .external_models import (
     RegisterExternalHandlerRequest,
@@ -49,6 +56,7 @@ ParsedMessage = Union[
     GetAppMetadataRequest,
     GetUserChannelsRequest,
     GetCurrentChannelRequest,
+    GetCurrentContextRequest,
     JoinUserChannelRequest,
     LeaveCurrentChannelRequest,
     FindIntentRequest,
@@ -65,6 +73,12 @@ ParsedMessage = Union[
     RegisterExternalHandlerRequest,
     UnregisterExternalHandlerRequest,
     ExternalIntentResultRequest,
+    CreatePrivateChannelRequest,
+    CreatePrivateChannelInvitationRequest,
+    PrivateChannelAddEventListenerRequest,
+    PrivateChannelDisconnectRequest,
+    JoinPrivateChannelRequest,
+    LeavePrivateChannelRequest,
 ]
 
 # Mapping from message type string to Pydantic model class
@@ -78,6 +92,7 @@ MESSAGE_TYPE_MAP: Dict[str, type[BaseModel]] = {
     "getAppMetadata": GetAppMetadataRequest,
     "getUserChannels": GetUserChannelsRequest,
     "getCurrentChannel": GetCurrentChannelRequest,
+    "getCurrentContext": GetCurrentContextRequest,
     "joinUserChannel": JoinUserChannelRequest,
     "leaveCurrentChannel": LeaveCurrentChannelRequest,
     "findIntent": FindIntentRequest,
@@ -94,6 +109,12 @@ MESSAGE_TYPE_MAP: Dict[str, type[BaseModel]] = {
     "registerExternalHandler": RegisterExternalHandlerRequest,
     "unregisterExternalHandler": UnregisterExternalHandlerRequest,
     "intentResult": ExternalIntentResultRequest,
+    "createPrivateChannel": CreatePrivateChannelRequest,
+    "createPrivateChannelInvitation": CreatePrivateChannelInvitationRequest,
+    "privateChannelAddEventListener": PrivateChannelAddEventListenerRequest,
+    "privateChannelDisconnect": PrivateChannelDisconnectRequest,
+    "joinPrivateChannel": JoinPrivateChannelRequest,
+    "leavePrivateChannel": LeavePrivateChannelRequest,
 }
 
 
