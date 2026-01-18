@@ -88,6 +88,17 @@
       "problemMatcher": []
     },
     {
+      "label": "Run AgentView",
+      "type": "shell",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe ${workspaceFolder}\\examples\\agentview\\main.py",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "problemMatcher": []
+    },
+    {
       "label": "Run Agent + Alice + Bob",
       "dependsOn": ["Run Agent (dev)", "Run Client: Alice", "Run Client: Bob"],
       "dependsOrder": "parallel"

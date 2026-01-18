@@ -109,6 +109,12 @@ class ChannelType:
     color: Optional[str]
     member_count: int
 
+    @strawberry.field
+    def members(self) -> List[str]:
+        if not hasattr(core_services, "channel_manager"):
+            return []
+        return core_services.channel_manager.get_channel_members(self.id)
+
 
 # Define the GraphQL schema
 @strawberry.type

@@ -58,6 +58,7 @@ dev = [
   "ruff>=0.14",
   "datamodel-code-generator>=0.26",
   "httpx>=0.28",
+  "gql[websockets]>=3.5",
   "rich>=13.0",
   "pre-commit>=4.0",
   "mkdocs>=1.5",
