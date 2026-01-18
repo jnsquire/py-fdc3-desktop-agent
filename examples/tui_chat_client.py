@@ -103,7 +103,7 @@ async def main() -> None:
                 try:
                     self.app.call_later(lambda: asyncio.create_task(self._safe_send(app)))
                     return
-                except (RuntimeError, AttributeError):
+                except RuntimeError:
                     # call_later may fail if the app is not fully initialized or shutting down
                     pass
             
