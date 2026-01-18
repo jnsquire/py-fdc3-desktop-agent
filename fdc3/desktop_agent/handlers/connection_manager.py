@@ -19,13 +19,13 @@ class WebSocketConnectionManager:
     def add_connection(self, instance_uuid: str, websocket: WebSocket):
         """Add a WebSocket connection for an instance"""
         self.connections[instance_uuid] = websocket
-        logger.debug(f"Added connection for instance {instance_uuid}")
+        logger.info(f"Added connection for instance {instance_uuid}")
 
     def remove_connection(self, instance_uuid: str):
         """Remove a WebSocket connection for an instance"""
         if instance_uuid in self.connections:
             del self.connections[instance_uuid]
-            logger.debug(f"Removed connection for instance {instance_uuid}")
+            logger.info(f"Removed connection for instance {instance_uuid}")
             try:
                 # Unregister any external handlers registered by this instance
                 core_services.external_registry.unregister_by_instance(instance_uuid)
@@ -44,7 +44,9 @@ class WebSocketConnectionManager:
                 # Remove broken connection
                 self.remove_connection(instance_uuid)
         else:
-            logger.warning(f"No connection found for instance {instance_uuid}")
+            logger.warning(
+                f"No connection found for instance {instance_uuid}; current connections={list(self.connections.keys())}"
+            )
 
     def get_connected_instances(self):
         """Get list of connected instance UUIDs"""

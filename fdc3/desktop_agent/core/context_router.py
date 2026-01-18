@@ -43,7 +43,8 @@ class ContextRouter:
         # Also broadcast to current channel members
         current_channel = self.channel_manager.get_current_channel(source_instance_uuid)
         if current_channel:
-            for member_uuid in current_channel.members:
+            members = self.channel_manager.get_channel_members(current_channel.id)
+            for member_uuid in members:
                 if member_uuid != source_instance_uuid:
                     targets.add(member_uuid)
 

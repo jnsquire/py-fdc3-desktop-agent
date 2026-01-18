@@ -451,7 +451,14 @@ class ErrorMessages(
     root: Union[OpenError, ResolveError, ResultError, ChannelError, BridgingError]
 
 
-class PrivateChannelEventListenerTypes(Enum):
-    onAddContextListener = "onAddContextListener"
-    onUnsubscribe = "onUnsubscribe"
-    onDisconnect = "onDisconnect"
+# Export PrivateChannelEventListenerTypes from the shared DACP models to avoid
+# duplication and keep a single source of truth. Use a fallback definition
+# if importing the shared enum fails for any reason.
+try:
+    from fdc3.models.dacp.enums import PrivateChannelEventListenerTypes
+except Exception:
+
+    class PrivateChannelEventListenerTypes(Enum):
+        onAddContextListener = "onAddContextListener"
+        onUnsubscribe = "onUnsubscribe"
+        onDisconnect = "onDisconnect"

@@ -119,7 +119,8 @@ from fdc3.models.dacp.external_models import (
 )
 from ..storage import Storage
 from ..launcher.interfaces import ProcessLauncher
-from ..api import IntentResolution, DisplayMetadata, PrivateChannelEventListenerTypes
+from ..api import IntentResolution, DisplayMetadata
+from fdc3.models.dacp.enums import PrivateChannelEventListenerTypes
 from fdc3.models.identifiers import AppIdentifier
 from fdc3.models.identifiers import IntentResolution as WireIntentResolution
 from fdc3.models.identifiers import AppIntent, IntentMetadata, AppMetadata
@@ -730,6 +731,7 @@ class DACPHandler:
 
         instance_uuid = self._get_instance_uuid(session_id, wcp_sessions)
         core_services.channel_manager.join_channel(instance_uuid, channel_id)
+        logger.info(f"Instance {instance_uuid} joined channel {channel_id}")
 
         response = JoinUserChannelResponse(
             type="joinUserChannelResponse",
@@ -1433,9 +1435,12 @@ class DACPHandler:
                 payload=BroadcastEventPayload(context=request.payload.context),
                 meta=AgentEventMeta(),
             )
-            await self.connection_manager.send_to_instance(
-                target_uuid, event.model_dump_json()
-            )
+            try:
+                await self.connection_manager.send_to_instance(
+                    target_uuid, event.model_dump_json()
+                )
+            except Exception:
+                logger.exception(f"Failed to send broadcast to {target_uuid}")
 
     async def _handle_add_context_listener(
         self,
@@ -1504,7 +1509,7 @@ class DACPHandler:
             initial_context = core_services.channel_manager.get_channel_context(
                 target_channel_id, request.payload.contextType
             )
-            if isinstance(initial_context, dict):
+            if initial_context is not None and isinstance(initial_context, dict):
                 event = BroadcastEvent(
                     type="broadcastEvent",
                     payload=BroadcastEventPayload(context=initial_context),

@@ -63,8 +63,6 @@ jobs:
         uses: codecov/codecov-action@v4
         with:
           files: coverage.xml
-          # token is optional for public repos; set CODECOV_TOKEN in repo secrets if needed
-          token: ${{ secrets.CODECOV_TOKEN }}
 
   docker:
     name: Build Docker Image

@@ -21,7 +21,7 @@ from fdc3.models.primitives import (
     Timestamp,
     ListenerUuid,
 )
-from fdc3.desktop_agent.api import PrivateChannelEventListenerTypes
+from .enums import PrivateChannelEventListenerTypes
 
 # DACP Envelopes
 

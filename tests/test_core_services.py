@@ -177,7 +177,7 @@ class TestListenerStore:
         assert len(store.get_context_listeners("fdc3.instrument")) == 1
         assert len(store.get_intent_listeners_for_intent("ViewChart")) == 0
 
-    def test_event_listeners_channel_filter(self):
+    def test_event_listeners_channel_scoping(self):
         """Event listeners should be scoped by channel_id when provided"""
         store = ListenerStore()
 
@@ -505,11 +505,13 @@ class TestChannelManager:
             "c1", {"type": "fdc3.instrument", "id": {"ticker": "XYZ"}}
         )
 
-        assert (
-            manager.get_channel_context("c1", "fdc3.instrument")["id"]["ticker"]
-            == "XYZ"
-        )
-        assert manager.get_channel_context("c1")["type"] == "fdc3.instrument"
+        instrument_context = manager.get_channel_context("c1", "fdc3.instrument")
+        assert instrument_context is not None
+        assert instrument_context["id"]["ticker"] == "XYZ"
+
+        channel_context = manager.get_channel_context("c1")
+        assert channel_context is not None
+        assert channel_context["type"] == "fdc3.instrument"
 
         manager.clear_channel_context("c1")
         assert manager.get_channel_context("c1") is None
