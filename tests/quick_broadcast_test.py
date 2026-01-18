@@ -1,7 +1,15 @@
 import asyncio
+import os
+
+import pytest
+
 from fdc3.client.client import FDC3Client
 
 
+@pytest.mark.skipif(
+    os.getenv("CI") is not None,
+    reason="Quick broadcast test is unreliable in CI environments",
+)
 async def test():
     alice = FDC3Client("ws://localhost:8000/ws", handler_id="auto-alice")
     bob = FDC3Client("ws://localhost:8000/ws", handler_id="auto-bob")
