@@ -38,6 +38,15 @@ def _response_type_for(request_type: str) -> str:
     return request_type + "Response"
 
 
+def _normalize_app_id(app_id: str | None) -> str | None:
+    if not app_id:
+        return None
+    if "@" in app_id:
+        base, _ = app_id.split("@", 1)
+        return base or app_id
+    return app_id
+
+
 class BridgeRequestRouter:
     """Handles requests received from the bridge and produces agent responses."""
 
@@ -228,7 +237,7 @@ class BridgeRequestRouter:
     async def _handle_open(self, payload: dict) -> dict:
         app = payload.get("app") or {}
         context = payload.get("context")
-        app_id = app.get("appId")
+        app_id = _normalize_app_id(app.get("appId"))
         if not app_id:
             return {"error": OpenError.AppNotFound.value}
 
@@ -240,11 +249,29 @@ class BridgeRequestRouter:
         if not launch_config:
             return {"error": OpenError.AppNotFound.value}
 
+        app_payload = dict(app)
+        app_payload["appId"] = app_id
         launch_result = await self._launcher.launch_app(
-            app_id, launch_config, context, app
+            app_id, launch_config, context, app_payload
         )
         if not launch_result.success:
             return {"error": OpenError.ErrorOnLaunch.value}
+
+        if not launch_result.instance_id or not launch_result.instance_uuid:
+            return {"error": OpenError.ErrorOnLaunch.value}
+
+        # Register pending instance and wait for connection (min 15s)
+        self._core.app_registry.register_pending_instance(
+            app_id, launch_result.instance_id, launch_result.instance_uuid
+        )
+
+        connected = await self._core.app_registry.wait_for_instance_connection(
+            launch_result.instance_uuid, timeout=15.0
+        )
+
+        if not connected:
+            self._core.app_registry.unregister_instance(launch_result.instance_uuid)
+            return {"error": OpenError.AppTimeout.value}
 
         return {
             "appIdentifier": {
@@ -256,7 +283,7 @@ class BridgeRequestRouter:
 
     async def _handle_get_app_metadata(self, payload: dict) -> dict:
         app = payload.get("app") or {}
-        app_id = app.get("appId")
+        app_id = _normalize_app_id(app.get("appId"))
         if not app_id:
             return {"error": OpenError.AppNotFound.value}
 
@@ -277,7 +304,7 @@ class BridgeRequestRouter:
 
     async def _handle_find_instances(self, payload: dict) -> dict:
         app = payload.get("app") or {}
-        app_id = app.get("appId")
+        app_id = _normalize_app_id(app.get("appId"))
         if not app_id:
             return {"appIdentifiers": []}
 

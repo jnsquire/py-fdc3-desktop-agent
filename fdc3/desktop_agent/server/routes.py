@@ -1,6 +1,6 @@
 # HTTP route handlers for the FDC3 Desktop Agent server
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import RedirectResponse
 
 router = APIRouter()
@@ -102,3 +102,42 @@ async def admin_raise_intent(request: Request):
                 logging.exception("Failed to deliver intentEvent to %s", target_uuid)
 
     return {"intentResolution": resolution.model_dump(), "targets": targets}
+
+
+def _app_directory_entry(meta) -> dict:
+    return {
+        "appId": getattr(meta, "app_id", None) or getattr(meta, "appId", None),
+        "name": getattr(meta, "name", None),
+        "version": getattr(meta, "version", None),
+        "description": getattr(meta, "description", None),
+        "icons": getattr(meta, "icons", None) or [],
+        "intents": getattr(meta, "intents", None) or [],
+    }
+
+
+@router.get("/v2/apps")
+async def app_directory_list(request: Request):
+    """List all apps in the local app directory (FDC3 App Directory v2 compatible)."""
+    storage = getattr(request.app.state, "storage", None)
+    if storage is None:
+        return []
+    try:
+        apps = await storage.apps.list_apps()
+    except Exception:
+        return []
+    return [_app_directory_entry(app) for app in apps if app is not None]
+
+
+@router.get("/v2/apps/{app_id}")
+async def app_directory_get(request: Request, app_id: str):
+    """Get app metadata from the local app directory (FDC3 App Directory v2 compatible)."""
+    storage = getattr(request.app.state, "storage", None)
+    if storage is None:
+        raise HTTPException(status_code=404, detail="App not found")
+    try:
+        meta = await storage.apps.get_app_metadata(app_id)
+    except Exception:
+        meta = None
+    if not meta:
+        raise HTTPException(status_code=404, detail="App not found")
+    return _app_directory_entry(meta)

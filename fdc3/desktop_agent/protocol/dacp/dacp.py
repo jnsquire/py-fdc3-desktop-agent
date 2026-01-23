@@ -28,6 +28,8 @@ class AgentResponseMeta(BaseModel):
     requestUuid: RequestUuid
     responseUuid: ResponseUuid = Field(default_factory=ResponseUuid)
     timestamp: Timestamp = Field(default_factory=Timestamp)
+    errorSources: Optional[object] = None
+    errorDetails: Optional[object] = None
 
 
 class AgentResponse(BaseModel):
@@ -82,7 +84,7 @@ class HeartbeatAcknowledgmentRequest(BaseModel):
 
 # open
 class OpenRequestPayload(BaseModel):
-    app: AppIdentifier
+    app: AppIdentifier | str
     context: Optional[dict] = None  # Context data
 
 
@@ -209,7 +211,7 @@ class IntentListenerUnsubscribeResponse(BaseModel):
 class RaiseIntentRequestPayload(BaseModel):
     intent: str
     context: Optional[dict] = None
-    target: Optional[AppIdentifier] = None
+    target: Optional[AppIdentifier | str] = None
 
 
 class RaiseIntentRequest(BaseModel):

@@ -22,6 +22,7 @@ from websockets.asyncio.client import ClientConnection, connect
 
 from fdc3.models.identifiers import AppIdentifier
 from fdc3.models.identifiers import BaseImplementationMetadata
+from fdc3.desktop_agent.api import BridgingError
 
 logger = logging.getLogger(__name__)
 
@@ -240,7 +241,7 @@ class BridgeClient:
                 pass
             self._run_task = None
 
-        await self._fail_all_pending("bridge stopped")
+        await self._fail_all_pending(BridgingError.AgentDisconnected.value)
 
     async def _fail_all_pending(self, error: str) -> None:
         async with self._pending_lock:
@@ -272,7 +273,7 @@ class BridgeClient:
                     except Exception:
                         pass
                     self._ws = None
-                await self._fail_all_pending("bridge disconnected")
+                await self._fail_all_pending(BridgingError.AgentDisconnected.value)
 
             if not self._stopping.is_set():
                 await asyncio.sleep(self._settings.retry_seconds)
@@ -449,7 +450,7 @@ class BridgeClient:
     ) -> dict[str, Any]:
         """Send an agentRequest message and await the (bridge-collated) response."""
         if self._ws is None:
-            raise RuntimeError("NotConnectedToBridge")
+            raise RuntimeError(BridgingError.NotConnectedToBridge.value)
 
         req_uuid = _make_uuid()
         timeout = (
@@ -490,7 +491,7 @@ class BridgeClient:
         Returns the generated requestUuid.
         """
         if self._ws is None:
-            raise RuntimeError("NotConnectedToBridge")
+            raise RuntimeError(BridgingError.NotConnectedToBridge.value)
 
         req_uuid = _make_uuid()
         msg = self._build_request_message(

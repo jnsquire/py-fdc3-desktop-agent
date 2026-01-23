@@ -10,6 +10,7 @@ from fdc3.desktop_agent.bridging.client import (
     BridgeConnectionSettings,
     RequestHandler,
 )
+from fdc3.desktop_agent.api import BridgingError
 
 
 class FakeWebSocket:
@@ -577,7 +578,7 @@ async def test_bridge_client_stop_fails_all_pending_futures():
 
     await client.stop()
     assert fut.done() is True
-    with pytest.raises(RuntimeError, match="bridge stopped"):
+    with pytest.raises(RuntimeError, match=BridgingError.AgentDisconnected.value):
         fut.result()
 
 
@@ -637,7 +638,7 @@ async def test_bridge_client_stop_ignores_ws_close_exception_and_still_fails_pen
     await client.stop()
     assert client._ws is None
     assert fut.done() is True
-    with pytest.raises(RuntimeError, match="bridge stopped"):
+    with pytest.raises(RuntimeError, match=BridgingError.AgentDisconnected.value):
         fut.result()
 
 
@@ -680,7 +681,7 @@ async def test_bridge_client_run_loop_resets_state_and_fails_pending_on_disconne
     assert client._connected_agents == []
     assert ws.closed is True
     assert client._ws is None
-    assert "bridge disconnected" in calls
+    assert BridgingError.AgentDisconnected.value in calls
 
 
 @pytest.mark.asyncio

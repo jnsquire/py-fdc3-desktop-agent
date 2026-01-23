@@ -15,6 +15,16 @@ from .interfaces import (
 logger = logging.getLogger(__name__)
 
 
+def _app_id_candidates(app_id: str) -> list[str]:
+    if not app_id:
+        return [app_id]
+    if "@" in app_id:
+        base, _ = app_id.split("@", 1)
+        if base and base != app_id:
+            return [app_id, base]
+    return [app_id]
+
+
 class SqliteAppDirectoryRepository(AppDirectoryRepository):
     """SQLite implementation of app directory repository"""
 
@@ -23,20 +33,22 @@ class SqliteAppDirectoryRepository(AppDirectoryRepository):
 
     async def get_app_metadata(self, app_id: str) -> Optional[AppMetadata]:
         """Get app metadata by app_id"""
+        candidates = _app_id_candidates(app_id)
+        placeholders = ", ".join(["?"] * len(candidates))
         async with self.db.execute(
-            "SELECT name, version, description FROM apps WHERE app_id = ?",
-            (app_id,),
+            f"SELECT app_id, name, version, description FROM apps WHERE app_id IN ({placeholders})",
+            tuple(candidates),
         ) as cursor:
             row = await cursor.fetchone()
-            if not row:
-                return None
-            name, version, description = row
+        if not row:
+            return None
+        resolved_app_id, name, version, description = row
 
         # Load normalized lists (order is not guaranteed)
         icons = []
         async with self.db.execute(
             "SELECT src, size FROM app_icons WHERE app_id = ?",
-            (app_id,),
+            (resolved_app_id,),
         ) as cursor:
             async for r in cursor:
                 src, size = r
@@ -45,7 +57,7 @@ class SqliteAppDirectoryRepository(AppDirectoryRepository):
         intents = []
         async with self.db.execute(
             "SELECT intent FROM app_intents WHERE app_id = ?",
-            (app_id,),
+            (resolved_app_id,),
         ) as cursor:
             async for r in cursor:
                 (intent,) = r
@@ -54,14 +66,14 @@ class SqliteAppDirectoryRepository(AppDirectoryRepository):
         allowed_origins = []
         async with self.db.execute(
             "SELECT origin FROM app_allowed_origins WHERE app_id = ?",
-            (app_id,),
+            (resolved_app_id,),
         ) as cursor:
             async for r in cursor:
                 (origin,) = r
                 allowed_origins.append(origin)
 
         return AppMetadata(
-            app_id, name, version, description, icons, intents, allowed_origins
+            resolved_app_id, name, version, description, icons, intents, allowed_origins
         )
         return None
 
@@ -126,12 +138,21 @@ class SqliteAppDirectoryRepository(AppDirectoryRepository):
 
     async def remove_app(self, app_id: str) -> None:
         """Remove app from directory"""
-        await self.db.execute("DELETE FROM app_icons WHERE app_id = ?", (app_id,))
-        await self.db.execute("DELETE FROM app_intents WHERE app_id = ?", (app_id,))
+        candidates = _app_id_candidates(app_id)
+        placeholders = ", ".join(["?"] * len(candidates))
+        params = tuple(candidates)
         await self.db.execute(
-            "DELETE FROM app_allowed_origins WHERE app_id = ?", (app_id,)
+            f"DELETE FROM app_icons WHERE app_id IN ({placeholders})", params
         )
-        await self.db.execute("DELETE FROM apps WHERE app_id = ?", (app_id,))
+        await self.db.execute(
+            f"DELETE FROM app_intents WHERE app_id IN ({placeholders})", params
+        )
+        await self.db.execute(
+            f"DELETE FROM app_allowed_origins WHERE app_id IN ({placeholders})", params
+        )
+        await self.db.execute(
+            f"DELETE FROM apps WHERE app_id IN ({placeholders})", params
+        )
         await self.db.commit()
 
 
@@ -143,16 +164,18 @@ class SqliteLaunchConfigRepository(LaunchConfigRepository):
 
     async def get_launch_config(self, app_id: str) -> Optional[LaunchConfig]:
         """Get launch config for app"""
+        candidates = _app_id_candidates(app_id)
+        placeholders = ", ".join(["?"] * len(candidates))
         async with self.db.execute(
-            "SELECT command, args, env, cwd, timeout FROM launch_configs WHERE app_id = ?",
-            (app_id,),
+            f"SELECT app_id, command, args, env, cwd, timeout FROM launch_configs WHERE app_id IN ({placeholders})",
+            tuple(candidates),
         ) as cursor:
             row = await cursor.fetchone()
-            if row:
-                command, args_json, env_json, cwd, timeout = row
-                args = json.loads(args_json) if args_json else []
-                env = json.loads(env_json) if env_json else {}
-                return LaunchConfig(app_id, command, args, env, cwd, timeout)
+        if row:
+            resolved_app_id, command, args_json, env_json, cwd, timeout = row
+            args = json.loads(args_json) if args_json else []
+            env = json.loads(env_json) if env_json else {}
+            return LaunchConfig(resolved_app_id, command, args, env, cwd, timeout)
         return None
 
     async def set_launch_config(self, config: LaunchConfig) -> None:
@@ -177,7 +200,12 @@ class SqliteLaunchConfigRepository(LaunchConfigRepository):
 
     async def remove_launch_config(self, app_id: str) -> None:
         """Remove launch config for app"""
-        await self.db.execute("DELETE FROM launch_configs WHERE app_id = ?", (app_id,))
+        candidates = _app_id_candidates(app_id)
+        placeholders = ", ".join(["?"] * len(candidates))
+        await self.db.execute(
+            f"DELETE FROM launch_configs WHERE app_id IN ({placeholders})",
+            tuple(candidates),
+        )
         await self.db.commit()
 
     async def list_launch_configs(self) -> List[LaunchConfig]:

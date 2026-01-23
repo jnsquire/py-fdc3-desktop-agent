@@ -245,10 +245,18 @@ async def test_bridge_router_open_request_success_builds_open_response(router_fa
     storage = make_storage(apps=apps, launch_configs=launch_configs)
 
     launcher = make_launcher(
-        launch_app=SimpleNamespace(success=True, instance_id="inst-1")
+        launch_app=SimpleNamespace(
+            success=True, instance_id="inst-1", instance_uuid="uuid-1"
+        )
     )
+    app_registry = SimpleNamespace(
+        register_pending_instance=Mock(),
+        wait_for_instance_connection=AsyncMock(return_value=True),
+        unregister_instance=Mock(),
+    )
+    core = make_core(app_registry=app_registry)
 
-    router = router_factory(storage=storage, launcher=launcher)
+    router = router_factory(storage=storage, launcher=launcher, core=core)
 
     resp = await router.handle(
         {

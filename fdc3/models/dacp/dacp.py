@@ -45,6 +45,8 @@ class AgentResponseMeta(BaseModel):
     requestUuid: RequestUuid = Field(default_factory=RequestUuid)
     responseUuid: ResponseUuid = Field(default_factory=ResponseUuid)
     timestamp: Timestamp = Field(default_factory=Timestamp)
+    errorSources: Optional[Any] = None
+    errorDetails: Optional[Any] = None
 
     @field_validator("requestUuid", mode="before")
     @classmethod
@@ -109,7 +111,7 @@ class HeartbeatAcknowledgmentRequest(BaseModel):
 
 # open
 class OpenRequestPayload(BaseModel):
-    app: "AppIdentifier"
+    app: Union["AppIdentifier", str]
     context: Optional[Fdc3Context] = None  # Context data
 
 
@@ -697,7 +699,7 @@ class FindInstancesResponse(BaseModel):
 class RaiseIntentRequestPayload(BaseModel):
     intent: str
     context: Optional[Fdc3Context] = None
-    target: Optional["AppIdentifier"] = None
+    target: Optional[Union["AppIdentifier", str]] = None
 
 
 class RaiseIntentRequest(BaseModel):

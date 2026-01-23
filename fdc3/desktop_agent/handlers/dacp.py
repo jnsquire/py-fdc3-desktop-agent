@@ -285,8 +285,42 @@ class DACPHandler:
         }
 
     @staticmethod
-    def _meta_from_request(request: Any) -> AgentResponseMeta:
-        return AgentResponseMeta(requestUuid=request.meta.requestUuid)
+    def _meta_from_request(
+        request: Any, bridge_meta: dict[str, Any] | None = None
+    ) -> AgentResponseMeta:
+        meta = AgentResponseMeta(requestUuid=request.meta.requestUuid)
+        if bridge_meta:
+            error_sources = bridge_meta.get("errorSources")
+            error_details = bridge_meta.get("errorDetails")
+            if error_sources is not None:
+                meta.errorSources = error_sources
+            if error_details is not None:
+                meta.errorDetails = error_details
+        return meta
+
+    @staticmethod
+    def _normalize_app_id(app_id: str | None) -> str | None:
+        if not app_id:
+            return None
+        if "@" in app_id:
+            base, _ = app_id.split("@", 1)
+            return base or app_id
+        return app_id
+
+    async def _resolve_app_id_by_name(self, app_name: str) -> str | None:
+        if not app_name:
+            return None
+        try:
+            listed = await self.storage.apps.list_apps()
+        except Exception:
+            listed = []
+        for meta in listed or []:
+            name = getattr(meta, "name", None)
+            if not isinstance(name, str):
+                continue
+            if name == app_name or name.casefold() == app_name.casefold():
+                return getattr(meta, "app_id", None) or getattr(meta, "appId", None)
+        return None
 
     def _get_instance_uuid(self, session_id: str, wcp_sessions: WcpSessions) -> str:
         """Extract instance UUID from session context."""
@@ -319,12 +353,13 @@ class DACPHandler:
         response_type: str,
         error: str,
         request: Any,
+        bridge_meta: dict[str, Any] | None = None,
     ) -> None:
         """Send a standardized error response."""
         response = AgentResponse(
             type=response_type,
             payload=ErrorResponsePayload(error=error),
-            meta=self._meta_from_request(request),
+            meta=self._meta_from_request(request, bridge_meta),
         )
         await self._send_model(websocket, response)
 
@@ -697,7 +732,7 @@ class DACPHandler:
     async def _handle_get_app_metadata(
         self, request: GetAppMetadataRequest, *, websocket: WebSocket
     ) -> None:
-        app_id = request.payload.app.appId
+        app_id = self._normalize_app_id(request.payload.app.appId)
         if not app_id:
             await self._send_error(
                 websocket, "getAppMetadataResponse", DACPError.APP_NOT_FOUND, request
@@ -719,10 +754,11 @@ class DACPHandler:
             )
             return
 
+        resolved_app_id = (
+            getattr(meta, "app_id", None) or getattr(meta, "appId", None) or app_id
+        )
         app_meta = AppMetadata(
-            appId=getattr(meta, "app_id", None)
-            or getattr(meta, "appId", None)
-            or app_id,
+            appId=resolved_app_id,
             name=getattr(meta, "name", None),
             version=getattr(meta, "version", None),
             description=getattr(meta, "description", None),
@@ -832,6 +868,16 @@ class DACPHandler:
 
         return False
 
+    @staticmethod
+    def _extract_typed_channel_context(result_type: str | None) -> str | None:
+        if not result_type:
+            return None
+        value = result_type.strip()
+        if value.startswith("channel<") and value.endswith(">"):
+            inner = value[len("channel<") : -1].strip()
+            return inner or None
+        return None
+
     async def _collect_app_intents_by_context(
         self,
         context: Fdc3Context,
@@ -932,10 +978,16 @@ class DACPHandler:
                     continue
 
                 meta = await self._get_app_metadata_cached(app_id, app_meta_by_id)
+                app_result_type = getattr(meta, "resultType", None) if meta else None
+                typed_channel_context = self._extract_typed_channel_context(
+                    app_result_type
+                )
+                if typed_channel_context:
+                    has_context_constraints = True
+                    if context_type and typed_channel_context != context_type:
+                        continue
 
-                if not self._matches_result_type(
-                    result_type, getattr(meta, "resultType", None) if meta else None
-                ):
+                if not self._matches_result_type(result_type, app_result_type):
                     continue
 
                 apps.append(self._wire_app_metadata(app_id, meta))
@@ -1511,8 +1563,16 @@ class DACPHandler:
 
             target = request.payload.target
             if target is not None:
-                target_app_id = target.appId
+                target_app_id = self._normalize_app_id(target.appId)
                 target_instance_id = target.instanceId
+                if not target_app_id:
+                    await self._send_error(
+                        websocket,
+                        "findIntentResponse",
+                        DACPError.TARGET_APP_UNAVAILABLE,
+                        request,
+                    )
+                    return
                 if target_instance_id:
                     instances = core_services.app_registry.get_instances_for_app(
                         target_app_id
@@ -1647,7 +1707,16 @@ class DACPHandler:
         """
         try:
             app_id = request.payload.app.appId
+            app_id = self._normalize_app_id(app_id)
             requested_instance_id = request.payload.app.instanceId
+            if not app_id:
+                await self._send_error(
+                    websocket,
+                    "findInstancesResponse",
+                    DACPError.TARGET_APP_UNAVAILABLE,
+                    request,
+                )
+                return
             instances = core_services.app_registry.get_instances_for_app(app_id)
 
             result: list[AppIdentifier] = []
@@ -1688,8 +1757,50 @@ class DACPHandler:
         try:
             normalized_context = self._normalize_context(request.payload.context)
 
+            app_value = request.payload.app
+            app_identity: AppIdentifier | None = None
+            if isinstance(app_value, AppIdentifier):
+                if app_value.desktopAgent:
+                    app_identity = app_value
+                else:
+                    normalized_app_id = self._normalize_app_id(app_value.appId)
+                    if normalized_app_id:
+                        app_identity = AppIdentifier(
+                            appId=normalized_app_id,
+                            instanceId=app_value.instanceId,
+                            desktopAgent=app_value.desktopAgent,
+                        )
+            elif isinstance(app_value, str):
+                normalized_app_id = self._normalize_app_id(app_value)
+                resolved = None
+                if normalized_app_id:
+                    try:
+                        meta = await self.storage.apps.get_app_metadata(
+                            normalized_app_id
+                        )
+                    except Exception:
+                        meta = None
+                    if meta is not None:
+                        resolved = normalized_app_id
+                if not resolved:
+                    resolved = await self._resolve_app_id_by_name(app_value)
+                if not resolved:
+                    await self._send_error(
+                        websocket, "openResponse", DACPError.APP_NOT_FOUND, request
+                    )
+                    return
+                app_identity = AppIdentifier(
+                    appId=resolved, instanceId=None, desktopAgent=None
+                )
+
+            if app_identity is None:
+                await self._send_error(
+                    websocket, "openResponse", DACPError.APP_NOT_FOUND, request
+                )
+                return
+
             # If the request targets a remote Desktop Agent (Agent Bridging), forward it.
-            target_da = getattr(request.payload.app, "desktopAgent", None)
+            target_da = getattr(app_identity, "desktopAgent", None)
             if target_da:
                 bridge = getattr(self, "bridge_client", None)
                 if bridge is None or not getattr(bridge, "is_connected", False):
@@ -1719,7 +1830,7 @@ class DACPHandler:
                 )
 
                 bridge_payload = {
-                    "app": request.payload.app.model_dump(),
+                    "app": app_identity.model_dump(),
                     "context": normalized_context,
                 }
                 try:
@@ -1727,7 +1838,7 @@ class DACPHandler:
                         request_type="openRequest",
                         payload=bridge_payload,
                         source=source_identity,
-                        destination=request.payload.app,
+                        destination=app_identity,
                     )
                 except asyncio.TimeoutError:
                     await self._send_error(
@@ -1746,26 +1857,35 @@ class DACPHandler:
                             request,
                         )
                         return
+                    if str(exc) == BridgingError.AgentDisconnected.value:
+                        await self._send_error(
+                            websocket,
+                            "openResponse",
+                            BridgingError.AgentDisconnected.value,
+                            request,
+                        )
+                        return
                     raise
 
                 self._log_bridge_error_details(bridge_resp)
+                bridge_meta = bridge_resp.get("meta") or {}
                 payload = bridge_resp.get("payload") or {}
                 if payload.get("error"):
                     response = AgentResponse(
                         type="openResponse",
                         payload=ErrorResponsePayload(error=str(payload.get("error"))),
-                        meta=self._meta_from_request(request),
+                        meta=self._meta_from_request(request, bridge_meta),
                     )
                 else:
                     response = OpenResponse(
                         type="openResponse",
                         payload=OpenResponsePayload(),
-                        meta=self._meta_from_request(request),
+                        meta=self._meta_from_request(request, bridge_meta),
                     )
                 await self._send_model(websocket, response)
                 return
 
-            app_id = request.payload.app.appId
+            app_id = app_identity.appId
 
             # Check if app exists in directory
             app_metadata = await self.storage.apps.get_app_metadata(app_id)
@@ -1818,7 +1938,7 @@ class DACPHandler:
 
             # Launch the app
             launch_result = await self.launcher.launch_app(
-                app_id, launch_config, normalized_context, request.payload.app
+                app_id, launch_config, normalized_context, app_identity
             )
 
             if launch_result.success:
@@ -2062,9 +2182,32 @@ class DACPHandler:
         normalized_context = self._normalize_context(request.payload.context)
         context_payload = normalized_context or request.payload.context
 
+        target = request.payload.target
+        if isinstance(target, AppIdentifier):
+            if not target.desktopAgent:
+                normalized_target_id = self._normalize_app_id(target.appId)
+                if normalized_target_id and normalized_target_id != target.appId:
+                    target = AppIdentifier(
+                        appId=normalized_target_id,
+                        instanceId=target.instanceId,
+                        desktopAgent=target.desktopAgent,
+                    )
+        elif isinstance(target, str):
+            resolved = await self._resolve_app_id_by_name(target)
+            normalized_target_id = self._normalize_app_id(resolved or target)
+            if normalized_target_id:
+                target = AppIdentifier(
+                    appId=normalized_target_id, instanceId=None, desktopAgent=None
+                )
+
+        if target is not None and not isinstance(target, AppIdentifier):
+            target = None
+
+        if target is not None and target != request.payload.target:
+            request.payload.target = target
+
         # Agent bridging: if a target is provided with a remote desktopAgent, forward.
         try:
-            target = request.payload.target
             target_da = getattr(target, "desktopAgent", None) if target else None
             bridge = getattr(self, "bridge_client", None)
             if target_da:
@@ -2134,15 +2277,24 @@ class DACPHandler:
                             request,
                         )
                         return
+                    if str(exc) == BridgingError.AgentDisconnected.value:
+                        await self._send_error(
+                            websocket,
+                            "raiseIntentResponse",
+                            BridgingError.AgentDisconnected.value,
+                            request,
+                        )
+                        return
                     raise
 
                 self._log_bridge_error_details(bridge_resp)
+                bridge_meta = bridge_resp.get("meta") or {}
                 payload = bridge_resp.get("payload") or {}
                 if payload.get("error"):
                     response = AgentResponse(
                         type="raiseIntentResponse",
                         payload=ErrorResponsePayload(error=str(payload.get("error"))),
-                        meta=self._meta_from_request(request),
+                        meta=self._meta_from_request(request, bridge_meta),
                     )
                 else:
                     intent_resolution_raw = payload.get("intentResolution")
@@ -2154,7 +2306,7 @@ class DACPHandler:
                         payload=RaiseIntentResponsePayload(
                             intentResolution=intent_resolution
                         ),
-                        meta=self._meta_from_request(request),
+                        meta=self._meta_from_request(request, bridge_meta),
                     )
                 await self._send_model(websocket, response)
                 return
@@ -2167,7 +2319,7 @@ class DACPHandler:
             response = await self.system_intent_handler.handle_system_intent(
                 request.payload.intent,
                 self._context_as_dict(normalized_context),
-                request.payload.target,
+                target,
                 websocket,
                 request.meta.requestUuid,
             )
@@ -2193,7 +2345,7 @@ class DACPHandler:
             core_services.intent_resolver.resolve_intent(
                 request.payload.intent,
                 self._context_as_dict(normalized_context),
-                request.payload.target,
+                target,
             )
         )
 
@@ -2264,8 +2416,16 @@ class DACPHandler:
             )
             target = request.payload.target
             if target is not None:
-                target_app_id = target.appId
+                target_app_id = self._normalize_app_id(target.appId)
                 target_instance_id = target.instanceId
+                if not target_app_id:
+                    await self._send_error(
+                        websocket,
+                        "raiseIntentForContextResponse",
+                        DACPError.TARGET_APP_UNAVAILABLE,
+                        request,
+                    )
+                    return
 
                 if target_instance_id:
                     instances = core_services.app_registry.get_instances_for_app(
