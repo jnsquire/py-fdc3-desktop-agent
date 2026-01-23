@@ -13,6 +13,7 @@ from .server import create_app, app
 # Re-export key interfaces for custom implementations
 from .storage.interfaces import Storage, AppMetadata, LaunchConfig
 from .launcher.interfaces import ProcessLauncher, LaunchResult
+from .launcher.web_launcher import WebEndpointLauncher, WebBrowserLauncher
 from .distributed.adapter import DistributedLogAdapter
 from .plugins import (
     IntentHandlerPlugin,
@@ -33,6 +34,8 @@ __all__ = [
     "LaunchConfig",
     "ProcessLauncher",
     "LaunchResult",
+    "WebEndpointLauncher",
+    "WebBrowserLauncher",
     "DistributedLogAdapter",
     "IntentHandlerPlugin",
     "IntentHandlerResult",

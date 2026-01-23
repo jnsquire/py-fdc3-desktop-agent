@@ -55,16 +55,16 @@ FDC3Client(
 
 ### Methods
 
-| Method                                                             | Description                                                             |
-| ------------------------------------------------------------------ | ----------------------------------------------------------------------- |
-| `connect()`                                                        | Connect to the agent and initiate WCP handshake                         |
-| `wait_for_handshake(timeout=10.0)`                                 | Wait for WCP handshake to complete; returns `True` if successful        |
-| `register_handler(handler_id, intents, priority=0, metadata=None)` | Register as a handler for the specified intents; returns `handler_uuid` |
-| `unregister_handler(handler_uuid)`                                 | Unregister a previously registered handler                              |
-| `send_intent_result(request_uuid, result=None, error=None)`        | Send the result (or error) for a forwarded intent                       |
-| `forwarded_intent_handlers`                                         | `EventEmitter` used to subscribe to forwarded intent events (use `add`/`remove`) |
-| `close()`                                                          | Close the WebSocket connection                                          |
-| `run_forever()`                                                    | Block until the connection is closed                                    |
+| Method                                                             | Description                                                                      |
+| ------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| `connect()`                                                        | Connect to the agent and initiate WCP handshake                                  |
+| `wait_for_handshake(timeout=10.0)`                                 | Wait for WCP handshake to complete; returns `True` if successful                 |
+| `register_handler(handler_id, intents, priority=0, metadata=None)` | Register as a handler for the specified intents; returns `handler_uuid`          |
+| `unregister_handler(handler_uuid)`                                 | Unregister a previously registered handler                                       |
+| `send_intent_result(request_uuid, result=None, error=None)`        | Send the result (or error) for a forwarded intent                                |
+| `forwarded_intent_handlers`                                        | `EventEmitter` used to subscribe to forwarded intent events (use `add`/`remove`) |
+| `close()`                                                          | Close the WebSocket connection                                                   |
+| `run_forever()`                                                    | Block until the connection is closed                                             |
 
 ## Protocol Messages
 
@@ -125,10 +125,15 @@ External handlers use these message types:
 
 ## Example External Handler
 
-See the repository example at https://github.com/jnsquire/py-fdc3-desktop-agent/blob/main/examples/external_handler.py for a complete working example. Run it with:
+See the repository examples at https://github.com/jnsquire/py-fdc3-desktop-agent/blob/main/examples/external_handler.py and https://github.com/jnsquire/py-fdc3-desktop-agent/blob/main/examples/external_handler_viewchart.py for complete working examples. The agent includes an Admin UI (http://localhost:8000/admin) with a **Raise Intent** form that can be used to trigger intents against registered handlers for quick testing.
+
+Run the ViewChart example with:
 
 ```bash
 python -m examples.external_handler --agent-url ws://localhost:8000/ws --handler-id my-handler
+
+# ViewChart-only example
+python -m examples.external_handler_viewchart --agent-url ws://localhost:8000/ws --handler-id viewchart-handler --open
 ```
 
 ## Creating an External Handler Package

@@ -48,3 +48,45 @@ class IntentResolver:
         """Deliver intent event to listeners. Returns target instance_uuids."""
         listeners = self.listener_store.get_intent_listeners_for_intent(intent)
         return [listener.instance_uuid for listener in listeners]
+
+    def deliver_intent_event_with_resolution(
+        self,
+        intent: str,
+        context: Optional[dict],
+        resolution: Optional[IntentResolution],
+        originating_app: Optional[AppIdentifier],
+    ) -> List[str]:
+        """Deliver an intent event preferring the provided resolution.
+
+        This avoids races between resolution and listener changes by attempting
+        to deliver the event specifically to the resolved instance (by
+        matching AppIdentifier.instanceId -> instance_uuid). If the resolved
+        instance is not available or does not have a listener for the intent,
+        falls back to the normal listener-based delivery.
+        """
+        # If no resolution available, fall back to normal delivery
+        if resolution is None:
+            return self.deliver_intent_event(intent, context, originating_app)
+
+        try:
+            src = resolution.source
+            if src and src.instanceId:
+                # Find the instance record for the resolved app/instance id
+                instances = self.app_registry.get_instances_for_app(src.appId)
+                for inst in instances:
+                    if inst.instance_id == src.instanceId:
+                        # Verify that this instance has a listener for the intent
+                        listeners = self.listener_store.get_intent_listeners_for_intent(
+                            intent
+                        )
+                        if any(
+                            listener.instance_uuid == inst.instance_uuid
+                            for listener in listeners
+                        ):
+                            return [inst.instance_uuid]
+        except Exception:
+            # Be conservative on error and fall back to normal delivery
+            pass
+
+        # Fallback
+        return self.deliver_intent_event(intent, context, originating_app)

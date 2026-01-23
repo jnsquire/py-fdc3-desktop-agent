@@ -15,7 +15,7 @@ from fdc3.models.dacp import (
 
 # Helper: map a raw message dict to an appropriate Pydantic model instance.
 # Returns the model instance on success or raises ValidationError on failure.
-_MODEL_MAP = {
+_MODEL_MAP: Dict[str, type[BaseModel]] = {
     "broadcastEvent": BroadcastEvent,
     "intentEvent": IntentEvent,
     "forwardedIntent": ForwardedIntentMessage,
@@ -46,7 +46,9 @@ def parse_message(msg: Any) -> Optional[BaseModel]:
         data = dict(msg)
 
     t = data.get("type")
-    model = _MODEL_MAP.get(t)  # type: ignore
+    if not isinstance(t, str):
+        return None
+    model = _MODEL_MAP.get(t)
     if not model:
         return None
     # Use Pydantic v2 validation API.

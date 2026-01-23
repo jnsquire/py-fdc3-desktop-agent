@@ -6,7 +6,7 @@ import json
 import logging
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any, AsyncContextManager, cast
+from typing import TYPE_CHECKING, Any, AsyncContextManager, Protocol, cast
 
 from fastapi import FastAPI
 
@@ -20,9 +20,17 @@ from ..bridging.client import (
     ChannelsState,
 )
 from ..bridging.router import BridgeRequestRouter
-from ..core import core_services
+from ..core import core_services, CoreServices
 from ..distributed.factory import get_adapter
+from ..distributed.adapter import DistributedLogAdapter
+from ..api import DisplayMetadata
 from ..tools import create_task_safe
+from fdc3.models.dacp.dacp import (
+    BroadcastEvent,
+    BroadcastEventPayload,
+    AgentEventMeta,
+    Fdc3Context,
+)
 from ..version import __version__
 from .constants import SYSTEM_APP_METADATA
 
@@ -33,7 +41,28 @@ if TYPE_CHECKING:
     from ..storage.interfaces import Storage
     from .connection_manager import AgentClientConnectionManager
 
+
+class AppState(Protocol):
+    bridge_client: BridgeClient | None
+    distributed_adapter: DistributedLogAdapter | None
+    distributed_subscription_id: str | None
+    storage: Storage
+    launcher: ProcessLauncher
+    core_services: CoreServices
+    dacp_handler: DACPHandler
+
+
 logger = logging.getLogger(__name__)
+
+
+DEFAULT_USER_CHANNELS: list[tuple[str, str, str]] = [
+    ("user:red", "Red", "0xFF0000"),
+    ("user:orange", "Orange", "0xFFA500"),
+    ("user:yellow", "Yellow", "0xFFFF00"),
+    ("user:green", "Green", "0x00FF00"),
+    ("user:blue", "Blue", "0x0000FF"),
+    ("user:purple", "Purple", "0x800080"),
+]
 
 
 def create_implementation_metadata_factory(
@@ -43,13 +72,12 @@ def create_implementation_metadata_factory(
 
     def _implementation_metadata() -> dict[str, Any]:
         # Minimal ImplementationMetadata for bridging handshake.
-        # Compute optional features based on available core services.
+        # Keep optional features aligned with DACP getInfo reporting.
         # See FDC3 agent-bridging overview, BCP step 3.
         optional_features = {
-            "OriginatingAppMetadata": hasattr(core_services, "app_registry")
-            and getattr(core_services, "app_registry") is not None,
-            "UserChannelMembershipAPIs": hasattr(core_services, "channel_manager")
-            and getattr(core_services, "channel_manager") is not None,
+            # We do not expose originating app metadata on context/intent payloads.
+            "OriginatingAppMetadata": False,
+            "UserChannelMembershipAPIs": True,
             "DesktopAgentBridging": True,
         }
 
@@ -75,7 +103,25 @@ def create_channels_state_factory(
         state: ChannelsState = {}
 
         channel_manager = core_services.channel_manager
-        app_registry = getattr(core_services, "app_registry", None)
+        app_registry = core_services.app_registry
+
+        try:
+            existing_users = [
+                c
+                for c in channel_manager.list_channels()
+                if getattr(c, "type", None) == "user"
+            ]
+        except Exception:
+            existing_users = []
+
+        if not existing_users:
+            for channel_id, name, color in DEFAULT_USER_CHANNELS:
+                if channel_manager.get_channel(channel_id) is None:
+                    channel_manager.create_channel(
+                        channel_id,
+                        "user",
+                        display_metadata=DisplayMetadata(name=name, color=color),
+                    )
 
         for channel in channel_manager.list_channels():
             members: list[ChannelMember] = []
@@ -108,6 +154,13 @@ def create_channels_state_factory(
     return cast(ChannelsStateFactory, _channels_state)
 
 
+async def _safe_await(label: str, awaitable) -> None:
+    try:
+        await awaitable
+    except Exception:
+        logger.exception("Error %s", label)
+
+
 def create_lifespan(
     config: DesktopAgentConfig,
     storage: Storage,
@@ -133,6 +186,95 @@ def create_lifespan(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         """Lifespan handler to initialize and teardown resources."""
+        state = cast(AppState, app.state)
+
+        async def _apply_channels_state(channels_state: dict[str, list[dict]] | None):
+            if not channels_state:
+                return
+
+            channel_manager = core_services.channel_manager
+            listener_store = core_services.listener_store
+
+            for channel_id, incoming in channels_state.items():
+                if not isinstance(incoming, list):
+                    continue
+
+                incoming_contexts: list[Fdc3Context] = [
+                    cast(Fdc3Context, ctx)
+                    for ctx in incoming
+                    if isinstance(ctx, dict) and ctx.get("type")
+                ]
+                if not incoming_contexts:
+                    continue
+
+                with channel_manager._lock:
+                    existing = dict(
+                        channel_manager.channel_contexts.get(channel_id, {})
+                    )
+                    members = set(channel_manager.get_channel_members(channel_id))
+                    channel_known = (
+                        channel_id in channel_manager.channels
+                        or channel_id in channel_manager.channel_contexts
+                    )
+
+                if not channel_known:
+                    with channel_manager._lock:
+                        stored = channel_manager.channel_contexts.setdefault(
+                            channel_id, {}
+                        )
+                        for ctx in incoming_contexts:
+                            stored[ctx["type"]] = ctx
+                        stored[channel_manager.LAST_CONTEXT_KEY] = incoming_contexts[0]
+                    continue
+
+                send_queue: list[tuple[str, Fdc3Context]] = []
+
+                for ctx in reversed(incoming_contexts):
+                    ctx_type = ctx["type"]
+                    existing_ctx = existing.get(ctx_type)
+                    if existing_ctx is None or existing_ctx != ctx:
+                        listeners = listener_store.get_context_listeners_for_type(
+                            ctx_type, channel_id=channel_id, include_global=True
+                        )
+                        for listener in listeners:
+                            if listener.context_type is None:
+                                continue
+                            if listener.instance_uuid not in members:
+                                continue
+                            send_queue.append((listener.instance_uuid, ctx))
+                        existing[ctx_type] = ctx
+
+                most_recent = incoming_contexts[0]
+                existing_last = existing.get(channel_manager.LAST_CONTEXT_KEY)
+                if existing_last != most_recent:
+                    for listener in listener_store.context_listeners.values():
+                        if listener.context_type is not None:
+                            continue
+                        if listener.channel_id not in (None, channel_id):
+                            continue
+                        if listener.instance_uuid not in members:
+                            continue
+                        send_queue.append((listener.instance_uuid, most_recent))
+                    existing[channel_manager.LAST_CONTEXT_KEY] = most_recent
+
+                with channel_manager._lock:
+                    channel_manager.channel_contexts[channel_id] = existing
+
+                serialized: dict[int, str] = {}
+                for instance_uuid, ctx in send_queue:
+                    key = id(ctx)
+                    payload = serialized.get(key)
+                    if payload is None:
+                        payload = BroadcastEvent(
+                            type="broadcastEvent",
+                            payload=BroadcastEventPayload(context=ctx),
+                            meta=AgentEventMeta(),
+                        ).model_dump_json()
+                        serialized[key] = payload
+                    await instance_connection_manager.send_to_instance(
+                        instance_uuid, payload
+                    )
+
         # Startup
         logging.basicConfig(level=getattr(logging, config.log_level))
 
@@ -168,7 +310,7 @@ def create_lifespan(
             logger.info(f"Registered plugin: {plugin.name}")
 
         # Desktop Agent Bridging (experimental)
-        app.state.bridge_client = None
+        state.bridge_client = None
         if config.bridge_enabled:
             settings = BridgeConnectionSettings(
                 host=config.bridge_host,
@@ -187,6 +329,14 @@ def create_lifespan(
                 local_desktop_agent_name=None,
             )
 
+            async def _handle_connected_agents_update(payload):
+                add_agent = payload.addAgent
+                if isinstance(add_agent, str) and add_agent:
+                    router.set_local_desktop_agent_name(add_agent)
+                channels_state = getattr(payload, "channelsState", None)
+                if channels_state:
+                    await _apply_channels_state(dict(channels_state))
+
             bridge_client = BridgeClient(
                 settings,
                 implementation_metadata_factory=create_implementation_metadata_factory(
@@ -194,26 +344,27 @@ def create_lifespan(
                 ),
                 channels_state_factory=create_channels_state_factory(settings),
                 request_handler=cast(RequestHandler, router.handle),
+                connected_agents_update_handler=_handle_connected_agents_update,
             )
             await bridge_client.start()
-            app.state.bridge_client = bridge_client
+            state.bridge_client = bridge_client
 
             # Inject into handler so outbound calls can be bridged.
             dacp_handler.bridge_client = bridge_client
 
         # Initialize distributed adapter
         adapter = config.distributed_adapter
-        sub_id = None
         if adapter is None:
             try:
                 adapter = get_adapter()
             except Exception:
+                logger.exception("Error creating distributed adapter")
                 adapter = None
 
         if adapter:
             try:
                 await adapter.start()
-                app.state.distributed_adapter = adapter
+                state.distributed_adapter = adapter
 
                 async def _distributed_event_handler(ev):
                     try:
@@ -241,66 +392,57 @@ def create_lifespan(
                     create_task_safe(_distributed_event_handler(ev))
 
                 sub_id = await adapter.subscribe("channel_events", _sub_cb)
-                app.state.distributed_subscription_id = sub_id
+                state.distributed_subscription_id = sub_id
             except Exception:
-                app.state.distributed_adapter = None
-                app.state.distributed_subscription_id = None
+                logger.exception("Error starting distributed adapter")
+                state.distributed_adapter = None
+                state.distributed_subscription_id = None
         else:
-            app.state.distributed_adapter = None
-            app.state.distributed_subscription_id = None
+            state.distributed_adapter = None
+            state.distributed_subscription_id = None
 
         # Store references for route handlers
-        app.state.storage = storage
-        app.state.launcher = launcher
-        app.state.core_services = core_services
+        state.storage = storage
+        state.launcher = launcher
+        state.core_services = core_services
+        # Expose the DACP handler so admin routes can programmatically raise
+        # intents and deliver intent events to connected instances.
+        state.dacp_handler = dacp_handler
 
         try:
             yield
         finally:
             # Shutdown
-            try:
-                bridge_client = getattr(app.state, "bridge_client", None)
-                if bridge_client is not None:
-                    await bridge_client.stop()
-            except Exception:
-                logger.exception("Error stopping bridge client")
+            if state.bridge_client is not None:
+                await _safe_await("stopping bridge client", state.bridge_client.stop())
 
-            adapter = getattr(app.state, "distributed_adapter", None)
-            sub_id = getattr(app.state, "distributed_subscription_id", None)
+            adapter = state.distributed_adapter
+            sub_id = state.distributed_subscription_id
             if adapter:
                 if sub_id:
-                    try:
-                        await adapter.unsubscribe(sub_id)
-                    except Exception:
-                        pass
-                try:
-                    await adapter.stop()
-                except Exception:
-                    pass
+                    await _safe_await(
+                        "unsubscribing distributed adapter",
+                        adapter.unsubscribe(sub_id),
+                    )
+                await _safe_await("stopping distributed adapter", adapter.stop())
 
-            try:
-                await launcher.stop()
-            except Exception:
-                pass
-
-            try:
-                await agent_client_manager.close_all()
-            except Exception:
-                pass
-
-            try:
-                await instance_connection_manager.close_all()
-            except Exception:
-                pass
+            await _safe_await("stopping launcher", launcher.stop())
+            await _safe_await(
+                "closing agent client manager", agent_client_manager.close_all()
+            )
+            await _safe_await(
+                "closing instance connection manager",
+                instance_connection_manager.close_all(),
+            )
 
             # Unregister plugins
             for plugin in list(core_services.plugin_registry.list_plugins()):
-                try:
-                    await core_services.unregister_plugin(plugin)
-                except Exception:
-                    pass
+                await _safe_await(
+                    f"unregistering plugin {plugin.name}",
+                    core_services.unregister_plugin(plugin),
+                )
 
-            await storage.close()
+            await _safe_await("closing storage", storage.close())
             logger.info("FDC3 Desktop Agent storage closed")
 
     return lifespan

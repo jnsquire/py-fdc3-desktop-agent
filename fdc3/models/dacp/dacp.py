@@ -5,7 +5,7 @@ remain functionally equivalent.
 """
 
 from pydantic import BaseModel, Field, field_validator
-from typing import Optional, Literal, Union, List, Any
+from typing import Optional, Literal, Union, List, Any, TypeAlias
 from fdc3.models.identifiers import AppIdentifier
 from fdc3.models.identifiers import AppMetadata
 from fdc3.models.identifiers import AppIntent
@@ -14,6 +14,7 @@ from fdc3.models.identifiers import IntentResolution
 from fdc3.models.identifiers import Channel
 from fdc3.models.identifiers import ImplementationMetadata
 from fdc3.models.identifiers import FDC3Event
+from fdc3.models.context_types import ContextBase
 from fdc3.models.primitives import (
     RequestUuid,
     ResponseUuid,
@@ -24,6 +25,8 @@ from fdc3.models.primitives import (
 from .enums import PrivateChannelEventListenerTypes
 
 # DACP Envelopes
+
+Fdc3Context: TypeAlias = ContextBase
 
 
 class AppRequestMeta(BaseModel):
@@ -107,7 +110,7 @@ class HeartbeatAcknowledgmentRequest(BaseModel):
 # open
 class OpenRequestPayload(BaseModel):
     app: "AppIdentifier"
-    context: Optional[dict] = None  # Context data
+    context: Optional[Fdc3Context] = None  # Context data
 
 
 class OpenRequest(BaseModel):
@@ -128,7 +131,7 @@ class OpenResponse(BaseModel):
 
 # broadcast
 class BroadcastRequestPayload(BaseModel):
-    context: dict  # Context data
+    context: Fdc3Context  # Context data
 
 
 class BroadcastRequest(BaseModel):
@@ -138,7 +141,7 @@ class BroadcastRequest(BaseModel):
 
 
 class BroadcastEventPayload(BaseModel):
-    context: dict
+    context: Fdc3Context
 
 
 class BroadcastEvent(BaseModel):
@@ -277,6 +280,29 @@ class GetUserChannelsResponse(BaseModel):
     meta: AgentResponseMeta = Field(default_factory=AgentResponseMeta)
 
 
+# deprecated user channel APIs (2.2 compatibility)
+class GetSystemChannelsRequestPayload(BaseModel):
+    pass
+
+
+class GetSystemChannelsRequest(BaseModel):
+    type: Literal["getSystemChannels"]
+    payload: GetSystemChannelsRequestPayload = Field(
+        default_factory=GetSystemChannelsRequestPayload
+    )
+    meta: AppRequestMeta = Field(default_factory=AppRequestMeta)
+
+
+class GetSystemChannelsResponsePayload(BaseModel):
+    channels: List[Channel]
+
+
+class GetSystemChannelsResponse(BaseModel):
+    type: Literal["getSystemChannelsResponse"]
+    payload: GetSystemChannelsResponsePayload
+    meta: AgentResponseMeta = Field(default_factory=AgentResponseMeta)
+
+
 class GetCurrentChannelRequestPayload(BaseModel):
     pass
 
@@ -314,7 +340,7 @@ class GetCurrentContextRequest(BaseModel):
 
 
 class GetCurrentContextResponsePayload(BaseModel):
-    context: Optional[dict] = None
+    context: Optional[Fdc3Context] = None
 
 
 class GetCurrentContextResponse(BaseModel):
@@ -340,6 +366,26 @@ class JoinUserChannelResponsePayload(BaseModel):
 class JoinUserChannelResponse(BaseModel):
     type: Literal["joinUserChannelResponse"]
     payload: JoinUserChannelResponsePayload
+    meta: AgentResponseMeta = Field(default_factory=AgentResponseMeta)
+
+
+class JoinChannelRequestPayload(BaseModel):
+    channelId: str
+
+
+class JoinChannelRequest(BaseModel):
+    type: Literal["joinChannel"]
+    payload: JoinChannelRequestPayload
+    meta: AppRequestMeta = Field(default_factory=AppRequestMeta)
+
+
+class JoinChannelResponsePayload(BaseModel):
+    channel: Channel
+
+
+class JoinChannelResponse(BaseModel):
+    type: Literal["joinChannelResponse"]
+    payload: JoinChannelResponsePayload
     meta: AgentResponseMeta = Field(default_factory=AgentResponseMeta)
 
 
@@ -583,7 +629,8 @@ class IntentListenerUnsubscribeResponse(BaseModel):
 # findIntent
 class FindIntentRequestPayload(BaseModel):
     intent: str
-    context: Optional[dict] = None
+    context: Optional[Fdc3Context] = None
+    resultType: Optional[str] = None
     target: Optional["AppIdentifier"] = None
 
 
@@ -605,7 +652,8 @@ class FindIntentResponse(BaseModel):
 
 # findIntentsByContext
 class FindIntentsByContextRequestPayload(BaseModel):
-    context: dict
+    context: Fdc3Context
+    resultType: Optional[str] = None
 
 
 class FindIntentsByContextRequest(BaseModel):
@@ -648,7 +696,7 @@ class FindInstancesResponse(BaseModel):
 # raiseIntent
 class RaiseIntentRequestPayload(BaseModel):
     intent: str
-    context: Optional[dict] = None
+    context: Optional[Fdc3Context] = None
     target: Optional["AppIdentifier"] = None
 
 
@@ -670,7 +718,8 @@ class RaiseIntentResponse(BaseModel):
 
 # raiseIntentForContext
 class RaiseIntentForContextRequestPayload(BaseModel):
-    context: dict
+    context: Fdc3Context
+    resultType: Optional[str] = None
     target: Optional["AppIdentifier"] = None
 
 
@@ -693,7 +742,7 @@ class RaiseIntentForContextResponse(BaseModel):
 # intentEvent
 class IntentEventPayload(BaseModel):
     intent: str
-    context: Optional[dict] = None
+    context: Optional[Fdc3Context] = None
     originatingApp: Optional["AppIdentifier"] = None
 
 

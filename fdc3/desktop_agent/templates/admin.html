@@ -167,6 +167,20 @@
         </div>
     </div>
 
+    <div class="section">
+        <h2>Raise Intent (Admin)</h2>
+        <div class="form-group">
+            <label for="intentName">Intent Name:</label>
+            <input type="text" id="intentName" placeholder="e.g., ViewChart">
+        </div>
+        <div class="form-group">
+            <label for="intentContext">Context (JSON):</label>
+            <textarea id="intentContext" rows="4" placeholder='e.g., { "id": "AAPL" }'></textarea>
+        </div>
+        <button type="button" onclick="raiseIntent()">Raise Intent</button>
+        <div id="raiseResult" style="margin-top:10px;"></div>
+    </div>
+
     <div id="status" class="status" style="display: none;"></div>
 
     <script>
@@ -358,6 +372,39 @@
             setTimeout(() => {
                 status.style.display = 'none';
             }, 5000);
+        }
+
+        async function raiseIntent() {
+            const intent = document.getElementById('intentName').value.trim();
+            const contextText = document.getElementById('intentContext').value.trim();
+            let context = null;
+            if (contextText) {
+                try {
+                    context = JSON.parse(contextText);
+                } catch (e) {
+                    showStatus('Invalid JSON for context: ' + e.message, 'error');
+                    return;
+                }
+            }
+
+            try {
+                const response = await fetch('/admin/raise-intent', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ intent, context })
+                });
+                const result = await response.json();
+                if (result.error) {
+                    showStatus('Raise intent failed: ' + result.error, 'error');
+                    document.getElementById('raiseResult').textContent = JSON.stringify(result);
+                    return;
+                }
+
+                document.getElementById('raiseResult').textContent = JSON.stringify(result, null, 2);
+                showStatus('Intent raised. Targets: ' + (result.targets || []).length, 'success');
+            } catch (e) {
+                showStatus('Error raising intent: ' + e.message, 'error');
+            }
         }
     </script>
 </body>

@@ -1,9 +1,10 @@
 # Process launcher interfaces and implementations
 
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any
+from typing import Optional
 from ..api import AppIdentifier
 from ..storage import LaunchConfig
+from fdc3.models.dacp.dacp import Fdc3Context
 
 
 class LaunchResult:
@@ -30,7 +31,7 @@ class ProcessLauncher(ABC):
         self,
         app_id: str,
         launch_config: LaunchConfig,
-        context: Optional[Dict[str, Any]] = None,
+        context: Optional[Fdc3Context] = None,
         target: Optional[AppIdentifier] = None,
     ) -> LaunchResult:
         """Launch an app process with the given configuration"""

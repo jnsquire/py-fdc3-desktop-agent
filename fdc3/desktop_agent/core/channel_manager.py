@@ -1,17 +1,51 @@
 import copy
 import uuid
 import threading
-from typing import Dict, List, Optional, Callable, Any, Set
+from typing import Dict, List, Optional, Callable, Any, Set, TypedDict, cast
 import inspect
 import json
 import asyncio
 from datetime import datetime
 import logging
+from fdc3.models.dacp.dacp import Fdc3Context
 from ..distributed.adapter import DistributedLogAdapter
 from ..api import DisplayMetadata
 
 
 logger = logging.getLogger(__name__)
+
+
+class ChannelEvent(TypedDict):
+    event_type: str
+    channel_id: str
+    instance_uuid: Optional[str]
+    context: Optional[str]
+    timestamp: str
+
+
+class EventSubscription(TypedDict):
+    callback: Callable[[ChannelEvent], Any]
+    channel_filter: Optional[str]
+
+
+class ChannelInfo(TypedDict):
+    id: str
+    type: str
+    display_name: Optional[str]
+    color: Optional[str]
+    member_count: int
+
+
+class PrivateChannelInvite(TypedDict):
+    token: str
+    instanceId: Optional[str]
+
+
+class PrivateChannelState(TypedDict):
+    id: str
+    owner: Optional[str]
+    members: List[str]
+    invites: List[PrivateChannelInvite]
 
 
 class ChannelInstance:
@@ -30,19 +64,20 @@ class ChannelInstance:
 class ChannelManager:
     """Manages user/app/private channels and joined channel per instance."""
 
+    LAST_CONTEXT_KEY = "__last__"
+
     def __init__(self):
         self.channels: Dict[str, ChannelInstance] = {}  # channel_id -> channel
         self.instance_channels: Dict[
             str, str
         ] = {}  # instance_uuid -> current_channel_id
-        self.event_subscriptions: Dict[
-            str, Dict[str, Any]
-        ] = {}  # subscription_id -> subscription info
+        self.event_subscriptions: Dict[str, EventSubscription] = {}
         self.private_channel_owners: Dict[str, str] = {}
         self.private_channel_participants: Dict[str, Set[str]] = {}
         self.private_channel_invites: Dict[str, Dict[str, Optional[str]]] = {}
+        self.remote_private_channel_listeners: Dict[str, Set[str]] = {}
         self.next_subscription_id = 1
-        self.channel_contexts: Dict[str, Dict[str, dict]] = {}
+        self.channel_contexts: Dict[str, Dict[str, Fdc3Context]] = {}
         # Optional distributed adapter to relay events across workers
         self.distributed_adapter: Optional[DistributedLogAdapter] = None
         # Lock to serialize access to channel membership and related structures
@@ -67,8 +102,9 @@ class ChannelManager:
             logger.info(
                 f"create_channel: created channel_id={channel_id} obj_id={id(channel)} type={channel_type}"
             )
-            self._emit_event("created", channel_id)
-            return channel
+
+        self._emit_event("created", channel_id)
+        return channel
 
     def create_private_channel(
         self,
@@ -95,7 +131,7 @@ class ChannelManager:
     ) -> str:
         with self._lock:
             channel = self.get_channel(channel_id)
-            if channel is None or getattr(channel, "type", None) != "private":
+            if channel is None or channel.type != "private":
                 raise ValueError("private channel not found")
 
             token = uuid.uuid4().hex
@@ -120,21 +156,24 @@ class ChannelManager:
                 self.private_channel_invites.pop(channel_id, None)
             return True
 
-    def get_private_channel_state(self, channel_id: str) -> Optional[Dict[str, Any]]:
+    def get_private_channel_state(
+        self, channel_id: str
+    ) -> Optional[PrivateChannelState]:
         channel = self.get_channel(channel_id)
-        if channel is None or getattr(channel, "type", None) != "private":
+        if channel is None or channel.type != "private":
             return None
         with self._lock:
+            invites: List[PrivateChannelInvite] = [
+                cast(PrivateChannelInvite, {"token": token, "instanceId": inst})
+                for token, inst in self.private_channel_invites.get(
+                    channel_id, {}
+                ).items()
+            ]
             return {
                 "id": channel.id,
                 "owner": self.private_channel_owners.get(channel_id),
                 "members": channel.members.copy(),
-                "invites": [
-                    {"token": token, "instanceId": inst}
-                    for token, inst in self.private_channel_invites.get(
-                        channel_id, {}
-                    ).items()
-                ],
+                "invites": invites,
             }
 
     def get_channel(self, channel_id: str) -> Optional[ChannelInstance]:
@@ -142,8 +181,9 @@ class ChannelManager:
             return self.channels.get(channel_id)
 
     def join_channel(self, instance_uuid: str, channel_id: str):
+        left_channel_id: str | None = None
+        joined = False
         with self._lock:
-            logger = __import__("logging").getLogger(__name__)
             if channel_id in self.channels:
                 # Leave current channel
                 if instance_uuid in self.instance_channels:
@@ -152,7 +192,7 @@ class ChannelManager:
                         members = self.channels[old_channel_id].members
                         if instance_uuid in members:
                             members.remove(instance_uuid)
-                        self._emit_event("left", old_channel_id, instance_uuid)
+                        left_channel_id = old_channel_id
 
                 # Debug: log members and channel object id before join
                 try:
@@ -168,7 +208,7 @@ class ChannelManager:
                 # Join new channel
                 self.channels[channel_id].members.append(instance_uuid)
                 self.instance_channels[instance_uuid] = channel_id
-                if getattr(self.channels[channel_id], "type", None) == "private":
+                if self.channels[channel_id].type == "private":
                     self.private_channel_participants.setdefault(channel_id, set()).add(
                         instance_uuid
                     )
@@ -183,11 +223,16 @@ class ChannelManager:
                     f"join_channel: instance={instance_uuid} joined {channel_id} after_members={after} after_obj_id={after_obj_id}"
                 )
 
-                self._emit_event("joined", channel_id, instance_uuid)
+                joined = True
+
+        if left_channel_id is not None:
+            self._emit_event("left", left_channel_id, instance_uuid)
+        if joined:
+            self._emit_event("joined", channel_id, instance_uuid)
 
     def leave_current_channel(self, instance_uuid: str):
+        left_channel_id: str | None = None
         with self._lock:
-            logger = __import__("logging").getLogger(__name__)
             if instance_uuid in self.instance_channels:
                 channel_id = self.instance_channels[instance_uuid]
                 # Debug: log members before leave
@@ -203,11 +248,11 @@ class ChannelManager:
                     members = self.channels[channel_id].members
                     if instance_uuid in members:
                         members.remove(instance_uuid)
-                    if getattr(self.channels[channel_id], "type", None) == "private":
+                    if self.channels[channel_id].type == "private":
                         participants = self.private_channel_participants.get(channel_id)
                         if participants:
                             participants.discard(instance_uuid)
-                    self._emit_event("left", channel_id, instance_uuid)
+                    left_channel_id = channel_id
                 del self.instance_channels[instance_uuid]
 
                 # Debug: log members after leave
@@ -223,6 +268,9 @@ class ChannelManager:
                     f"leave_current_channel: instance={instance_uuid} left {channel_id} after_members={after}"
                 )
 
+        if left_channel_id is not None:
+            self._emit_event("left", left_channel_id, instance_uuid)
+
     def get_current_channel(self, instance_uuid: str) -> Optional[ChannelInstance]:
         with self._lock:
             channel_id = self.instance_channels.get(instance_uuid)
@@ -232,7 +280,6 @@ class ChannelManager:
 
     def get_channel_members(self, channel_id: str) -> List[str]:
         with self._lock:
-            logger = __import__("logging").getLogger(__name__)
             if channel_id in self.channels:
                 members = self.channels[channel_id].members.copy()
                 logger.debug(
@@ -249,6 +296,7 @@ class ChannelManager:
         return self.private_channel_owners.get(channel_id)
 
     def destroy_private_channel(self, channel_id: str) -> None:
+        destroyed = False
         with self._lock:
             channel = self.channels.pop(channel_id, None)
             if channel is None:
@@ -258,23 +306,31 @@ class ChannelManager:
             self.private_channel_participants.pop(channel_id, None)
             self.private_channel_invites.pop(channel_id, None)
             self.channel_contexts.pop(channel_id, None)
+            self.remote_private_channel_listeners.pop(channel_id, None)
 
             for instance_uuid in list(channel.members):
                 if self.instance_channels.get(instance_uuid) == channel_id:
                     del self.instance_channels[instance_uuid]
 
+            destroyed = True
+
+        if destroyed:
             self._emit_event("destroyed", channel_id)
 
     def broadcast_to_channel(
-        self, channel_id: str, context: Dict[str, Any], source_instance_uuid: str
+        self, channel_id: str, context: Fdc3Context, source_instance_uuid: str
     ):
         """Emit a broadcast event for a channel."""
+        should_emit = False
         with self._lock:
             if channel_id in self.channels:
                 self.set_channel_context(channel_id, context)
-                self._emit_event("broadcast", channel_id, source_instance_uuid, context)
+                should_emit = True
 
-    def set_channel_context(self, channel_id: str, context: Dict[str, Any]) -> None:
+        if should_emit:
+            self._emit_event("broadcast", channel_id, source_instance_uuid, context)
+
+    def set_channel_context(self, channel_id: str, context: Fdc3Context) -> None:
         if not context or not isinstance(context, dict):
             return
 
@@ -286,11 +342,11 @@ class ChannelManager:
             stored = self.channel_contexts.setdefault(channel_id, {})
             sanitized = copy.deepcopy(context)
             stored[context_type] = sanitized
-            stored["__last__"] = sanitized
+            stored[self.LAST_CONTEXT_KEY] = sanitized
 
     def get_channel_context(
         self, channel_id: str, context_type: Optional[str] = None
-    ) -> Optional[dict]:
+    ) -> Optional[Fdc3Context]:
         with self._lock:
             contexts = self.channel_contexts.get(channel_id)
             if not contexts:
@@ -298,13 +354,42 @@ class ChannelManager:
 
             if context_type is not None:
                 return contexts.get(context_type)
-            return contexts.get("__last__")
+            return contexts.get(self.LAST_CONTEXT_KEY)
 
     def clear_channel_context(self, channel_id: str) -> None:
         with self._lock:
             self.channel_contexts.pop(channel_id, None)
 
-    def get_channel_info(self, channel_id: str) -> Optional[Dict[str, Any]]:
+    def add_remote_private_channel_listener(
+        self, channel_id: str, desktop_agent: str
+    ) -> None:
+        if not channel_id or not desktop_agent:
+            return
+        with self._lock:
+            self.remote_private_channel_listeners.setdefault(channel_id, set()).add(
+                desktop_agent
+            )
+
+    def remove_remote_private_channel_listener(
+        self, channel_id: str, desktop_agent: str
+    ) -> None:
+        if not channel_id or not desktop_agent:
+            return
+        with self._lock:
+            listeners = self.remote_private_channel_listeners.get(channel_id)
+            if not listeners:
+                return
+            listeners.discard(desktop_agent)
+            if not listeners:
+                self.remote_private_channel_listeners.pop(channel_id, None)
+
+    def get_remote_private_channel_listeners(self, channel_id: str) -> Set[str]:
+        if not channel_id:
+            return set()
+        with self._lock:
+            return set(self.remote_private_channel_listeners.get(channel_id, set()))
+
+    def get_channel_info(self, channel_id: str) -> Optional[ChannelInfo]:
         """Get channel information for GraphQL queries."""
         channel = self.get_channel(channel_id)
         if channel:
@@ -315,9 +400,7 @@ class ChannelManager:
                     channel.display_metadata.name if channel.display_metadata else None
                 ),
                 "color": (
-                    getattr(channel.display_metadata, "color", None)
-                    if channel.display_metadata
-                    else None
+                    channel.display_metadata.color if channel.display_metadata else None
                 ),
                 "member_count": len(channel.members),
             }
@@ -325,7 +408,7 @@ class ChannelManager:
 
     def subscribe_to_events(
         self,
-        callback: Callable[[Dict[str, Any]], None],
+        callback: Callable[[ChannelEvent], None],
         channel_filter: Optional[str] = None,
     ) -> str:
         """Subscribe to channel events. Returns subscription ID."""
@@ -349,11 +432,11 @@ class ChannelManager:
         event_type: str,
         channel_id: str,
         instance_uuid: Optional[str] = None,
-        context: Optional[Dict[str, Any]] = None,
+        context: Optional[Fdc3Context] = None,
         remote: bool = False,
     ):
         """Emit an event to all subscribers."""
-        event_data = {
+        event_data: ChannelEvent = {
             "event_type": event_type,
             "channel_id": channel_id,
             "instance_uuid": instance_uuid,
@@ -401,7 +484,7 @@ class ChannelManager:
                 # Best-effort: do not break local emission if publishing fails
                 logger.exception("Failed to schedule distributed publish task")
 
-    async def _publish_event(self, event_data: Dict[str, Any]):
+    async def _publish_event(self, event_data: ChannelEvent):
         try:
             adapter = self.distributed_adapter
             if adapter:

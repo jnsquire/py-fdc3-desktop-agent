@@ -5,7 +5,6 @@ Handles system-level intents that are built into the desktop agent itself.
 
 import logging
 import os
-import webbrowser
 import subprocess
 from typing import Dict, Any, Optional
 from pydantic import BaseModel
@@ -23,6 +22,7 @@ from fdc3.models.dacp.dacp import (
 )
 from fdc3.models.identifiers import AppIdentifier
 from fdc3.models.identifiers import IntentResolution
+from ..launcher.web_launcher import WebEndpointLauncher, WebBrowserLauncher
 
 logger = logging.getLogger(__name__)
 
@@ -56,10 +56,20 @@ class SystemIntentHandler:
         "fdc3.systemAlert": "system_alert",
     }
 
-    def __init__(self, templates_dir: str = "src/fdc3/desktop_agent/templates"):
+    def __init__(
+        self,
+        templates_dir: str = "src/fdc3/desktop_agent/templates",
+        web_launcher: Optional[WebEndpointLauncher] = None,
+    ):
         self.templates_dir = Path(templates_dir)
         self.system_app_id = "fdc3-desktop-agent"
         self.system_app_name = "FDC3 Desktop Agent"
+        self.web_launcher = web_launcher or WebBrowserLauncher()
+
+    async def _launch_web_url(
+        self, url: str, context: Optional[Dict[str, Any]] = None
+    ) -> bool:
+        return await self.web_launcher.launch(url, context=context)
 
     def is_system_intent(self, intent: str) -> bool:
         """Check if an intent is a system intent"""
@@ -129,8 +139,7 @@ class SystemIntentHandler:
         try:
             # Open the app directory management page
             directory_url = "http://localhost:8000/app-directory"
-            webbrowser.open(directory_url)
-            return True
+            return await self._launch_web_url(directory_url, context=context)
         except Exception as e:
             logger.error(f"Failed to open app directory: {e}")
             return False
@@ -142,8 +151,7 @@ class SystemIntentHandler:
         try:
             # Open the app management interface
             manage_url = "http://localhost:8000/manage-apps"
-            webbrowser.open(manage_url)
-            return True
+            return await self._launch_web_url(manage_url, context=context)
         except Exception as e:
             logger.error(f"Failed to open app management: {e}")
             return False
@@ -155,8 +163,7 @@ class SystemIntentHandler:
         # For now, just open the app directory with install mode
         try:
             install_url = "http://localhost:8000/app-directory?mode=install"
-            webbrowser.open(install_url)
-            return True
+            return await self._launch_web_url(install_url, context=context)
         except Exception as e:
             logger.error(f"Failed to open app installation: {e}")
             return False
@@ -167,8 +174,7 @@ class SystemIntentHandler:
         """Remove apps from the system"""
         try:
             uninstall_url = "http://localhost:8000/manage-apps?mode=uninstall"
-            webbrowser.open(uninstall_url)
-            return True
+            return await self._launch_web_url(uninstall_url, context=context)
         except Exception as e:
             logger.error(f"Failed to open app uninstallation: {e}")
             return False
@@ -179,8 +185,7 @@ class SystemIntentHandler:
         """Open system configuration panel"""
         try:
             settings_url = "http://localhost:8000/system-settings"
-            webbrowser.open(settings_url)
-            return True
+            return await self._launch_web_url(settings_url, context=context)
         except Exception as e:
             logger.error(f"Failed to open system settings: {e}")
             return False
@@ -191,8 +196,7 @@ class SystemIntentHandler:
         """Manage user/system channels"""
         try:
             channels_url = "http://localhost:8000/channels"
-            webbrowser.open(channels_url)
-            return True
+            return await self._launch_web_url(channels_url, context=context)
         except Exception as e:
             logger.error(f"Failed to open channel configuration: {e}")
             return False
@@ -203,8 +207,7 @@ class SystemIntentHandler:
         """Run system health checks and diagnostics"""
         try:
             diagnostics_url = "http://localhost:8000/diagnostics"
-            webbrowser.open(diagnostics_url)
-            return True
+            return await self._launch_web_url(diagnostics_url, context=context)
         except Exception as e:
             logger.error(f"Failed to open diagnostics: {e}")
             return False
@@ -215,8 +218,7 @@ class SystemIntentHandler:
         """Create new user channels"""
         try:
             create_channel_url = "http://localhost:8000/channels?mode=create"
-            webbrowser.open(create_channel_url)
-            return True
+            return await self._launch_web_url(create_channel_url, context=context)
         except Exception as e:
             logger.error(f"Failed to open channel creation: {e}")
             return False
@@ -227,8 +229,7 @@ class SystemIntentHandler:
         """Remove user channels"""
         try:
             delete_channel_url = "http://localhost:8000/channels?mode=delete"
-            webbrowser.open(delete_channel_url)
-            return True
+            return await self._launch_web_url(delete_channel_url, context=context)
         except Exception as e:
             logger.error(f"Failed to open channel deletion: {e}")
             return False
@@ -239,8 +240,7 @@ class SystemIntentHandler:
         """Configure channel settings and membership"""
         try:
             manage_channel_url = "http://localhost:8000/channels?mode=manage"
-            webbrowser.open(manage_channel_url)
-            return True
+            return await self._launch_web_url(manage_channel_url, context=context)
         except Exception as e:
             logger.error(f"Failed to open channel management: {e}")
             return False
@@ -255,8 +255,7 @@ class SystemIntentHandler:
             resolve_url = "http://localhost:8000/resolve-intent"
             if intent_name:
                 resolve_url += f"?intent={intent_name}"
-            webbrowser.open(resolve_url)
-            return True
+            return await self._launch_web_url(resolve_url, context=context)
         except Exception as e:
             logger.error(f"Failed to open intent resolver: {e}")
             return False
@@ -268,8 +267,7 @@ class SystemIntentHandler:
         try:
             if context and "url" in context:
                 url = context["url"]
-                webbrowser.open(url)
-                return True
+                return await self._launch_web_url(url, context=context)
             else:
                 logger.warning("No URL provided in context for fdc3.openUrl")
                 return False
@@ -305,8 +303,7 @@ class SystemIntentHandler:
             search_url = "http://localhost:8000/search"
             if context and "query" in context:
                 search_url += f"?q={context['query']}"
-            webbrowser.open(search_url)
-            return True
+            return await self._launch_web_url(search_url, context=context)
         except Exception as e:
             logger.error(f"Failed to open system search: {e}")
             return False
@@ -335,8 +332,7 @@ class SystemIntentHandler:
             alert_url = "http://localhost:8000/alert"
             if context:
                 alert_url += f"?message={context.get('message', '')}"
-            webbrowser.open(alert_url)
-            return True
+            return await self._launch_web_url(alert_url, context=context)
         except Exception as e:
             logger.error(f"Failed to show system alert: {e}")
             return False

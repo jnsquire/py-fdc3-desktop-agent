@@ -5,6 +5,9 @@ import pytest
 
 from fdc3.desktop_agent.api import IntentResolution, OpenError, ResolveError
 from fdc3.desktop_agent.bridging.router import BridgeRequestRouter
+from fdc3.desktop_agent.core.channel_manager import ChannelManager
+from fdc3.desktop_agent.core.listener_store import ListenerStore
+from fdc3.models.primitives import ListenerUuid
 from fdc3.models.identifiers import AppIdentifier
 
 
@@ -76,6 +79,41 @@ def make_core(context_router=None, intent_resolver=None, app_registry=None):
 
 
 @pytest.mark.asyncio
+async def test_bridge_router_fdc3_event_delivery_targets_instance(
+    router_factory, connection_manager
+):
+    class _Inst:
+        def __init__(self, instance_id: str, instance_uuid: str):
+            self.instance_id = instance_id
+            self.instance_uuid = instance_uuid
+
+    app_registry = SimpleNamespace(
+        get_connected_instances_for_app=Mock(return_value=[_Inst("inst-1", "uuid-1")])
+    )
+    core = make_core(app_registry=app_registry)
+    router = router_factory(core=core)
+
+    resp = await router.handle(
+        {
+            "type": "fdc3Event",
+            "payload": {
+                "event": {
+                    "type": "USER_CHANNEL_CHANGED",
+                    "details": {"currentChannelId": "user:red"},
+                }
+            },
+            "meta": {
+                "requestUuid": "r-event",
+                "destination": {"appId": "app-1", "instanceId": "inst-1"},
+            },
+        }
+    )
+
+    assert resp is None
+    connection_manager.send_to_instance.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_bridge_router_broadcast_request_fanouts_and_returns_none(
     router_factory, connection_manager
 ):
@@ -91,15 +129,111 @@ async def test_bridge_router_broadcast_request_fanouts_and_returns_none(
         {
             "type": "broadcastRequest",
             "payload": {
-                "context": {"type": "fdc3.instrument", "id": {"ticker": "AAPL"}}
+                "context": {"type": "fdc3.instrument", "id": {"ticker": "AAPL"}},
+                "channelId": "user:red",
             },
             "meta": {"requestUuid": "r-1"},
         }
     )
 
     assert resp is None
-    core.context_router.broadcast_context.assert_called_once()
+    core.context_router.broadcast_context.assert_called_once_with(
+        {"type": "fdc3.instrument", "id": {"ticker": "AAPL"}},
+        source_instance_uuid="",
+        channel_id="user:red",
+    )
     assert connection_manager.send_to_instance.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_bridge_router_private_channel_event_delivery(
+    router_factory, connection_manager
+):
+    listener_store = ListenerStore()
+    listener_store.add_event_listener(
+        listener_uuid=ListenerUuid(root="l-1"),
+        instance_uuid="inst-1",
+        event_type="onDisconnect",
+        channel_id="private:abc",
+    )
+    core = SimpleNamespace(
+        context_router=SimpleNamespace(broadcast_context=Mock(return_value=[])),
+        intent_resolver=SimpleNamespace(
+            resolve_intent=Mock(), deliver_intent_event=Mock()
+        ),
+        app_registry=SimpleNamespace(get_connected_instances_for_app=Mock()),
+        listener_store=listener_store,
+        channel_manager=ChannelManager(),
+    )
+
+    router = router_factory(core=core)
+
+    resp = await router.handle(
+        {
+            "type": "privateChannelEvent",
+            "payload": {
+                "channelId": "private:abc",
+                "eventType": "onDisconnect",
+                "details": {"initiatorInstanceUuid": "inst-2"},
+            },
+            "meta": {"requestUuid": "r-priv-1"},
+        }
+    )
+
+    assert resp is None
+    connection_manager.send_to_instance.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_bridge_router_private_channel_event_listener_updates_remote_tracking(
+    router_factory,
+):
+    channel_manager = ChannelManager()
+    core = SimpleNamespace(
+        context_router=SimpleNamespace(broadcast_context=Mock(return_value=[])),
+        intent_resolver=SimpleNamespace(
+            resolve_intent=Mock(), deliver_intent_event=Mock()
+        ),
+        app_registry=SimpleNamespace(get_connected_instances_for_app=Mock()),
+        listener_store=ListenerStore(),
+        channel_manager=channel_manager,
+    )
+
+    router = router_factory(core=core)
+
+    resp = await router.handle(
+        {
+            "type": "privateChannelEventListenerAdded",
+            "payload": {"channelId": "private:abc"},
+            "meta": {
+                "requestUuid": "r-priv-2",
+                "source": {"desktopAgent": "remote-da", "appId": "app-1"},
+            },
+        }
+    )
+
+    assert resp is None
+
+    assert "remote-da" in channel_manager.get_remote_private_channel_listeners(
+        "private:abc"
+    )
+
+    resp = await router.handle(
+        {
+            "type": "privateChannelEventListenerRemoved",
+            "payload": {"channelId": "private:abc"},
+            "meta": {
+                "requestUuid": "r-priv-3",
+                "source": {"desktopAgent": "remote-da", "appId": "app-1"},
+            },
+        }
+    )
+
+    assert resp is None
+
+    assert "remote-da" not in channel_manager.get_remote_private_channel_listeners(
+        "private:abc"
+    )
 
 
 @pytest.mark.asyncio

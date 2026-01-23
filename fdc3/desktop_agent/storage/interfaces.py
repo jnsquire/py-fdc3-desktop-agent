@@ -13,9 +13,9 @@ class AppMetadata:
         name: str,
         version: str = "",
         description: str = "",
-        icons: List[Dict[str, Any]] = None,
-        intents: List[str] = None,
-        allowed_origins: List[str] = None,
+        icons: Optional[List[Dict[str, Any]]] = None,
+        intents: Optional[List[str]] = None,
+        allowed_origins: Optional[List[str]] = None,
     ):
         self.app_id = app_id
         self.name = name
@@ -33,8 +33,8 @@ class LaunchConfig:
         self,
         app_id: str,
         command: str,
-        args: List[str] = None,
-        env: Dict[str, str] = None,
+        args: Optional[List[str]] = None,
+        env: Optional[Dict[str, str]] = None,
         cwd: str = "",
         timeout: int = 30,
     ):

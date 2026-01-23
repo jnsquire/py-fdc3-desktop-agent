@@ -131,6 +131,7 @@ class BridgeConnectedAgentsUpdatePayload(BaseModel):
 
     addAgent: Optional[str] = None
     allAgents: list[dict] = Field(default_factory=list)
+    channelsState: Optional[Mapping[str, list[dict[str, Any]]]] = None
 
 
 class BridgeConnectedAgentsUpdate(BridgeMessage):
@@ -169,12 +170,16 @@ class BridgeClient:
         implementation_metadata_factory: ImplementationMetadataFactory,
         channels_state_factory: ChannelsStateFactory,
         request_handler: RequestHandler,
+        connected_agents_update_handler: Optional[
+            Callable[[BridgeConnectedAgentsUpdatePayload], Awaitable[None]]
+        ] = None,
         connect_func: Optional[ConnectFunc] = None,
     ):
         self._settings = settings
         self._implementation_metadata_factory = implementation_metadata_factory
         self._channels_state_factory = channels_state_factory
         self._request_handler = request_handler
+        self._connected_agents_update_handler = connected_agents_update_handler
         self._connect: ConnectFunc = connect_func or connect
 
         self._ws: Optional[ClientConnection] = None
@@ -198,6 +203,13 @@ class BridgeClient:
     @property
     def is_connected(self) -> bool:
         return self._ws is not None and self._assigned_name is not None
+
+    def has_connected_agent(self, name: str) -> bool:
+        if not name:
+            return False
+        return any(
+            agent.get("desktopAgent") == name for agent in self._connected_agents
+        )
 
     async def start(self) -> None:
         if self._run_task is not None:
@@ -383,6 +395,8 @@ class BridgeClient:
                     if isinstance(payload.addAgent, str) and payload.addAgent:
                         self._assigned_name = payload.addAgent
                     self._connected_agents = payload.allAgents
+                    if self._connected_agents_update_handler is not None:
+                        await self._connected_agents_update_handler(payload)
                 continue
 
             # Bridge auth failure
@@ -491,8 +505,8 @@ class BridgeClient:
         await self._ws.send(BridgeMessage.model_validate(msg).model_dump_json())
         return req_uuid
 
-    @staticmethod
     def _build_request_message(
+        self,
         *,
         request_type: str,
         payload: dict[str, Any],
@@ -507,18 +521,22 @@ class BridgeClient:
             "meta": {
                 "requestUuid": request_uuid,
                 "timestamp": _utc_now_iso(),
-                "source": source.model_dump()
-                if isinstance(source, AppIdentifier)
-                else dict(source),
+                "source": self._normalize_identifier(source),
             },
         }
         if destination is not None:
-            msg["meta"]["destination"] = (
-                destination.model_dump()
-                if isinstance(destination, AppIdentifier)
-                else dict(destination)
-            )
+            msg["meta"]["destination"] = self._normalize_identifier(destination)
         return msg
+
+    def _normalize_identifier(self, ident: AppIdentifierLike) -> dict[str, Any]:
+        if isinstance(ident, AppIdentifier):
+            data = ident.model_dump()
+        else:
+            data = dict(ident)
+
+        if not data.get("desktopAgent") and self._assigned_name:
+            data["desktopAgent"] = self._assigned_name
+        return data
 
 
 def make_desktop_agent_identifier(desktop_agent: str) -> dict[str, str]:

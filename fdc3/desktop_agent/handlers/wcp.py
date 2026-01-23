@@ -25,6 +25,8 @@ from ..transport.wcp.wcp import (
 from pydantic import ValidationError
 from ..core import core_services
 from ..storage import Storage
+from ..version import __version__
+from fdc3.models.identifiers import ImplementationMetadata, AppMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -32,8 +34,9 @@ logger = logging.getLogger(__name__)
 class WCPHandler:
     """Handles WCP (Web Connection Protocol) messages"""
 
-    def __init__(self, storage: Storage):
+    def __init__(self, storage: Storage, *, bridge_enabled: bool = False):
         self.storage = storage
+        self._bridge_enabled = bridge_enabled
 
     async def _send_model(self, websocket: WebSocket, model) -> None:
         """Helper method to send a Pydantic model as JSON over WebSocket"""
@@ -150,22 +153,53 @@ class WCPHandler:
 
             # Send success response
             # Populate implementationMetadata from storage if available (best-effort)
-            impl_meta = {}
+            name = None
+            version = None
+            description = None
+            icons = None
             try:
                 app_id = identity.get("appId")
                 if app_id and hasattr(self.storage, "apps"):
                     app_meta = await self.storage.apps.get_app_metadata(app_id)
                     if app_meta:
-                        impl_meta = {
-                            "appId": getattr(app_meta, "app_id", None),
-                            "name": getattr(app_meta, "name", None),
-                            "version": getattr(app_meta, "version", None),
-                            "description": getattr(app_meta, "description", None),
-                            "icons": getattr(app_meta, "icons", []),
-                            "intents": getattr(app_meta, "intents", []),
-                        }
+                        name = getattr(app_meta, "name", None)
+                        version = getattr(app_meta, "version", None)
+                        description = getattr(app_meta, "description", None)
+                        icons = getattr(app_meta, "icons", None)
             except Exception:
-                impl_meta = {}
+                pass
+
+            optional_features = {
+                "OriginatingAppMetadata": False,
+                "UserChannelMembershipAPIs": True,
+                "DesktopAgentBridging": self._bridge_enabled,
+            }
+
+            impl_meta = ImplementationMetadata(
+                fdc3Version="2.2",
+                provider="py-fdc3-desktop-agent",
+                providerVersion=__version__,
+                optionalFeatures=optional_features,
+                appMetadata=AppMetadata(
+                    appId=identity.get("appId") or "unknown",
+                    instanceId=identity.get("instanceId"),
+                    name=name,
+                    version=version,
+                    description=description,
+                    icons=icons,
+                ),
+            ).model_dump()
+
+            # Backward-compat: include app metadata fields at top-level
+            impl_meta.update(
+                {
+                    "appId": identity.get("appId") or "unknown",
+                    "name": name,
+                    "version": version,
+                    "description": description,
+                    "icons": icons or [],
+                }
+            )
 
             # Add runtime launcher info (best-effort)
             try:
@@ -173,22 +207,14 @@ class WCPHandler:
                     os.getenv("FDC3_DESKTOP_AGENT_URL")
                     or f"ws://{os.getenv('FDC3_HOST', 'localhost')}:{os.getenv('FDC3_PORT', '8000')}/ws"
                 )
-                runtime_info = {
-                    "launcher": {
-                        "type": "subprocess",
-                        "python": sys.executable,
-                        "platform": platform.platform(),
-                        "agentUrl": agent_url,
-                    }
+                impl_meta["launcher"] = {
+                    "type": "subprocess",
+                    "python": sys.executable,
+                    "platform": platform.platform(),
+                    "agentUrl": agent_url,
                 }
             except Exception:
-                runtime_info = {}
-
-            # Merge runtime info into implementation metadata
-            if impl_meta:
-                impl_meta.update(runtime_info)
-            else:
-                impl_meta = runtime_info
+                pass
 
             connection_attempt = getattr(
                 getattr(wcp4, "meta", None), "connectionAttemptUuid", None

@@ -231,6 +231,7 @@ class RaiseIntentResponse(BaseModel):
 # raiseIntentForContext
 class RaiseIntentForContextRequestPayload(BaseModel):
     context: dict
+    resultType: Optional[str] = None
     target: Optional[AppIdentifier] = None
 
 

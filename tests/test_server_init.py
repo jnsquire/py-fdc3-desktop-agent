@@ -7,6 +7,10 @@ from fastapi import WebSocket
 from fastapi.websockets import WebSocketDisconnect
 
 from fdc3.desktop_agent.config import DesktopAgentConfig
+from fdc3.desktop_agent.core import CoreServices
+from fdc3.desktop_agent.core.channel_manager import ChannelManager
+from fdc3.desktop_agent.core.listener_store import ListenerStore
+from fdc3.models.primitives import ListenerUuid
 from fdc3.desktop_agent.tools import yield_once
 
 
@@ -125,6 +129,25 @@ class _DistributedAdapterStub:
         raise RuntimeError("stop failed")
 
 
+class _InstanceConnectionManagerStub:
+    last_instance: "_InstanceConnectionManagerStub | None" = None
+
+    def __init__(self):
+        _InstanceConnectionManagerStub.last_instance = self
+        self.sent: list[tuple[str, str]] = []
+
+    async def send_to_instance(self, instance_uuid: str, payload: str) -> None:
+        self.sent.append((instance_uuid, payload))
+
+    async def close_all(self) -> None:
+        return
+
+
+class _AgentClientManagerStub:
+    async def close_all(self) -> None:
+        return
+
+
 @pytest.mark.asyncio
 async def test_server_lifespan_bridge_channels_state_factory_populates_state(
     monkeypatch,
@@ -136,6 +159,8 @@ async def test_server_lifespan_bridge_channels_state_factory_populates_state(
         def __init__(self, channel_id: str, members: list[str]):
             self.id = channel_id
             self.members = members
+            self.type = "user"
+            self.display_metadata = None
 
     class _ChannelManagerStateStub:
         def __init__(self):
@@ -151,6 +176,20 @@ async def test_server_lifespan_bridge_channels_state_factory_populates_state(
             if channel_id in self.channels:
                 return list(self.channels[channel_id].members)
             return []
+
+        def get_channel(self, channel_id: str):
+            return self.channels.get(channel_id)
+
+        def create_channel(
+            self, channel_id: str, channel_type: str, display_metadata=None
+        ):
+            if channel_id in self.channels:
+                return self.channels[channel_id]
+            channel = _ChannelStub(channel_id, [])
+            channel.type = channel_type
+            channel.display_metadata = display_metadata
+            self.channels[channel_id] = channel
+            return channel
 
     class _AppInstanceStub:
         def __init__(self, app_id: str, instance_id: str, instance_uuid: str):
@@ -189,9 +228,11 @@ async def test_server_lifespan_bridge_channels_state_factory_populates_state(
             implementation_metadata_factory: Any,
             channels_state_factory: Any,
             request_handler: Any,
+            connected_agents_update_handler: Any = None,
         ):
             self.channels_state_factory = channels_state_factory
             self.captured_state: Optional[dict] = None
+            self.connected_agents_update_handler = connected_agents_update_handler
 
         async def start(self) -> None:
             self.captured_state = self.channels_state_factory()
@@ -200,6 +241,15 @@ async def test_server_lifespan_bridge_channels_state_factory_populates_state(
             return
 
     monkeypatch.setattr(lifespan_mod, "BridgeClient", _BridgeClientCapture)
+
+    from fdc3.desktop_agent.server import app_factory as app_factory_mod
+
+    monkeypatch.setattr(
+        app_factory_mod, "WebSocketConnectionManager", _InstanceConnectionManagerStub
+    )
+    monkeypatch.setattr(
+        app_factory_mod, "AgentClientConnectionManager", _AgentClientManagerStub
+    )
 
     storage = _StorageStub()
     config = DesktopAgentConfig(
@@ -226,6 +276,187 @@ async def test_server_lifespan_bridge_channels_state_factory_populates_state(
             }
         ]
         assert captured["blue"] == []
+
+
+@pytest.mark.asyncio
+async def test_bridge_connected_agents_update_applies_unknown_channel_state(
+    monkeypatch,
+):
+    from fdc3.desktop_agent import server as server_mod
+    from fdc3.desktop_agent.server import lifespan as lifespan_mod
+    from fdc3.desktop_agent.server import app_factory as app_factory_mod
+
+    core = CoreServices()
+    monkeypatch.setattr(lifespan_mod, "core_services", core)
+
+    class _BridgeClientCapture:
+        def __init__(
+            self,
+            settings: Any,
+            *,
+            implementation_metadata_factory: Any,
+            channels_state_factory: Any,
+            request_handler: Any,
+            connected_agents_update_handler: Any = None,
+        ):
+            self.connected_agents_update_handler = connected_agents_update_handler
+
+        async def start(self) -> None:
+            return
+
+        async def stop(self) -> None:
+            return
+
+    monkeypatch.setattr(lifespan_mod, "BridgeClient", _BridgeClientCapture)
+    monkeypatch.setattr(
+        app_factory_mod, "WebSocketConnectionManager", _InstanceConnectionManagerStub
+    )
+    monkeypatch.setattr(
+        app_factory_mod, "AgentClientConnectionManager", _AgentClientManagerStub
+    )
+
+    storage = _StorageStub()
+    config = DesktopAgentConfig(
+        storage=cast(Any, storage),
+        launcher=cast(Any, _LauncherStub()),
+        auto_discover_plugins=False,
+        bridge_enabled=True,
+        bridge_requested_name="agent-1",
+    )
+
+    app = server_mod.create_app(config)
+
+    async with app.router.lifespan_context(app):
+        bridge_client = app.state.bridge_client
+        assert bridge_client is not None
+        update_handler = cast(Any, bridge_client).connected_agents_update_handler
+        assert update_handler is not None
+
+        channels_state = {
+            "user:demo": [
+                {"type": "fdc3.contact", "id": {"email": "test@x.com"}},
+                {"type": "fdc3.instrument", "id": {"ticker": "AAPL"}},
+            ]
+        }
+
+        await update_handler(
+            type("Payload", (), {"addAgent": None, "channelsState": channels_state})()
+        )
+
+        stored = core.channel_manager.channel_contexts.get("user:demo")
+        assert stored is not None
+        assert stored.get("fdc3.contact") is not None
+        assert stored.get("fdc3.instrument") is not None
+        assert (
+            stored.get(core.channel_manager.LAST_CONTEXT_KEY)
+            == channels_state["user:demo"][0]
+        )
+
+        instance_manager = _InstanceConnectionManagerStub.last_instance
+        assert instance_manager is not None
+        assert instance_manager.sent == []
+
+
+@pytest.mark.asyncio
+async def test_bridge_connected_agents_update_merges_known_channel_and_notifies_listeners(
+    monkeypatch,
+):
+    from fdc3.desktop_agent import server as server_mod
+    from fdc3.desktop_agent.server import lifespan as lifespan_mod
+    from fdc3.desktop_agent.server import app_factory as app_factory_mod
+
+    core = CoreServices()
+    monkeypatch.setattr(lifespan_mod, "core_services", core)
+
+    class _BridgeClientCapture:
+        def __init__(
+            self,
+            settings: Any,
+            *,
+            implementation_metadata_factory: Any,
+            channels_state_factory: Any,
+            request_handler: Any,
+            connected_agents_update_handler: Any = None,
+        ):
+            self.connected_agents_update_handler = connected_agents_update_handler
+
+        async def start(self) -> None:
+            return
+
+        async def stop(self) -> None:
+            return
+
+    monkeypatch.setattr(lifespan_mod, "BridgeClient", _BridgeClientCapture)
+    monkeypatch.setattr(
+        app_factory_mod, "WebSocketConnectionManager", _InstanceConnectionManagerStub
+    )
+    monkeypatch.setattr(
+        app_factory_mod, "AgentClientConnectionManager", _AgentClientManagerStub
+    )
+
+    storage = _StorageStub()
+    config = DesktopAgentConfig(
+        storage=cast(Any, storage),
+        launcher=cast(Any, _LauncherStub()),
+        auto_discover_plugins=False,
+        bridge_enabled=True,
+        bridge_requested_name="agent-1",
+    )
+
+    app = server_mod.create_app(config)
+
+    async with app.router.lifespan_context(app):
+        channel_manager: ChannelManager = core.channel_manager
+        listener_store: ListenerStore = core.listener_store
+
+        channel = channel_manager.create_channel("user:red", "user")
+        channel.members.append("inst-1")
+
+        channel_manager.set_channel_context(
+            "user:red", {"type": "fdc3.instrument", "id": {"ticker": "MSFT"}}
+        )
+
+        listener_store.add_context_listener(
+            ListenerUuid("typed-instrument"),
+            "inst-1",
+            "fdc3.instrument",
+            channel_id="user:red",
+        )
+        listener_store.add_context_listener(
+            ListenerUuid("typed-contact"),
+            "inst-1",
+            "fdc3.contact",
+            channel_id="user:red",
+        )
+        listener_store.add_context_listener(
+            ListenerUuid("untyped"),
+            "inst-1",
+            None,
+            channel_id="user:red",
+        )
+
+        bridge_client = app.state.bridge_client
+        assert bridge_client is not None
+        update_handler = cast(Any, bridge_client).connected_agents_update_handler
+        assert update_handler is not None
+
+        channels_state = {
+            "user:red": [
+                {"type": "fdc3.contact", "id": {"email": "test@x.com"}},
+                {"type": "fdc3.instrument", "id": {"ticker": "AAPL"}},
+            ]
+        }
+
+        await update_handler(
+            type("Payload", (), {"addAgent": None, "channelsState": channels_state})()
+        )
+
+        instance_manager = _InstanceConnectionManagerStub.last_instance
+        assert instance_manager is not None
+        payloads = [json.loads(p[1]) for p in instance_manager.sent]
+        types = [p["payload"]["context"]["type"] for p in payloads]
+        assert types.count("fdc3.instrument") == 1
+        assert types.count("fdc3.contact") == 2
 
 
 @pytest.mark.asyncio

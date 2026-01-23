@@ -97,15 +97,20 @@ async def websocket_endpoint(
                     # the handler can deliver messages to this instance via
                     # `WebSocketConnectionManager.send_to_instance`.
                     try:
-                        identity = wcp_sessions[session_id]["identity"]
-                        instance_uuid = identity["instanceUuid"]
-                        # Best-effort: not fatal if registration fails
-                        dacp_handler.connection_manager.add_connection(
-                            instance_uuid, websocket
-                        )
-                        logger.debug(
-                            f"Registered instance connection for {instance_uuid}"
-                        )
+                        if session_id is None:
+                            logger.warning(
+                                "DACP transition without session_id; skipping registration"
+                            )
+                        else:
+                            identity = wcp_sessions[session_id]["identity"]
+                            instance_uuid = identity["instanceUuid"]
+                            # Best-effort: not fatal if registration fails
+                            dacp_handler.connection_manager.add_connection(
+                                instance_uuid, websocket
+                            )
+                            logger.debug(
+                                f"Registered instance connection for {instance_uuid}"
+                            )
                     except Exception:
                         logger.exception("Failed to register instance connection")
             else:
@@ -120,7 +125,7 @@ async def websocket_endpoint(
                 await heartbeat_task
             except asyncio.CancelledError:
                 pass
-        if session_id in wcp_sessions:
+        if session_id is not None and session_id in wcp_sessions:
             identity = wcp_sessions[session_id]["identity"]
             instance_uuid = identity["instanceUuid"]
             core_services.app_registry.unregister_instance(instance_uuid)

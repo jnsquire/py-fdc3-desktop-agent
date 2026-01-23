@@ -11,6 +11,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from fdc3.desktop_agent.api import IntentResolution
+from fdc3.desktop_agent.api import OpenError, ResolveError
+from fdc3.desktop_agent.api import BridgingError
 from fdc3.desktop_agent.handlers.dacp import DACPHandler
 from fdc3.desktop_agent.launcher.interfaces import LaunchResult
 from fdc3.models.identifiers import AppIdentifier
@@ -678,6 +680,34 @@ class TestDACPHandlerUserChannels:
         assert any(c["id"] == "user:red" for c in payload["payload"]["channels"])
 
     @pytest.mark.asyncio
+    async def test_get_system_channels_creates_defaults(self):
+        handler, _, _, _ = _handler()
+        ws = _websocket()
+
+        from fdc3.desktop_agent.core import core_services
+
+        core_services.channel_manager.channels.clear()
+        core_services.channel_manager.instance_channels.clear()
+
+        await handler.handle_message(
+            {
+                "type": "getSystemChannels",
+                "payload": {},
+                "meta": {"requestUuid": "r1s"},
+            },
+            session_id="s1",
+            wcp_sessions={"s1": {"identity": {"instanceUuid": "i1"}}},
+            websocket=ws,
+        )
+
+        ws.send_text.assert_called_once()
+        payload = json.loads(ws.send_text.call_args.args[0])
+        assert payload["type"] == "getSystemChannelsResponse"
+        assert payload["meta"]["requestUuid"] == "r1s"
+        assert isinstance(payload["payload"]["channels"], list)
+        assert any(c["id"] == "user:red" for c in payload["payload"]["channels"])
+
+    @pytest.mark.asyncio
     async def test_join_get_current_leave_roundtrip(self):
         handler, _, _, _ = _handler()
         ws = _websocket()
@@ -745,6 +775,46 @@ class TestDACPHandlerUserChannels:
         )
         payload = json.loads(ws.send_text.call_args.args[0])
         assert payload["payload"]["channel"] is None
+
+    @pytest.mark.asyncio
+    async def test_join_channel_deprecated_roundtrip(self):
+        handler, _, _, _ = _handler()
+        ws = _websocket()
+        session_id, sessions = _wcp_sessions("inst-1")
+
+        from fdc3.desktop_agent.core import core_services
+
+        core_services.channel_manager.channels.clear()
+        core_services.channel_manager.instance_channels.clear()
+
+        await handler.handle_message(
+            {
+                "type": "joinChannel",
+                "payload": {"channelId": "red"},
+                "meta": {"requestUuid": "r2d"},
+            },
+            session_id,
+            sessions,
+            ws,
+        )
+        payload = json.loads(ws.send_text.call_args.args[0])
+        assert payload["type"] == "joinChannelResponse"
+        assert payload["payload"]["channel"]["id"] == "user:red"
+
+        ws.send_text.reset_mock()
+        await handler.handle_message(
+            {
+                "type": "getCurrentChannel",
+                "payload": {},
+                "meta": {"requestUuid": "r3d"},
+            },
+            session_id,
+            sessions,
+            ws,
+        )
+        payload = json.loads(ws.send_text.call_args.args[0])
+        assert payload["type"] == "getCurrentChannelResponse"
+        assert payload["payload"]["channel"]["id"] == "user:red"
 
     @pytest.mark.asyncio
     async def test_join_user_channel_unknown_errors(self):
@@ -1610,6 +1680,99 @@ class TestDACPHandlerOpen:
             assert sent.payload.error == "AppNotFound"
 
     @pytest.mark.asyncio
+    async def test_open_remote_without_bridge_returns_not_connected(self):
+        handler, _, _, _ = _handler()
+        ws = _websocket()
+        session_id, sessions = _wcp_sessions("src-uuid")
+
+        from fdc3.models.dacp.dacp import OpenRequest
+
+        req = OpenRequest.model_validate(
+            {
+                "type": "open",
+                "payload": {"app": {"appId": "app-1", "desktopAgent": "remote"}},
+                "meta": {"requestUuid": "req-bridge-1"},
+            }
+        )
+
+        await handler._handle_open(
+            req, websocket=ws, session_id=session_id, wcp_sessions=sessions
+        )
+
+        payload = json.loads(ws.send_text.call_args.args[0])
+        assert payload["type"] == "openResponse"
+        assert payload["payload"]["error"] == BridgingError.NotConnectedToBridge.value
+
+    @pytest.mark.asyncio
+    async def test_open_remote_unknown_agent_returns_not_found(self):
+        handler, _, _, _ = _handler()
+        ws = _websocket()
+        session_id, sessions = _wcp_sessions("src-uuid")
+
+        class _BridgeStub:
+            is_connected = True
+
+            @staticmethod
+            def has_connected_agent(name: str) -> bool:
+                return False
+
+        handler.bridge_client = _BridgeStub()
+
+        from fdc3.models.dacp.dacp import OpenRequest
+
+        req = OpenRequest.model_validate(
+            {
+                "type": "open",
+                "payload": {"app": {"appId": "app-1", "desktopAgent": "remote"}},
+                "meta": {"requestUuid": "req-bridge-1a"},
+            }
+        )
+
+        await handler._handle_open(
+            req, websocket=ws, session_id=session_id, wcp_sessions=sessions
+        )
+
+        payload = json.loads(ws.send_text.call_args.args[0])
+        assert payload["type"] == "openResponse"
+        assert payload["payload"]["error"] == OpenError.DesktopAgentNotFound.value
+
+    @pytest.mark.asyncio
+    async def test_open_remote_bridge_error_payload_returns_error_response(self):
+        handler, _, _, _ = _handler()
+        ws = _websocket()
+        session_id, sessions = _wcp_sessions("src-uuid")
+
+        class _BridgeStub:
+            is_connected = True
+
+            @staticmethod
+            def has_connected_agent(name: str) -> bool:
+                return True
+
+            async def send_agent_request(self, **_kwargs):
+                return {"payload": {"error": BridgingError.AgentDisconnected.value}}
+
+        handler.bridge_client = _BridgeStub()
+
+        from fdc3.models.dacp.dacp import OpenRequest
+
+        req = OpenRequest.model_validate(
+            {
+                "type": "open",
+                "payload": {"app": {"appId": "app-1", "desktopAgent": "remote"}},
+                "meta": {"requestUuid": "req-bridge-1b"},
+            }
+        )
+
+        await handler._handle_open(
+            req, websocket=ws, session_id=session_id, wcp_sessions=sessions
+        )
+
+        payload = json.loads(ws.send_text.call_args.args[0])
+        assert payload["type"] == "openResponse"
+        assert payload["payload"]["error"] == BridgingError.AgentDisconnected.value
+
+    @pytest.mark.asyncio
     async def test_open_reuses_existing_instance(self):
         handler, storage, _, _ = _handler()
         ws = _websocket()
@@ -2000,6 +2163,113 @@ class TestDACPHandlerBroadcastAndListeners:
 
 class TestDACPHandlerRaiseIntent:
     @pytest.mark.asyncio
+    async def test_raise_intent_remote_without_bridge_returns_not_connected(self):
+        handler, _, _, _ = _handler()
+        ws = _websocket()
+        session_id, sessions = _wcp_sessions("src-uuid")
+
+        from fdc3.models.dacp.dacp import RaiseIntentRequest
+
+        req = RaiseIntentRequest.model_validate(
+            {
+                "type": "raiseIntent",
+                "payload": {
+                    "intent": "ViewChart",
+                    "context": {"type": "fdc3.instrument", "id": {"ticker": "AAPL"}},
+                    "target": {"appId": "target", "desktopAgent": "remote"},
+                },
+                "meta": {"requestUuid": "req-bridge-2"},
+            }
+        )
+
+        await handler._handle_raise_intent(
+            req, websocket=ws, session_id=session_id, wcp_sessions=sessions
+        )
+
+        payload = json.loads(ws.send_text.call_args.args[0])
+        assert payload["type"] == "raiseIntentResponse"
+        assert payload["payload"]["error"] == BridgingError.NotConnectedToBridge.value
+
+    @pytest.mark.asyncio
+    async def test_raise_intent_remote_unknown_agent_returns_not_found(self):
+        handler, _, _, _ = _handler()
+        ws = _websocket()
+        session_id, sessions = _wcp_sessions("src-uuid")
+
+        class _BridgeStub:
+            is_connected = True
+
+            @staticmethod
+            def has_connected_agent(name: str) -> bool:
+                return False
+
+        handler.bridge_client = _BridgeStub()
+
+        from fdc3.models.dacp.dacp import RaiseIntentRequest
+
+        req = RaiseIntentRequest.model_validate(
+            {
+                "type": "raiseIntent",
+                "payload": {
+                    "intent": "ViewChart",
+                    "context": {"type": "fdc3.instrument", "id": {"ticker": "AAPL"}},
+                    "target": {"appId": "target", "desktopAgent": "remote"},
+                },
+                "meta": {"requestUuid": "req-bridge-2a"},
+            }
+        )
+
+        await handler._handle_raise_intent(
+            req, websocket=ws, session_id=session_id, wcp_sessions=sessions
+        )
+
+        payload = json.loads(ws.send_text.call_args.args[0])
+        assert payload["type"] == "raiseIntentResponse"
+        assert payload["payload"]["error"] == ResolveError.DesktopAgentNotFound.value
+
+    @pytest.mark.asyncio
+    async def test_raise_intent_remote_bridge_error_payload_returns_error_response(
+        self,
+    ):
+        handler, _, _, _ = _handler()
+        ws = _websocket()
+        session_id, sessions = _wcp_sessions("src-uuid")
+
+        class _BridgeStub:
+            is_connected = True
+
+            @staticmethod
+            def has_connected_agent(name: str) -> bool:
+                return True
+
+            async def send_agent_request(self, **_kwargs):
+                return {"payload": {"error": BridgingError.AgentDisconnected.value}}
+
+        handler.bridge_client = _BridgeStub()
+
+        from fdc3.models.dacp.dacp import RaiseIntentRequest
+
+        req = RaiseIntentRequest.model_validate(
+            {
+                "type": "raiseIntent",
+                "payload": {
+                    "intent": "ViewChart",
+                    "context": {"type": "fdc3.instrument", "id": {"ticker": "AAPL"}},
+                    "target": {"appId": "target", "desktopAgent": "remote"},
+                },
+                "meta": {"requestUuid": "req-bridge-2b"},
+            }
+        )
+
+        await handler._handle_raise_intent(
+            req, websocket=ws, session_id=session_id, wcp_sessions=sessions
+        )
+
+        payload = json.loads(ws.send_text.call_args.args[0])
+        assert payload["type"] == "raiseIntentResponse"
+        assert payload["payload"]["error"] == BridgingError.AgentDisconnected.value
+
+    @pytest.mark.asyncio
     async def test_raise_intent_system_intent_short_circuit(self):
         handler, _, _, _ = _handler()
         ws = _websocket()
@@ -2139,7 +2409,9 @@ class TestDACPHandlerRaiseIntent:
             ),
         ):
             cs.intent_resolver.resolve_intent.return_value = resolution
-            cs.intent_resolver.deliver_intent_event.return_value = ["t1"]
+            cs.intent_resolver.deliver_intent_event_with_resolution.return_value = [
+                "t1"
+            ]
 
             await handler._handle_raise_intent(req, ws)
 
@@ -2279,7 +2551,9 @@ class TestDACPHandlerRaiseIntent:
                 "l1": SimpleNamespace(intent="ViewChart")
             }
             cs.intent_resolver.resolve_intent.return_value = resolution
-            cs.intent_resolver.deliver_intent_event.return_value = ["t1"]
+            cs.intent_resolver.deliver_intent_event_with_resolution.return_value = [
+                "t1"
+            ]
 
             await handler._handle_raise_intent_for_context(req, websocket=ws)
 
@@ -2287,6 +2561,288 @@ class TestDACPHandlerRaiseIntent:
             assert sent.type == "raiseIntentForContextResponse"
             assert sent.payload.intentResolution.intent == "ViewChart"
             assert connection_manager.send_to_instance.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_raise_intent_for_context_filters_by_context_types(self):
+        handler, storage, _, connection_manager = _handler()
+        ws = _websocket()
+
+        from fdc3.models.dacp.dacp import RaiseIntentForContextRequest
+        from fdc3.desktop_agent.api import IntentResolution
+        from fdc3.models.identifiers import AppIdentifier
+
+        req = RaiseIntentForContextRequest.model_validate(
+            {
+                "type": "raiseIntentForContext",
+                "payload": {"context": {"type": "fdc3.instrument"}},
+                "meta": {"requestUuid": "req-ctx-1"},
+            }
+        )
+
+        storage.apps.list_apps.return_value = [
+            SimpleNamespace(
+                app_id="app-1",
+                name="A1",
+                intents=[
+                    {"name": "ViewChart", "contexts": ["fdc3.instrument"]},
+                    {"name": "ViewNews", "contexts": ["fdc3.news"]},
+                ],
+            )
+        ]
+
+        resolution = IntentResolution(
+            source=AppIdentifier(appId="target", instanceId="target-inst"),
+            intent="ViewChart",
+        )
+
+        with (
+            patch("fdc3.desktop_agent.handlers.dacp.core_services") as cs,
+            patch.object(handler, "_send_model", new_callable=AsyncMock) as send,
+        ):
+            cs.listener_store.intent_listeners = {}
+            cs.intent_resolver.resolve_intent.return_value = resolution
+            cs.intent_resolver.deliver_intent_event_with_resolution.return_value = []
+
+            await handler._handle_raise_intent_for_context(req, websocket=ws)
+
+            sent = send.call_args.args[1]
+            assert sent.type == "raiseIntentForContextResponse"
+            assert sent.payload.intentResolution.intent == "ViewChart"
+            assert connection_manager.send_to_instance.await_count == 0
+
+    @pytest.mark.asyncio
+    async def test_raise_intent_for_context_incompatible_context_returns_no_apps_found(
+        self,
+    ):
+        handler, storage, _, _ = _handler()
+        ws = _websocket()
+
+        from fdc3.models.dacp.dacp import RaiseIntentForContextRequest
+
+        req = RaiseIntentForContextRequest.model_validate(
+            {
+                "type": "raiseIntentForContext",
+                "payload": {"context": {"type": "fdc3.instrument"}},
+                "meta": {"requestUuid": "req-ctx-2"},
+            }
+        )
+
+        storage.apps.list_apps.return_value = [
+            SimpleNamespace(
+                app_id="app-1",
+                name="A1",
+                intents=[{"name": "ViewNews", "contexts": ["fdc3.news"]}],
+            )
+        ]
+
+        with (
+            patch("fdc3.desktop_agent.handlers.dacp.core_services") as cs,
+            patch.object(handler, "_send_model", new_callable=AsyncMock) as send,
+        ):
+            cs.listener_store.intent_listeners = {
+                "l1": SimpleNamespace(intent="ViewChart")
+            }
+            await handler._handle_raise_intent_for_context(req, websocket=ws)
+
+            sent = send.call_args.args[1]
+            assert sent.type == "raiseIntentForContextResponse"
+            assert sent.payload.error == "NoAppsFound"
+
+    @pytest.mark.asyncio
+    async def test_raise_intent_for_context_multiple_compatible_intents_returns_ambiguous(
+        self,
+    ):
+        handler, storage, _, _ = _handler()
+        ws = _websocket()
+
+        from fdc3.models.dacp.dacp import RaiseIntentForContextRequest
+
+        req = RaiseIntentForContextRequest.model_validate(
+            {
+                "type": "raiseIntentForContext",
+                "payload": {"context": {"type": "fdc3.instrument"}},
+                "meta": {"requestUuid": "req-ctx-3"},
+            }
+        )
+
+        storage.apps.list_apps.return_value = [
+            SimpleNamespace(
+                app_id="app-1",
+                name="A1",
+                intents=[
+                    {"name": "ViewChart", "contexts": ["fdc3.instrument"]},
+                    {"name": "ViewNews", "contexts": ["fdc3.instrument"]},
+                ],
+            )
+        ]
+
+        with (
+            patch("fdc3.desktop_agent.handlers.dacp.core_services") as cs,
+            patch.object(handler, "_send_model", new_callable=AsyncMock) as send,
+        ):
+            cs.listener_store.intent_listeners = {}
+            await handler._handle_raise_intent_for_context(req, websocket=ws)
+
+            sent = send.call_args.args[1]
+            assert sent.type == "raiseIntentForContextResponse"
+            assert sent.payload.error == "ResolverUnavailable"
+
+    @pytest.mark.asyncio
+    async def test_raise_intent_for_context_target_instance_unavailable(self):
+        handler, storage, _, _ = _handler()
+        ws = _websocket()
+
+        from fdc3.models.dacp.dacp import RaiseIntentForContextRequest
+
+        req = RaiseIntentForContextRequest.model_validate(
+            {
+                "type": "raiseIntentForContext",
+                "payload": {
+                    "context": {"type": "fdc3.instrument"},
+                    "target": {"appId": "app-1", "instanceId": "inst-2"},
+                },
+                "meta": {"requestUuid": "req-ctx-4"},
+            }
+        )
+
+        storage.apps.list_apps.return_value = [
+            SimpleNamespace(
+                app_id="app-1",
+                name="A1",
+                intents=[{"name": "ViewChart", "contexts": ["fdc3.instrument"]}],
+            )
+        ]
+
+        with (
+            patch("fdc3.desktop_agent.handlers.dacp.core_services") as cs,
+            patch.object(handler, "_send_model", new_callable=AsyncMock) as send,
+        ):
+            cs.listener_store.intent_listeners = {}
+            cs.app_registry.get_instances_for_app.return_value = [
+                SimpleNamespace(instance_id="inst-1")
+            ]
+            await handler._handle_raise_intent_for_context(req, websocket=ws)
+
+            sent = send.call_args.args[1]
+            assert sent.type == "raiseIntentForContextResponse"
+            assert sent.payload.error == "TargetInstanceUnavailable"
+
+    @pytest.mark.asyncio
+    async def test_raise_intent_for_context_target_app_unavailable(self):
+        handler, storage, _, _ = _handler()
+        ws = _websocket()
+
+        from fdc3.models.dacp.dacp import RaiseIntentForContextRequest
+
+        req = RaiseIntentForContextRequest.model_validate(
+            {
+                "type": "raiseIntentForContext",
+                "payload": {
+                    "context": {"type": "fdc3.instrument"},
+                    "target": {"appId": "missing"},
+                },
+                "meta": {"requestUuid": "req-ctx-5"},
+            }
+        )
+
+        storage.apps.list_apps.return_value = [
+            SimpleNamespace(
+                app_id="app-1",
+                name="A1",
+                intents=[{"name": "ViewChart", "contexts": ["fdc3.instrument"]}],
+            )
+        ]
+        storage.apps.get_app_metadata.return_value = None
+
+        with (
+            patch("fdc3.desktop_agent.handlers.dacp.core_services") as cs,
+            patch.object(handler, "_send_model", new_callable=AsyncMock) as send,
+        ):
+            cs.listener_store.intent_listeners = {}
+            await handler._handle_raise_intent_for_context(req, websocket=ws)
+
+            sent = send.call_args.args[1]
+            assert sent.type == "raiseIntentForContextResponse"
+            assert sent.payload.error == "TargetAppUnavailable"
+
+    @pytest.mark.asyncio
+    async def test_raise_intent_prefers_resolved_instance(self):
+        """End-to-end behaviour: if a resolution targets a specific instance id,
+        the delivery should go to that instance only (avoid races)."""
+        handler, _, _, connection_manager = _handler()
+        ws = _websocket()
+
+        from fdc3.models.dacp.dacp import RaiseIntentRequest
+        from fdc3.desktop_agent.core.intent_resolver import IntentResolver
+        from fdc3.desktop_agent.core.listener_store import ListenerStore
+        from fdc3.desktop_agent.core.app_registry import AppRegistry
+        from fdc3.models.primitives import ListenerUuid
+        from fdc3.models.identifiers import AppIdentifier, IntentResolution
+
+        # Create a listener store with two listeners for ViewChart
+        listener_store = ListenerStore()
+        listener_store.add_intent_listener(ListenerUuid(), "target-uuid", "ViewChart")
+        listener_store.add_intent_listener(ListenerUuid(), "other-uuid", "ViewChart")
+
+        # App registry has instances for the resolved app with matching instanceId
+        app_registry = AppRegistry()
+        # register two instances for appId 'targetApp'
+        app_registry.register_instance("targetApp", "target-instance", "target-uuid")
+        app_registry.register_instance("targetApp", "other-instance", "other-uuid")
+
+        # IntentResolver using these stores
+        resolver = IntentResolver(listener_store, app_registry)
+
+        req = RaiseIntentRequest.model_validate(
+            {
+                "type": "raiseIntent",
+                "payload": {"intent": "ViewChart", "context": {"type": "x"}},
+                "meta": {
+                    "requestUuid": "req-1",
+                    "source": {"appId": "source", "instanceId": "inst"},
+                },
+            }
+        )
+
+        resolution = IntentResolution(
+            source=AppIdentifier(appId="targetApp", instanceId="target-instance"),
+            intent="ViewChart",
+        )
+
+        with (
+            patch.object(
+                handler,
+                "_try_plugin_handler",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch.object(
+                handler,
+                "_try_external_handler",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch("fdc3.desktop_agent.handlers.dacp.core_services") as cs,
+            patch.object(handler, "_send_model", new_callable=AsyncMock) as send,
+            patch.object(
+                handler.system_intent_handler, "is_system_intent", return_value=False
+            ),
+        ):
+            # Use the real resolver but stub resolve_intent to return our resolution
+            cs.intent_resolver = resolver
+            # Also patch resolve_intent to return the explicit resolution so the
+            # handler uses it when generating the response (sync function expected)
+            cs.intent_resolver.resolve_intent = lambda *_args, **_kwargs: resolution
+
+            # Call the handler
+            await handler._handle_raise_intent(req, ws)
+
+            # Ensure the response + delivery happened
+            assert send.await_count == 1
+            # Only the resolved instance should have been targeted
+            connection_manager.send_to_instance.assert_awaited_once()
+            args = connection_manager.send_to_instance.await_args.args
+            assert args[0] == "target-uuid"
 
     @pytest.mark.asyncio
     async def test_intent_result_and_heartbeat_paths(self):

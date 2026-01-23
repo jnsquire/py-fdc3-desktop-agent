@@ -16,3 +16,5 @@ dist/
 .cache/
 site/
 fdc3_agent.db
+examples/windows-tray-ui/bin/
+examples/windows-tray-ui/obj/

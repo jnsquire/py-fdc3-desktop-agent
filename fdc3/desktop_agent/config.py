@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, List, Optional
 if TYPE_CHECKING:
     from .distributed.adapter import DistributedLogAdapter
     from .launcher.interfaces import ProcessLauncher
+    from .launcher.web_launcher import WebEndpointLauncher
     from .storage.interfaces import Storage
     from .plugins.interfaces import IntentHandlerPlugin
 
@@ -70,6 +71,7 @@ class DesktopAgentConfig:
     # Optional custom implementations (if None, defaults are used)
     storage: Optional["Storage"] = None
     launcher: Optional["ProcessLauncher"] = None
+    web_launcher: Optional["WebEndpointLauncher"] = None
     distributed_adapter: Optional["DistributedLogAdapter"] = None
 
     # Intent handler plugins (registered during app creation)

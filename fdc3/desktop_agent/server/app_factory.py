@@ -16,6 +16,7 @@ from ..api.graphql import schema, set_graphql_storage
 from ..config import DesktopAgentConfig
 from ..storage import SqliteStorage
 from ..launcher import SubprocessLauncher
+from ..launcher.web_launcher import WebBrowserLauncher
 from ..access_control import AccessControlManager
 from ..handlers import (
     AccessControlHandler,
@@ -72,6 +73,9 @@ def create_app(config: Optional[DesktopAgentConfig] = None) -> FastAPI:
     # Access control
     access_control = AccessControlManager(allowed_origins=config.allowed_origins)
 
+    # Expose the DACP handler on app.state for admin routes to use
+    # (set after dacp_handler is created below)
+
     # Connection managers
     instance_connection_manager = WebSocketConnectionManager()
     agent_client_manager = AgentClientConnectionManager()
@@ -80,9 +84,12 @@ def create_app(config: Optional[DesktopAgentConfig] = None) -> FastAPI:
     access_control_handler = AccessControlHandler(
         access_control, config.allowed_origins
     )
-    wcp_handler = WCPHandler(storage)
+    wcp_handler = WCPHandler(storage, bridge_enabled=config.bridge_enabled)
     # bridge client is created in lifespan (needs event loop); injected into handler.
-    dacp_handler = DACPHandler(storage, launcher, instance_connection_manager)
+    web_launcher = config.web_launcher or WebBrowserLauncher()
+    dacp_handler = DACPHandler(
+        storage, launcher, instance_connection_manager, web_launcher
+    )
 
     # WCP session state
     wcp_sessions: Dict[str, dict] = {}
