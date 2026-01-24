@@ -1,13 +1,14 @@
 import copy
 import uuid
 import threading
-from typing import Dict, List, Optional, Callable, Any, Set, TypedDict, cast
+from typing import Dict, List, Optional, Callable, Any, Set, TypedDict
 import inspect
 import json
 import asyncio
 from datetime import datetime
 import logging
 from fdc3.models.dacp.dacp import Fdc3Context
+from pydantic import BaseModel
 from ..distributed.adapter import DistributedLogAdapter
 from ..api import DisplayMetadata
 
@@ -36,9 +37,9 @@ class ChannelInfo(TypedDict):
     member_count: int
 
 
-class PrivateChannelInvite(TypedDict):
+class PrivateChannelInvite(BaseModel):
     token: str
-    instanceId: Optional[str]
+    instanceId: Optional[str] = None
 
 
 class PrivateChannelState(TypedDict):
@@ -164,7 +165,7 @@ class ChannelManager:
             return None
         with self._lock:
             invites: List[PrivateChannelInvite] = [
-                cast(PrivateChannelInvite, {"token": token, "instanceId": inst})
+                PrivateChannelInvite(token=token, instanceId=inst)
                 for token, inst in self.private_channel_invites.get(
                     channel_id, {}
                 ).items()

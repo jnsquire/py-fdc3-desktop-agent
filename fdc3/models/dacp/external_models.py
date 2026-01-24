@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from .dacp import AgentResponseMeta, AppRequestMeta
+from .dacp import AgentResponseMeta, AppRequestMeta, register_message_type
 
 
 # --- Incoming messages (from external handlers) ---
@@ -34,6 +34,7 @@ class RegisterExternalHandlerPayload(BaseModel):
         return v
 
 
+@register_message_type("registerExternalHandler")
 class RegisterExternalHandlerRequest(BaseModel):
     """Request to register an external intent handler."""
 
@@ -50,6 +51,7 @@ class UnregisterExternalHandlerPayload(BaseModel):
     )
 
 
+@register_message_type("unregisterExternalHandler")
 class UnregisterExternalHandlerRequest(BaseModel):
     """Request to unregister an external intent handler."""
 
@@ -72,6 +74,7 @@ class ExternalIntentResultPayload(BaseModel):
     )
 
 
+@register_message_type("intentResult")
 class ExternalIntentResultRequest(BaseModel):
     """Intent result message from an external handler."""
 

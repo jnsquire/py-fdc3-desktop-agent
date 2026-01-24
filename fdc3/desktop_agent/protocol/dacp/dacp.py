@@ -11,6 +11,16 @@ from ...api import (
 
 # DACP Envelopes
 
+MESSAGE_TYPE_MAP: dict[str, type[BaseModel]] = {}
+
+
+def register_message_type(message_type: str):
+    def decorator(cls: type[BaseModel]) -> type[BaseModel]:
+        MESSAGE_TYPE_MAP[message_type] = cls
+        return cls
+
+    return decorator
+
 
 class AppRequestMeta(BaseModel):
     requestUuid: RequestUuid
@@ -73,6 +83,7 @@ class HeartbeatAcknowledgmentRequestPayload(BaseModel):
     heartbeatEventUuid: EventUuid = Field(default_factory=EventUuid)
 
 
+@register_message_type("heartbeatAcknowledgmentRequest")
 class HeartbeatAcknowledgmentRequest(BaseModel):
     type: Literal["heartbeatAcknowledgmentRequest"]
     payload: HeartbeatAcknowledgmentRequestPayload
@@ -88,6 +99,7 @@ class OpenRequestPayload(BaseModel):
     context: Optional[dict] = None  # Context data
 
 
+@register_message_type("open")
 class OpenRequest(BaseModel):
     type: Literal["open"]
     payload: OpenRequestPayload
@@ -109,6 +121,7 @@ class BroadcastRequestPayload(BaseModel):
     context: dict  # Context data
 
 
+@register_message_type("broadcast")
 class BroadcastRequest(BaseModel):
     type: Literal["broadcast"]
     payload: BroadcastRequestPayload
@@ -130,6 +143,7 @@ class AddContextListenerRequestPayload(BaseModel):
     contextType: Optional[str] = None
 
 
+@register_message_type("addContextListener")
 class AddContextListenerRequest(BaseModel):
     type: Literal["addContextListener"]
     payload: AddContextListenerRequestPayload
@@ -150,6 +164,7 @@ class ContextListenerUnsubscribeRequestPayload(BaseModel):
     listenerUuid: ListenerUuid
 
 
+@register_message_type("contextListenerUnsubscribe")
 class ContextListenerUnsubscribeRequest(BaseModel):
     type: Literal["contextListenerUnsubscribe"]
     payload: ContextListenerUnsubscribeRequestPayload
@@ -171,6 +186,7 @@ class AddIntentListenerRequestPayload(BaseModel):
     intent: str
 
 
+@register_message_type("addIntentListener")
 class AddIntentListenerRequest(BaseModel):
     type: Literal["addIntentListener"]
     payload: AddIntentListenerRequestPayload
@@ -191,6 +207,7 @@ class IntentListenerUnsubscribeRequestPayload(BaseModel):
     listenerUuid: ListenerUuid
 
 
+@register_message_type("intentListenerUnsubscribe")
 class IntentListenerUnsubscribeRequest(BaseModel):
     type: Literal["intentListenerUnsubscribe"]
     payload: IntentListenerUnsubscribeRequestPayload
@@ -214,6 +231,7 @@ class RaiseIntentRequestPayload(BaseModel):
     target: Optional[AppIdentifier | str] = None
 
 
+@register_message_type("raiseIntent")
 class RaiseIntentRequest(BaseModel):
     type: Literal["raiseIntent"]
     payload: RaiseIntentRequestPayload
@@ -237,6 +255,7 @@ class RaiseIntentForContextRequestPayload(BaseModel):
     target: Optional[AppIdentifier] = None
 
 
+@register_message_type("raiseIntentForContext")
 class RaiseIntentForContextRequest(BaseModel):
     type: Literal["raiseIntentForContext"]
     payload: RaiseIntentForContextRequestPayload
@@ -271,6 +290,7 @@ class IntentResultRequestPayload(BaseModel):
     intentResult: dict  # IntentResult
 
 
+@register_message_type("intentResultRequest")
 class IntentResultRequest(BaseModel):
     type: Literal["intentResultRequest"]
     payload: IntentResultRequestPayload
@@ -292,6 +312,7 @@ class RaiseIntentResultResponsePayload(BaseModel):
     pass
 
 
+@register_message_type("raiseIntentResultResponse")
 class RaiseIntentResultResponse(BaseModel):
     type: Literal["raiseIntentResultResponse"]
     payload: RaiseIntentResultResponsePayload

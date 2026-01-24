@@ -13,6 +13,7 @@ from fdc3.desktop_agent.access_control import (
 )
 from fdc3.desktop_agent.handlers.system_intent import SystemIntentHandler
 from fdc3.desktop_agent.handlers.wcp import WCPHandler
+from fdc3.desktop_agent.types import WcpSession
 from fdc3.desktop_agent.storage import Storage
 from fdc3.desktop_agent.launcher import ProcessLauncher
 from fdc3.models.primitives import RequestUuid
@@ -182,7 +183,7 @@ async def test_wcp_handle_message_goodbye_disconnects():
     handler = WCPHandler(cast(Storage, FakeStorage()))
     ws = FakeWebSocket()
 
-    wcp_sessions = {"s": {"wcp1_identity": {}, "identity": None, "state": "handshake"}}
+    wcp_sessions = {"s": WcpSession(wcp1_identity={}, identity=None, state="handshake")}
     transition = await handler.handle_message(
         {"type": "WCP6Goodbye"}, "s", wcp_sessions, cast(WebSocket, ws)
     )
@@ -221,7 +222,11 @@ async def test_wcp4_invalid_payload_sends_failed_response(monkeypatch):
             "meta": {"connectionAttemptUuid": "cid", "timestamp": "now"},
         },
         "s",
-        {"s": {"wcp1_identity": {"identityUrl": "http://x", "actualUrl": "http://x"}}},
+        {
+            "s": WcpSession(
+                wcp1_identity={"identityUrl": "http://x", "actualUrl": "http://x"}
+            )
+        },
         cast(WebSocket, ws),
     )
     assert ok is False
@@ -246,7 +251,11 @@ async def test_wcp4_invalid_payload_meta_access_raises(monkeypatch):
     ok = await handler._handle_wcp4_validate_app_identity(
         msg,
         "s",
-        {"s": {"wcp1_identity": {"identityUrl": "http://x", "actualUrl": "http://x"}}},
+        {
+            "s": WcpSession(
+                wcp1_identity={"identityUrl": "http://x", "actualUrl": "http://x"}
+            )
+        },
         cast(WebSocket, ws),
     )
     assert ok is False
@@ -267,7 +276,11 @@ async def test_wcp4_invalid_payload_failed_response_send_raises(monkeypatch):
     ok = await handler._handle_wcp4_validate_app_identity(
         {"type": "WCP4ValidateAppIdentity"},
         "s",
-        {"s": {"wcp1_identity": {"identityUrl": "http://x", "actualUrl": "http://x"}}},
+        {
+            "s": WcpSession(
+                wcp1_identity={"identityUrl": "http://x", "actualUrl": "http://x"}
+            )
+        },
         cast(WebSocket, FakeWebSocket()),
     )
     assert ok is False
@@ -292,7 +305,11 @@ async def test_wcp4_valid_but_identity_invalid_sends_failure():
             },
         },
         "s",
-        {"s": {"wcp1_identity": {"identityUrl": "http://x", "actualUrl": "http://x"}}},
+        {
+            "s": WcpSession(
+                wcp1_identity={"identityUrl": "http://x", "actualUrl": "http://x"}
+            )
+        },
         cast(WebSocket, ws),
     )
     assert ok is False
@@ -326,11 +343,11 @@ async def test_wcp4_success_external_handler_storage_metadata_error(monkeypatch)
     monkeypatch.setattr(wcp_mod.core_services, "app_registry", AppRegistryStub())
 
     wcp_sessions = {
-        "s": {
-            "wcp1_identity": {"identityUrl": "http://x", "actualUrl": "http://x"},
-            "identity": None,
-            "state": "handshake",
-        }
+        "s": WcpSession(
+            wcp1_identity={"identityUrl": "http://x", "actualUrl": "http://x"},
+            identity=None,
+            state="handshake",
+        )
     }
 
     transition = await handler.handle_message(
@@ -385,11 +402,11 @@ async def test_wcp4_success_runtime_info_error(monkeypatch):
     )
 
     wcp_sessions = {
-        "s": {
-            "wcp1_identity": {"identityUrl": "http://x", "actualUrl": "http://x"},
-            "identity": None,
-            "state": "handshake",
-        }
+        "s": WcpSession(
+            wcp1_identity={"identityUrl": "http://x", "actualUrl": "http://x"},
+            identity=None,
+            state="handshake",
+        )
     }
 
     transition = await handler.handle_message(
@@ -447,11 +464,11 @@ async def test_wcp4_success_external_handler_includes_impl_metadata(monkeypatch)
     monkeypatch.setattr(wcp_mod.core_services, "app_registry", AppRegistryStub())
 
     wcp_sessions = {
-        "s": {
-            "wcp1_identity": {"identityUrl": "http://x", "actualUrl": "http://x"},
-            "identity": None,
-            "state": "handshake",
-        }
+        "s": WcpSession(
+            wcp1_identity={"identityUrl": "http://x", "actualUrl": "http://x"},
+            identity=None,
+            state="handshake",
+        )
     }
 
     transition = await handler.handle_message(
@@ -508,11 +525,11 @@ async def test_wcp_validate_app_identity_external_handler_generates_uuid(monkeyp
         meta=cast(Any, {"connectionAttemptUuid": "cid", "timestamp": "now"}),
     )
     sessions = {
-        "s": {
-            "wcp1_identity": {"identityUrl": "http://x", "actualUrl": "http://x"},
-            "identity": None,
-            "state": "handshake",
-        }
+        "s": WcpSession(
+            wcp1_identity={"identityUrl": "http://x", "actualUrl": "http://x"},
+            identity=None,
+            state="handshake",
+        )
     }
     res = await handler._validate_app_identity(wcp4, "s", sessions)
     assert res["valid"] is True
@@ -559,12 +576,12 @@ async def test_wcp_validate_app_identity_origin_not_allowed(monkeypatch):
     )
 
     sessions = {
-        "s": {
-            "wcp1_identity": {
+        "s": WcpSession(
+            wcp1_identity={
                 "identityUrl": "http://malicious.com/app",
                 "actualUrl": "http://malicious.com/app",
             }
-        }
+        )
     }
     res = await handler._validate_app_identity(wcp4, "s", sessions)
     assert res["valid"] is False
@@ -610,7 +627,7 @@ async def test_wcp_validate_app_identity_invalid_urls(monkeypatch):
         meta=cast(Any, {"connectionAttemptUuid": "cid", "timestamp": "now"}),
     )
 
-    sessions = {"s": {"wcp1_identity": {"identityUrl": None, "actualUrl": None}}}
+    sessions = {"s": WcpSession(wcp1_identity={"identityUrl": None, "actualUrl": None})}
     res = await handler._validate_app_identity(wcp4, "s", sessions)
     assert res["valid"] is False
     assert res["error"] == "Invalid identity or actual URL"
@@ -652,7 +669,9 @@ async def test_wcp_validate_app_identity_allowed_origins_storage_error(monkeypat
         meta=cast(Any, {"connectionAttemptUuid": "cid", "timestamp": "now"}),
     )
     sessions = {
-        "s": {"wcp1_identity": {"identityUrl": "http://x", "actualUrl": "http://x"}}
+        "s": WcpSession(
+            wcp1_identity={"identityUrl": "http://x", "actualUrl": "http://x"}
+        )
     }
     res = await handler._validate_app_identity(wcp4, "s", sessions)
     assert res["valid"] is True
@@ -691,7 +710,9 @@ async def test_wcp_validate_app_identity_instance_uuid_not_found(monkeypatch):
         ),
     )
     sessions = {
-        "s": {"wcp1_identity": {"identityUrl": "http://x", "actualUrl": "http://x"}}
+        "s": WcpSession(
+            wcp1_identity={"identityUrl": "http://x", "actualUrl": "http://x"}
+        )
     }
     res = await handler._validate_app_identity(wcp4, "s", sessions)
     assert res["valid"] is False
@@ -725,12 +746,14 @@ async def test_wcp_validate_identity_cases():
         payload=WCP4ValidateAppIdentityPayload(instanceId=None, instanceUuid=None),
         meta=cast(Any, {"connectionAttemptUuid": "cid", "timestamp": "now"}),
     )
-    res = await handler._validate_app_identity(wcp4, "s", {"s": {}})
+    res = await handler._validate_app_identity(wcp4, "s", {"s": WcpSession()})
     assert res["valid"] is False
 
     # Case: wcp1_identity exists but instanceUuid missing
     sessions = {
-        "s": {"wcp1_identity": {"identityUrl": "http://a", "actualUrl": "http://a"}}
+        "s": WcpSession(
+            wcp1_identity={"identityUrl": "http://a", "actualUrl": "http://a"}
+        )
     }
     res2 = await handler._validate_app_identity(wcp4, "s", sessions)
     assert res2["valid"] is False

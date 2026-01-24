@@ -1,4 +1,4 @@
-from types import SimpleNamespace
+from dataclasses import dataclass, field
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -9,11 +9,88 @@ from fdc3.desktop_agent.core.channel_manager import ChannelManager
 from fdc3.desktop_agent.core.listener_store import ListenerStore
 from fdc3.models.primitives import ListenerUuid
 from fdc3.models.identifiers import AppIdentifier
+from fdc3.desktop_agent.storage import AppMetadata
+
+
+@dataclass
+class ConnectionManagerStub:
+    send_to_instance: AsyncMock = field(default_factory=AsyncMock)
+
+
+@dataclass
+class LaunchConfigMeta:
+    app_id: str
+
+
+@dataclass
+class LaunchResultStub:
+    success: bool
+    instance_id: str | None = None
+    instance_uuid: str | None = None
+
+
+@dataclass
+class AppInstance:
+    app_id: str
+    instance_id: str
+    instance_uuid: str | None = None
+
+
+@dataclass
+class AppsRepoStub:
+    get_app_metadata: AsyncMock
+    list_apps: AsyncMock
+
+
+@dataclass
+class LaunchConfigsRepoStub:
+    get_launch_config: AsyncMock
+
+
+@dataclass
+class StorageStub:
+    apps: AppsRepoStub
+    launch_configs: LaunchConfigsRepoStub
+
+
+@dataclass
+class LauncherStub:
+    launch_app: AsyncMock
+
+
+@dataclass
+class ContextRouterStub:
+    broadcast_context: Mock = field(default_factory=lambda: Mock(return_value=[]))
+
+
+@dataclass
+class IntentResolverStub:
+    resolve_intent: Mock = field(default_factory=Mock)
+    deliver_intent_event: Mock = field(default_factory=Mock)
+
+
+@dataclass
+class AppRegistryStub:
+    get_connected_instances_for_app: Mock = field(default_factory=Mock)
+    register_pending_instance: Mock = field(default_factory=Mock)
+    wait_for_instance_connection: AsyncMock = field(
+        default_factory=lambda: AsyncMock(return_value=True)
+    )
+    unregister_instance: Mock = field(default_factory=Mock)
+
+
+@dataclass
+class CoreServicesStub:
+    context_router: ContextRouterStub = field(default_factory=ContextRouterStub)
+    intent_resolver: IntentResolverStub = field(default_factory=IntentResolverStub)
+    app_registry: AppRegistryStub = field(default_factory=AppRegistryStub)
+    listener_store: ListenerStore | None = None
+    channel_manager: ChannelManager | None = None
 
 
 @pytest.fixture
 def connection_manager():
-    return SimpleNamespace(send_to_instance=AsyncMock())
+    return ConnectionManagerStub()
 
 
 @pytest.fixture
@@ -26,10 +103,10 @@ def router_factory(connection_manager):
         local_name: str | None = "local-da",
     ) -> BridgeRequestRouter:
         return BridgeRequestRouter(
-            storage=storage or SimpleNamespace(),
-            launcher=launcher or SimpleNamespace(),
+            storage=storage or make_storage(),
+            launcher=launcher or make_launcher(),
             connection_manager=connection_manager,
-            core_services=core or SimpleNamespace(),
+            core_services=core or CoreServicesStub(),
             local_desktop_agent_name=local_name,
         )
 
@@ -37,7 +114,7 @@ def router_factory(connection_manager):
 
 
 def make_apps(get_app_metadata=None, list_apps=None):
-    return SimpleNamespace(
+    return AppsRepoStub(
         get_app_metadata=AsyncMock(return_value=get_app_metadata)
         if get_app_metadata is not None
         else AsyncMock(return_value=None),
@@ -46,7 +123,7 @@ def make_apps(get_app_metadata=None, list_apps=None):
 
 
 def make_launch_configs(get_launch_config=None):
-    return SimpleNamespace(
+    return LaunchConfigsRepoStub(
         get_launch_config=AsyncMock(return_value=get_launch_config)
         if get_launch_config is not None
         else AsyncMock(return_value=None)
@@ -54,13 +131,14 @@ def make_launch_configs(get_launch_config=None):
 
 
 def make_storage(apps=None, launch_configs=None):
-    return SimpleNamespace(
-        apps=apps or make_apps(), launch_configs=launch_configs or make_launch_configs()
+    return StorageStub(
+        apps=apps or make_apps(),
+        launch_configs=launch_configs or make_launch_configs(),
     )
 
 
 def make_launcher(launch_app=None):
-    return SimpleNamespace(
+    return LauncherStub(
         launch_app=AsyncMock(return_value=launch_app)
         if launch_app is not None
         else AsyncMock()
@@ -68,13 +146,10 @@ def make_launcher(launch_app=None):
 
 
 def make_core(context_router=None, intent_resolver=None, app_registry=None):
-    return SimpleNamespace(
-        context_router=context_router
-        or SimpleNamespace(broadcast_context=Mock(return_value=[])),
-        intent_resolver=intent_resolver
-        or SimpleNamespace(resolve_intent=Mock(), deliver_intent_event=Mock()),
-        app_registry=app_registry
-        or SimpleNamespace(get_connected_instances_for_app=Mock()),
+    return CoreServicesStub(
+        context_router=context_router or ContextRouterStub(),
+        intent_resolver=intent_resolver or IntentResolverStub(),
+        app_registry=app_registry or AppRegistryStub(),
     )
 
 
@@ -82,13 +157,10 @@ def make_core(context_router=None, intent_resolver=None, app_registry=None):
 async def test_bridge_router_fdc3_event_delivery_targets_instance(
     router_factory, connection_manager
 ):
-    class _Inst:
-        def __init__(self, instance_id: str, instance_uuid: str):
-            self.instance_id = instance_id
-            self.instance_uuid = instance_uuid
-
-    app_registry = SimpleNamespace(
-        get_connected_instances_for_app=Mock(return_value=[_Inst("inst-1", "uuid-1")])
+    app_registry = AppRegistryStub(
+        get_connected_instances_for_app=Mock(
+            return_value=[AppInstance("app-1", "inst-1", "uuid-1")]
+        )
     )
     core = make_core(app_registry=app_registry)
     router = router_factory(core=core)
@@ -117,8 +189,8 @@ async def test_bridge_router_fdc3_event_delivery_targets_instance(
 async def test_bridge_router_broadcast_request_fanouts_and_returns_none(
     router_factory, connection_manager
 ):
-    core = SimpleNamespace(
-        context_router=SimpleNamespace(
+    core = CoreServicesStub(
+        context_router=ContextRouterStub(
             broadcast_context=Mock(return_value=["i-1", "i-2"])
         )
     )
@@ -156,12 +228,10 @@ async def test_bridge_router_private_channel_event_delivery(
         event_type="onDisconnect",
         channel_id="private:abc",
     )
-    core = SimpleNamespace(
-        context_router=SimpleNamespace(broadcast_context=Mock(return_value=[])),
-        intent_resolver=SimpleNamespace(
-            resolve_intent=Mock(), deliver_intent_event=Mock()
-        ),
-        app_registry=SimpleNamespace(get_connected_instances_for_app=Mock()),
+    core = CoreServicesStub(
+        context_router=ContextRouterStub(),
+        intent_resolver=IntentResolverStub(),
+        app_registry=AppRegistryStub(),
         listener_store=listener_store,
         channel_manager=ChannelManager(),
     )
@@ -189,12 +259,10 @@ async def test_bridge_router_private_channel_event_listener_updates_remote_track
     router_factory,
 ):
     channel_manager = ChannelManager()
-    core = SimpleNamespace(
-        context_router=SimpleNamespace(broadcast_context=Mock(return_value=[])),
-        intent_resolver=SimpleNamespace(
-            resolve_intent=Mock(), deliver_intent_event=Mock()
-        ),
-        app_registry=SimpleNamespace(get_connected_instances_for_app=Mock()),
+    core = CoreServicesStub(
+        context_router=ContextRouterStub(),
+        intent_resolver=IntentResolverStub(),
+        app_registry=AppRegistryStub(),
         listener_store=ListenerStore(),
         channel_manager=channel_manager,
     )
@@ -238,18 +306,18 @@ async def test_bridge_router_private_channel_event_listener_updates_remote_track
 
 @pytest.mark.asyncio
 async def test_bridge_router_open_request_success_builds_open_response(router_factory):
-    apps = make_apps(get_app_metadata=SimpleNamespace(app_id="app-1"))
+    apps = make_apps(get_app_metadata=AppMetadata(app_id="app-1", name="App 1"))
     launch_configs = make_launch_configs(
-        get_launch_config=SimpleNamespace(app_id="app-1")
+        get_launch_config=LaunchConfigMeta(app_id="app-1")
     )
     storage = make_storage(apps=apps, launch_configs=launch_configs)
 
     launcher = make_launcher(
-        launch_app=SimpleNamespace(
+        launch_app=LaunchResultStub(
             success=True, instance_id="inst-1", instance_uuid="uuid-1"
         )
     )
-    app_registry = SimpleNamespace(
+    app_registry = AppRegistryStub(
         register_pending_instance=Mock(),
         wait_for_instance_connection=AsyncMock(return_value=True),
         unregister_instance=Mock(),
@@ -311,7 +379,7 @@ async def test_bridge_router_raise_intent_request_delivers_intent_event_and_retu
         intent="ViewChart",
     )
 
-    intent_resolver = SimpleNamespace(
+    intent_resolver = IntentResolverStub(
         resolve_intent=Mock(return_value=resolution),
         deliver_intent_event=Mock(return_value=["inst-123"]),
     )
@@ -342,7 +410,7 @@ async def test_bridge_router_get_app_metadata_request_success_returns_metadata_p
     router_factory,
 ):
     apps = make_apps(
-        get_app_metadata=SimpleNamespace(
+        get_app_metadata=AppMetadata(
             app_id="app-1",
             name="App One",
             version="1.2.3",
@@ -379,8 +447,11 @@ async def test_bridge_router_get_app_metadata_request_success_returns_metadata_p
 async def test_bridge_router_get_app_metadata_request_missing_or_unknown_returns_app_not_found_error(
     router_factory,
 ):
-    apps = SimpleNamespace(get_app_metadata=AsyncMock(return_value=None))
-    storage = SimpleNamespace(apps=apps)
+    apps = AppsRepoStub(
+        get_app_metadata=AsyncMock(return_value=None),
+        list_apps=AsyncMock(return_value=[]),
+    )
+    storage = StorageStub(apps=apps, launch_configs=make_launch_configs())
 
     router = router_factory(storage=storage)
 
@@ -411,11 +482,11 @@ async def test_bridge_router_get_app_metadata_request_missing_or_unknown_returns
 async def test_bridge_router_find_instances_request_returns_identifiers_for_connected_instances(
     router_factory,
 ):
-    app_registry = SimpleNamespace(
+    app_registry = AppRegistryStub(
         get_connected_instances_for_app=Mock(
             return_value=[
-                SimpleNamespace(app_id="app-1", instance_id="i-1"),
-                SimpleNamespace(app_id="app-1", instance_id="i-2"),
+                AppInstance(app_id="app-1", instance_id="i-1"),
+                AppInstance(app_id="app-1", instance_id="i-2"),
             ]
         )
     )
@@ -445,8 +516,8 @@ async def test_bridge_router_find_instances_request_returns_identifiers_for_conn
 async def test_bridge_router_find_instances_request_missing_app_id_returns_empty_list(
     router_factory,
 ):
-    core = SimpleNamespace(
-        app_registry=SimpleNamespace(get_connected_instances_for_app=Mock())
+    core = CoreServicesStub(
+        app_registry=AppRegistryStub(get_connected_instances_for_app=Mock())
     )
 
     router = router_factory(core=core)
@@ -494,11 +565,11 @@ async def test_bridge_router_find_intent_request_returns_error_when_no_matching_
 ):
     apps = make_apps(
         list_apps=[
-            SimpleNamespace(
+            AppMetadata(
                 app_id="a1",
                 name="A1",
                 version="1",
-                description=None,
+                description="",
                 icons=None,
                 intents=["Other"],
             )
@@ -527,7 +598,7 @@ async def test_bridge_router_find_intent_request_returns_app_intent_for_matches(
 ):
     apps = make_apps(
         list_apps=[
-            SimpleNamespace(
+            AppMetadata(
                 app_id="a1",
                 name="A1",
                 version="1",
@@ -535,7 +606,7 @@ async def test_bridge_router_find_intent_request_returns_app_intent_for_matches(
                 icons=[{"src": "x"}],
                 intents=["ViewChart"],
             ),
-            SimpleNamespace(
+            AppMetadata(
                 app_id="a2",
                 name="A2",
                 version="2",

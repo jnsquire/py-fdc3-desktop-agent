@@ -16,6 +16,15 @@ python -m pip install -e '.[dev]'
 python -m pytest
 ```
 
+## Code style (required)
+
+After each major change, run the following commands to fix lint issues and format files:
+
+```bash
+uv run ruff check --fix
+uv run ruff format
+```
+
 ## Developer setup
 
 This repository includes helper scripts to bootstrap a developer environment and install git hooks.

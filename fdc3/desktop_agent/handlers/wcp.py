@@ -27,6 +27,7 @@ from ..core import core_services
 from ..storage import Storage
 from ..version import __version__
 from fdc3.models.identifiers import ImplementationMetadata, AppMetadata
+from ..types import WcpIdentity, WcpSession, WcpSessions
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,7 @@ class WCPHandler:
         self,
         message: Dict[str, Any],
         session_id: str,
-        wcp_sessions: Dict[str, Any],
+        wcp_sessions: WcpSessions,
         websocket: WebSocket,
     ) -> Optional[str]:
         """
@@ -81,7 +82,7 @@ class WCPHandler:
         self,
         message: Dict[str, Any],
         session_id: str,
-        wcp_sessions: Dict[str, Any],
+        wcp_sessions: WcpSessions,
         websocket: WebSocket,
     ):
         """Handle WCP1Hello message"""
@@ -91,15 +92,15 @@ class WCPHandler:
             logger.warning("Invalid WCP1Hello received: %s", exc)
             return
 
-        wcp_sessions[session_id] = {
-            "wcp1_identity": {
+        wcp_sessions[session_id] = WcpSession(
+            wcp1_identity={
                 "identityUrl": wcp1.payload.identityUrl,
                 "actualUrl": wcp1.payload.actualUrl,
                 "fdc3Version": wcp1.payload.fdc3Version,
             },
-            "identity": None,
-            "state": "handshake",
-        }
+            identity=None,
+            state="handshake",
+        )
 
         # Send WCP3Handshake (skip WCP2 for now)
         wcp3 = WCP3Handshake(
@@ -114,7 +115,7 @@ class WCPHandler:
         self,
         message: Dict[str, Any],
         session_id: str,
-        wcp_sessions: Dict[str, Any],
+        wcp_sessions: WcpSessions,
         websocket: WebSocket,
     ) -> bool:
         """Handle WCP4ValidateAppIdentity message. Returns True if transitioning to DACP."""
@@ -148,8 +149,12 @@ class WCPHandler:
         )
 
         if validation_result["valid"]:
-            identity = validation_result["identity"]
-            wcp_sessions[session_id]["identity"] = identity
+            identity = WcpIdentity.model_validate(validation_result["identity"])
+            session = wcp_sessions.get(session_id)
+            if session is None:
+                session = WcpSession()
+                wcp_sessions[session_id] = session
+            session.identity = identity
 
             # Send success response
             # Populate implementationMetadata from storage if available (best-effort)
@@ -158,7 +163,7 @@ class WCPHandler:
             description = None
             icons = None
             try:
-                app_id = identity.get("appId")
+                app_id = identity.appId
                 if app_id and hasattr(self.storage, "apps"):
                     app_meta = await self.storage.apps.get_app_metadata(app_id)
                     if app_meta:
@@ -181,8 +186,8 @@ class WCPHandler:
                 providerVersion=__version__,
                 optionalFeatures=optional_features,
                 appMetadata=AppMetadata(
-                    appId=identity.get("appId") or "unknown",
-                    instanceId=identity.get("instanceId"),
+                    appId=identity.appId or "unknown",
+                    instanceId=identity.instanceId,
                     name=name,
                     version=version,
                     description=description,
@@ -193,7 +198,7 @@ class WCPHandler:
             # Backward-compat: include app metadata fields at top-level
             impl_meta.update(
                 {
-                    "appId": identity.get("appId") or "unknown",
+                    "appId": identity.appId or "unknown",
                     "name": name,
                     "version": version,
                     "description": description,
@@ -221,9 +226,9 @@ class WCPHandler:
             )
             wcp5 = WCP5ValidateAppIdentityResponse(
                 payload=WCP5ValidateAppIdentityResponsePayload(
-                    appId=identity["appId"],
-                    instanceId=identity["instanceId"],
-                    instanceUuid=identity["instanceUuid"],
+                    appId=identity.appId or "unknown",
+                    instanceId=identity.instanceId or "",
+                    instanceUuid=identity.instanceUuid or "",
                     implementationMetadata=impl_meta,
                 ),
                 meta={
@@ -235,7 +240,9 @@ class WCPHandler:
 
             # Register instance
             core_services.app_registry.register_instance(
-                identity["appId"], identity["instanceId"], identity["instanceUuid"]
+                identity.appId or "unknown",
+                identity.instanceId or "",
+                identity.instanceUuid or "",
             )
 
             return True  # Transition to DACP
@@ -256,7 +263,7 @@ class WCPHandler:
             await self._send_model(websocket, wcp5_failed)
             return False
 
-    async def _handle_wcp6_goodbye(self, session_id: str, wcp_sessions: Dict[str, Any]):
+    async def _handle_wcp6_goodbye(self, session_id: str, wcp_sessions: WcpSessions):
         """Handle WCP6Goodbye message"""
         if session_id in wcp_sessions:
             del wcp_sessions[session_id]
@@ -265,7 +272,7 @@ class WCPHandler:
         self,
         wcp4: WCP4ValidateAppIdentity,
         session_id: str,
-        wcp_sessions: Dict[str, Any],
+        wcp_sessions: WcpSessions,
     ) -> Dict[str, Any]:
         """Validate WCP4 app identity request.
 
@@ -276,7 +283,12 @@ class WCPHandler:
         from urllib.parse import urlparse
         import uuid as uuid_mod
 
-        wcp1_identity = wcp_sessions[session_id].get("wcp1_identity")
+        session = wcp_sessions.get(session_id)
+        wcp1_identity = None
+        if isinstance(session, WcpSession):
+            wcp1_identity = session.wcp1_identity
+        elif isinstance(session, dict):
+            wcp1_identity = session.get("wcp1_identity")
         if not wcp1_identity:
             return {"valid": False, "error": "No WCP1 identity information found"}
 

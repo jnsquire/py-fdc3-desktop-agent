@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Optional, Any, Literal
 from pydantic import BaseModel, Field, field_validator
 
-from .dacp import AppRequestMeta
+from .dacp import AppRequestMeta, register_message_type
 
 
 # --- Outgoing messages (to external handlers) ---
@@ -123,6 +123,7 @@ class RegisterExternalHandlerPayload(BaseModel):
         return v
 
 
+@register_message_type("registerExternalHandler")
 class RegisterExternalHandlerRequest(BaseModel):
     """Request to register an external intent handler."""
 
@@ -139,6 +140,7 @@ class UnregisterExternalHandlerPayload(BaseModel):
     )
 
 
+@register_message_type("unregisterExternalHandler")
 class UnregisterExternalHandlerRequest(BaseModel):
     """Request to unregister an external intent handler."""
 
@@ -167,6 +169,7 @@ class ExternalIntentResultPayload(BaseModel):
         return v
 
 
+@register_message_type("intentResult")
 class ExternalIntentResultRequest(BaseModel):
     """Intent result message from an external handler."""
 

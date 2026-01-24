@@ -13,13 +13,13 @@ use :func:`fdc3.desktop_agent.server.create_app`.
 import asyncio
 import json
 import logging
-from typing import Dict
 
 from fastapi import WebSocket, WebSocketDisconnect
 
 from ..core import core_services
 from ..handlers import AccessControlHandler, WCPHandler, DACPHandler
 from .connection_manager import AgentClientConnectionManager
+from ..types import WcpSessions
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ async def websocket_endpoint(
     access_control_handler: AccessControlHandler,
     wcp_handler: WCPHandler,
     dacp_handler: DACPHandler,
-    wcp_sessions: Dict[str, dict],
+    wcp_sessions: WcpSessions,
     agent_client_manager: AgentClientConnectionManager,
 ):
     """WebSocket endpoint for FDC3 WCP and DACP communication.
@@ -102,8 +102,16 @@ async def websocket_endpoint(
                                 "DACP transition without session_id; skipping registration"
                             )
                         else:
-                            identity = wcp_sessions[session_id]["identity"]
-                            instance_uuid = identity["instanceUuid"]
+                            session = wcp_sessions.get(session_id)
+                            identity = session.identity if session else None
+                            instance_uuid = (
+                                identity.instanceUuid if identity is not None else None
+                            )
+                            if not instance_uuid:
+                                logger.warning(
+                                    "DACP transition without instanceUuid; skipping registration"
+                                )
+                                continue
                             # Best-effort: not fatal if registration fails
                             dacp_handler.connection_manager.add_connection(
                                 instance_uuid, websocket
@@ -126,8 +134,13 @@ async def websocket_endpoint(
             except asyncio.CancelledError:
                 pass
         if session_id is not None and session_id in wcp_sessions:
-            identity = wcp_sessions[session_id]["identity"]
-            instance_uuid = identity["instanceUuid"]
+            session = wcp_sessions[session_id]
+            identity = session.identity if session else None
+            instance_uuid = identity.instanceUuid if identity is not None else None
+            if not instance_uuid:
+                del wcp_sessions[session_id]
+                logger.info("WebSocket disconnected")
+                return
             core_services.app_registry.unregister_instance(instance_uuid)
             core_services.listener_store.remove_listeners_for_instance(instance_uuid)
             core_services.channel_manager.leave_current_channel(instance_uuid)

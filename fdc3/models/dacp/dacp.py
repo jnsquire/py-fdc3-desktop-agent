@@ -28,6 +28,16 @@ from .enums import PrivateChannelEventListenerTypes
 
 Fdc3Context: TypeAlias = ContextBase
 
+MESSAGE_TYPE_MAP: dict[str, type[BaseModel]] = {}
+
+
+def register_message_type(message_type: str):
+    def decorator(cls: type[BaseModel]) -> type[BaseModel]:
+        MESSAGE_TYPE_MAP[message_type] = cls
+        return cls
+
+    return decorator
+
 
 class AppRequestMeta(BaseModel):
     requestUuid: RequestUuid = Field(default_factory=RequestUuid)
@@ -100,6 +110,7 @@ class HeartbeatAcknowledgmentRequestPayload(BaseModel):
     heartbeatEventUuid: EventUuid = Field(default_factory=EventUuid)
 
 
+@register_message_type("heartbeatAcknowledgmentRequest")
 class HeartbeatAcknowledgmentRequest(BaseModel):
     type: Literal["heartbeatAcknowledgmentRequest"]
     payload: HeartbeatAcknowledgmentRequestPayload
@@ -115,6 +126,7 @@ class OpenRequestPayload(BaseModel):
     context: Optional[Fdc3Context] = None  # Context data
 
 
+@register_message_type("open")
 class OpenRequest(BaseModel):
     type: Literal["open"]
     payload: OpenRequestPayload
@@ -136,6 +148,7 @@ class BroadcastRequestPayload(BaseModel):
     context: Fdc3Context  # Context data
 
 
+@register_message_type("broadcast")
 class BroadcastRequest(BaseModel):
     type: Literal["broadcast"]
     payload: BroadcastRequestPayload
@@ -158,6 +171,7 @@ class AddContextListenerRequestPayload(BaseModel):
     channelId: Optional[str] = None
 
 
+@register_message_type("addContextListener")
 class AddContextListenerRequest(BaseModel):
     type: Literal["addContextListener"]
     payload: AddContextListenerRequestPayload
@@ -178,6 +192,7 @@ class ContextListenerUnsubscribeRequestPayload(BaseModel):
     listenerUuid: ListenerUuid
 
 
+@register_message_type("contextListenerUnsubscribe")
 class ContextListenerUnsubscribeRequest(BaseModel):
     type: Literal["contextListenerUnsubscribe"]
     payload: ContextListenerUnsubscribeRequestPayload
@@ -199,6 +214,7 @@ class AddEventListenerRequestPayload(BaseModel):
     eventType: str
 
 
+@register_message_type("addEventListener")
 class AddEventListenerRequest(BaseModel):
     type: Literal["addEventListener"]
     payload: AddEventListenerRequestPayload
@@ -219,6 +235,7 @@ class RemoveEventListenerRequestPayload(BaseModel):
     listenerUuid: ListenerUuid
 
 
+@register_message_type("removeEventListener")
 class RemoveEventListenerRequest(BaseModel):
     type: Literal["removeEventListener"]
     payload: RemoveEventListenerRequestPayload
@@ -264,6 +281,7 @@ class GetUserChannelsRequestPayload(BaseModel):
     pass
 
 
+@register_message_type("getUserChannels")
 class GetUserChannelsRequest(BaseModel):
     type: Literal["getUserChannels"]
     payload: GetUserChannelsRequestPayload = Field(
@@ -287,6 +305,7 @@ class GetSystemChannelsRequestPayload(BaseModel):
     pass
 
 
+@register_message_type("getSystemChannels")
 class GetSystemChannelsRequest(BaseModel):
     type: Literal["getSystemChannels"]
     payload: GetSystemChannelsRequestPayload = Field(
@@ -309,6 +328,7 @@ class GetCurrentChannelRequestPayload(BaseModel):
     pass
 
 
+@register_message_type("getCurrentChannel")
 class GetCurrentChannelRequest(BaseModel):
     type: Literal["getCurrentChannel"]
     payload: GetCurrentChannelRequestPayload = Field(
@@ -333,6 +353,7 @@ class GetCurrentContextRequestPayload(BaseModel):
     channelId: Optional[str] = None
 
 
+@register_message_type("getCurrentContext")
 class GetCurrentContextRequest(BaseModel):
     type: Literal["getCurrentContext"]
     payload: GetCurrentContextRequestPayload = Field(
@@ -355,6 +376,7 @@ class JoinUserChannelRequestPayload(BaseModel):
     channelId: str
 
 
+@register_message_type("joinUserChannel")
 class JoinUserChannelRequest(BaseModel):
     type: Literal["joinUserChannel"]
     payload: JoinUserChannelRequestPayload
@@ -375,6 +397,7 @@ class JoinChannelRequestPayload(BaseModel):
     channelId: str
 
 
+@register_message_type("joinChannel")
 class JoinChannelRequest(BaseModel):
     type: Literal["joinChannel"]
     payload: JoinChannelRequestPayload
@@ -395,6 +418,7 @@ class LeaveCurrentChannelRequestPayload(BaseModel):
     pass
 
 
+@register_message_type("leaveCurrentChannel")
 class LeaveCurrentChannelRequest(BaseModel):
     type: Literal["leaveCurrentChannel"]
     payload: LeaveCurrentChannelRequestPayload = Field(
@@ -420,6 +444,7 @@ class CreatePrivateChannelRequestPayload(BaseModel):
     displayMetadata: Optional[DisplayMetadata] = None
 
 
+@register_message_type("createPrivateChannel")
 class CreatePrivateChannelRequest(BaseModel):
     type: Literal["createPrivateChannel"]
     payload: CreatePrivateChannelRequestPayload = Field(
@@ -443,6 +468,7 @@ class CreatePrivateChannelInvitationRequestPayload(BaseModel):
     instanceId: Optional[str] = None
 
 
+@register_message_type("createPrivateChannelInvitation")
 class CreatePrivateChannelInvitationRequest(BaseModel):
     type: Literal["createPrivateChannelInvitation"]
     payload: CreatePrivateChannelInvitationRequestPayload
@@ -464,6 +490,7 @@ class JoinPrivateChannelRequestPayload(BaseModel):
     invitationToken: Optional[str] = None
 
 
+@register_message_type("joinPrivateChannel")
 class JoinPrivateChannelRequest(BaseModel):
     type: Literal["joinPrivateChannel"]
     payload: JoinPrivateChannelRequestPayload
@@ -484,6 +511,7 @@ class LeavePrivateChannelRequestPayload(BaseModel):
     channelId: str
 
 
+@register_message_type("leavePrivateChannel")
 class LeavePrivateChannelRequest(BaseModel):
     type: Literal["leavePrivateChannel"]
     payload: LeavePrivateChannelRequestPayload
@@ -507,6 +535,7 @@ class PrivateChannelAddEventListenerRequestPayload(BaseModel):
     eventType: Optional[PrivateChannelEventListenerTypes] = None
 
 
+@register_message_type("privateChannelAddEventListener")
 class PrivateChannelAddEventListenerRequest(BaseModel):
     type: Literal["privateChannelAddEventListener"]
     payload: PrivateChannelAddEventListenerRequestPayload
@@ -527,6 +556,7 @@ class PrivateChannelDisconnectRequestPayload(BaseModel):
     channelId: str
 
 
+@register_message_type("privateChannelDisconnect")
 class PrivateChannelDisconnectRequest(BaseModel):
     type: Literal["privateChannelDisconnect"]
     payload: PrivateChannelDisconnectRequestPayload
@@ -550,6 +580,7 @@ class GetInfoRequestPayload(BaseModel):
     pass
 
 
+@register_message_type("getInfo")
 class GetInfoRequest(BaseModel):
     type: Literal["getInfo"]
     payload: GetInfoRequestPayload = Field(default_factory=GetInfoRequestPayload)
@@ -571,6 +602,7 @@ class GetAppMetadataRequestPayload(BaseModel):
     app: AppIdentifier
 
 
+@register_message_type("getAppMetadata")
 class GetAppMetadataRequest(BaseModel):
     type: Literal["getAppMetadata"]
     payload: GetAppMetadataRequestPayload
@@ -592,6 +624,7 @@ class AddIntentListenerRequestPayload(BaseModel):
     intent: str
 
 
+@register_message_type("addIntentListener")
 class AddIntentListenerRequest(BaseModel):
     type: Literal["addIntentListener"]
     payload: AddIntentListenerRequestPayload
@@ -612,6 +645,7 @@ class IntentListenerUnsubscribeRequestPayload(BaseModel):
     listenerUuid: ListenerUuid
 
 
+@register_message_type("intentListenerUnsubscribe")
 class IntentListenerUnsubscribeRequest(BaseModel):
     type: Literal["intentListenerUnsubscribe"]
     payload: IntentListenerUnsubscribeRequestPayload
@@ -636,6 +670,7 @@ class FindIntentRequestPayload(BaseModel):
     target: Optional["AppIdentifier"] = None
 
 
+@register_message_type("findIntent")
 class FindIntentRequest(BaseModel):
     type: Literal["findIntent"]
     payload: FindIntentRequestPayload
@@ -658,6 +693,7 @@ class FindIntentsByContextRequestPayload(BaseModel):
     resultType: Optional[str] = None
 
 
+@register_message_type("findIntentsByContext")
 class FindIntentsByContextRequest(BaseModel):
     type: Literal["findIntentsByContext"]
     payload: FindIntentsByContextRequestPayload
@@ -679,6 +715,7 @@ class FindInstancesRequestPayload(BaseModel):
     app: "AppIdentifier"
 
 
+@register_message_type("findInstances")
 class FindInstancesRequest(BaseModel):
     type: Literal["findInstances"]
     payload: FindInstancesRequestPayload
@@ -702,6 +739,7 @@ class RaiseIntentRequestPayload(BaseModel):
     target: Optional[Union["AppIdentifier", str]] = None
 
 
+@register_message_type("raiseIntent")
 class RaiseIntentRequest(BaseModel):
     type: Literal["raiseIntent"]
     payload: RaiseIntentRequestPayload
@@ -725,6 +763,7 @@ class RaiseIntentForContextRequestPayload(BaseModel):
     target: Optional["AppIdentifier"] = None
 
 
+@register_message_type("raiseIntentForContext")
 class RaiseIntentForContextRequest(BaseModel):
     type: Literal["raiseIntentForContext"]
     payload: RaiseIntentForContextRequestPayload
@@ -759,6 +798,7 @@ class IntentResultRequestPayload(BaseModel):
     intentResult: dict  # IntentResult
 
 
+@register_message_type("intentResultRequest")
 class IntentResultRequest(BaseModel):
     type: Literal["intentResultRequest"]
     payload: IntentResultRequestPayload
@@ -780,6 +820,7 @@ class RaiseIntentResultResponsePayload(BaseModel):
     pass
 
 
+@register_message_type("raiseIntentResultResponse")
 class RaiseIntentResultResponse(BaseModel):
     type: Literal["raiseIntentResultResponse"]
     payload: RaiseIntentResultResponsePayload

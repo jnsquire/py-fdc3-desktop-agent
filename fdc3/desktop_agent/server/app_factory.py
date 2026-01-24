@@ -6,7 +6,7 @@ launching, access-control, HTTP routes, GraphQL, and the WebSocket endpoint.
 
 import logging
 from contextlib import asynccontextmanager
-from typing import Dict, Optional
+from typing import Optional
 
 from fastapi import FastAPI, WebSocket
 from fastapi.staticfiles import StaticFiles
@@ -29,6 +29,7 @@ from .connection_manager import AgentClientConnectionManager
 from .lifespan import create_lifespan
 from .routes import router as routes_router
 from .websocket import websocket_endpoint
+from ..types import WcpSessions
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +93,7 @@ def create_app(config: Optional[DesktopAgentConfig] = None) -> FastAPI:
     )
 
     # WCP session state
-    wcp_sessions: Dict[str, dict] = {}
+    wcp_sessions: WcpSessions = {}
 
     # Create the base lifespan from the lifespan module
     base_lifespan = create_lifespan(

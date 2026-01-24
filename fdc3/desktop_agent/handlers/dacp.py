@@ -6,7 +6,7 @@ Handles FDC3 operations like app launching, context broadcasting, and listener m
 import logging
 import uuid
 import asyncio
-from typing import Dict, Any, Optional, TypedDict, TypeAlias, cast, Iterable, Mapping
+from typing import Dict, Any, Optional, cast, Iterable, Mapping
 
 from fastapi import WebSocket
 
@@ -144,36 +144,19 @@ from fdc3.models.identifiers import (
 )
 from fdc3.models.identifiers import FDC3Event, FDC3EventType
 from fdc3.models.primitives import RequestUuid, ListenerUuid
+from ..types import (
+    WcpIdentity,
+    WcpSession,
+    WcpSessions,
+    IntentEntry,
+    IntentEntryMapping,
+)
 from .connection_manager import WebSocketConnectionManager
 from .system_intent import SystemIntentHandler
 from ..launcher.web_launcher import WebEndpointLauncher
 from ..version import __version__
 
 logger = logging.getLogger(__name__)
-
-
-class WcpIdentity(TypedDict, total=False):
-    appId: str
-    instanceId: str
-    instanceUuid: str
-
-
-class WcpSession(TypedDict, total=False):
-    identity: WcpIdentity
-
-
-WcpSessions: TypeAlias = Dict[str, WcpSession]
-
-
-class IntentEntryMapping(TypedDict, total=False):
-    name: str
-    intent: str
-    intentName: str
-    contexts: list[str] | str
-    contextTypes: list[str] | str
-
-
-IntentEntry: TypeAlias = str | IntentEntryMapping
 
 
 class DACPError:
@@ -324,17 +307,26 @@ class DACPHandler:
 
     def _get_instance_uuid(self, session_id: str, wcp_sessions: WcpSessions) -> str:
         """Extract instance UUID from session context."""
-        return wcp_sessions[session_id]["identity"]["instanceUuid"]
+        identity = self._get_session_identity(session_id, wcp_sessions)
+        return identity.instanceUuid or ""
 
     def _get_session_identity(
         self, session_id: str | None, wcp_sessions: WcpSessions | None
     ) -> WcpIdentity:
         """Extract identity dict from session context."""
         if session_id is None or wcp_sessions is None:
-            return cast(WcpIdentity, {})
-        return cast(
-            WcpIdentity, (wcp_sessions.get(session_id) or {}).get("identity") or {}
-        )
+            return WcpIdentity()
+        session = wcp_sessions.get(session_id) or {}
+        if isinstance(session, WcpSession):
+            raw_identity = session.identity or {}
+        else:
+            raw_identity = (session or {}).get("identity") or {}
+        if isinstance(raw_identity, WcpIdentity):
+            return raw_identity
+        try:
+            return WcpIdentity.model_validate(raw_identity)
+        except Exception:
+            return WcpIdentity()
 
     def _get_source_app_identifier(
         self, session_id: str | None, wcp_sessions: WcpSessions | None
@@ -342,8 +334,8 @@ class DACPHandler:
         """Build AppIdentifier from session context."""
         identity = self._get_session_identity(session_id, wcp_sessions)
         return AppIdentifier(
-            appId=identity.get("appId") or "unknown",
-            instanceId=identity.get("instanceId"),
+            appId=identity.appId or "unknown",
+            instanceId=identity.instanceId,
             desktopAgent=None,
         )
 
@@ -657,8 +649,8 @@ class DACPHandler:
 
         identity = self._get_session_identity(session_id, wcp_sessions)
         source_identity = AppIdentifier(
-            appId=identity.get("appId") or "fdc3-desktop-agent",
-            instanceId=identity.get("instanceId"),
+            appId=identity.appId or "fdc3-desktop-agent",
+            instanceId=identity.instanceId,
             desktopAgent=None,
         )
         await self._bridge_private_channel_listener_update(
@@ -677,8 +669,8 @@ class DACPHandler:
         websocket: WebSocket,
     ) -> None:
         identity = self._get_session_identity(session_id, wcp_sessions)
-        app_id = identity.get("appId") or "unknown"
-        instance_id = identity.get("instanceId")
+        app_id = identity.appId or "unknown"
+        instance_id = identity.instanceId
 
         # Best-effort: enrich app metadata from storage if available.
         name = None
@@ -903,8 +895,13 @@ class DACPHandler:
         ) -> tuple[str, list[str] | None] | None:
             if isinstance(entry, str):
                 return entry, None
-            if isinstance(entry, Mapping):
+            if isinstance(entry, IntentEntryMapping):
+                entry_dict = entry.model_dump()
+            elif isinstance(entry, Mapping):
                 entry_dict = entry
+            else:
+                return None
+            if isinstance(entry_dict, Mapping):
                 name = (
                     entry_dict.get("name")
                     or entry_dict.get("intent")
@@ -1824,8 +1821,8 @@ class DACPHandler:
 
                 identity = self._get_session_identity(session_id, wcp_sessions)
                 source_identity = AppIdentifier(
-                    appId=identity.get("appId") or "unknown",
-                    instanceId=identity.get("instanceId"),
+                    appId=identity.appId or "unknown",
+                    instanceId=identity.instanceId,
                     desktopAgent=None,
                 )
 
@@ -2011,15 +2008,15 @@ class DACPHandler:
         try:
             bridge = getattr(self, "bridge_client", None)
             if bridge is not None and getattr(bridge, "is_connected", False):
-                source_identity = wcp_sessions[session_id]["identity"]
+                source_identity = self._get_session_identity(session_id, wcp_sessions)
                 await bridge.send_request_no_wait(
                     request_type="broadcastRequest",
                     payload={"context": context_payload, "channelId": channel_id}
                     if channel_id
                     else {"context": context_payload},
                     source=AppIdentifier(
-                        appId=source_identity["appId"],
-                        instanceId=source_identity.get("instanceId"),
+                        appId=source_identity.appId or "unknown",
+                        instanceId=source_identity.instanceId,
                         desktopAgent=None,
                     ),
                 )
@@ -2238,14 +2235,10 @@ class DACPHandler:
                         else AppIdentifier.model_validate(src)
                     )
                 else:
-                    identity = {}
-                    if session_id is not None and wcp_sessions is not None:
-                        identity = (wcp_sessions.get(session_id) or {}).get(
-                            "identity"
-                        ) or {}
+                    identity = self._get_session_identity(session_id, wcp_sessions)
                     source_identity = AppIdentifier(
-                        appId=identity.get("appId") or "unknown",
-                        instanceId=identity.get("instanceId"),
+                        appId=identity.appId or "unknown",
+                        instanceId=identity.instanceId,
                         desktopAgent=None,
                     )
 

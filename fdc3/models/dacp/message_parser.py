@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, Any, Union, cast
+from typing import Any, Union, cast
 from pydantic import BaseModel, ValidationError
 import logging
 
@@ -38,6 +38,7 @@ from .dacp import (
     PrivateChannelDisconnectRequest,
     JoinPrivateChannelRequest,
     LeavePrivateChannelRequest,
+    MESSAGE_TYPE_MAP,
 )
 from .external_models import (
     RegisterExternalHandlerRequest,
@@ -85,43 +86,6 @@ ParsedMessage = Union[
     LeavePrivateChannelRequest,
 ]
 
-# Mapping from message type string to Pydantic model class
-MESSAGE_TYPE_MAP: Dict[str, type[BaseModel]] = {
-    "open": OpenRequest,
-    "broadcast": BroadcastRequest,
-    "addContextListener": AddContextListenerRequest,
-    "addIntentListener": AddIntentListenerRequest,
-    "intentListenerUnsubscribe": IntentListenerUnsubscribeRequest,
-    "getInfo": GetInfoRequest,
-    "getAppMetadata": GetAppMetadataRequest,
-    "getUserChannels": GetUserChannelsRequest,
-    "getSystemChannels": GetSystemChannelsRequest,
-    "getCurrentChannel": GetCurrentChannelRequest,
-    "getCurrentContext": GetCurrentContextRequest,
-    "joinUserChannel": JoinUserChannelRequest,
-    "joinChannel": JoinChannelRequest,
-    "leaveCurrentChannel": LeaveCurrentChannelRequest,
-    "findIntent": FindIntentRequest,
-    "findIntentsByContext": FindIntentsByContextRequest,
-    "findInstances": FindInstancesRequest,
-    "raiseIntent": RaiseIntentRequest,
-    "raiseIntentForContext": RaiseIntentForContextRequest,
-    "intentResultRequest": IntentResultRequest,
-    "raiseIntentResultResponse": RaiseIntentResultResponse,
-    "contextListenerUnsubscribe": ContextListenerUnsubscribeRequest,
-    "addEventListener": AddEventListenerRequest,
-    "removeEventListener": RemoveEventListenerRequest,
-    "heartbeatAcknowledgmentRequest": HeartbeatAcknowledgmentRequest,
-    "registerExternalHandler": RegisterExternalHandlerRequest,
-    "unregisterExternalHandler": UnregisterExternalHandlerRequest,
-    "intentResult": ExternalIntentResultRequest,
-    "createPrivateChannel": CreatePrivateChannelRequest,
-    "createPrivateChannelInvitation": CreatePrivateChannelInvitationRequest,
-    "privateChannelAddEventListener": PrivateChannelAddEventListenerRequest,
-    "privateChannelDisconnect": PrivateChannelDisconnectRequest,
-    "joinPrivateChannel": JoinPrivateChannelRequest,
-    "leavePrivateChannel": LeavePrivateChannelRequest,
-}
 
 
 class MessageParseError(Exception):

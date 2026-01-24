@@ -6,7 +6,7 @@ transforming raw dicts into strongly-typed Pydantic models with validation.
 
 from __future__ import annotations
 
-from typing import Dict, Any, Union, cast
+from typing import Any, Union, cast
 from pydantic import BaseModel, ValidationError
 import logging
 
@@ -22,6 +22,7 @@ from .dacp import (
     RaiseIntentResultResponse,
     ContextListenerUnsubscribeRequest,
     HeartbeatAcknowledgmentRequest,
+    MESSAGE_TYPE_MAP,
 )
 from .external_models import (
     RegisterExternalHandlerRequest,
@@ -49,23 +50,6 @@ ParsedMessage = Union[
     ExternalIntentResultRequest,
 ]
 
-# Mapping from message type string to Pydantic model class
-MESSAGE_TYPE_MAP: Dict[str, type[BaseModel]] = {
-    "open": OpenRequest,
-    "broadcast": BroadcastRequest,
-    "addContextListener": AddContextListenerRequest,
-    "addIntentListener": AddIntentListenerRequest,
-    "intentListenerUnsubscribe": IntentListenerUnsubscribeRequest,
-    "raiseIntent": RaiseIntentRequest,
-    "raiseIntentForContext": RaiseIntentForContextRequest,
-    "intentResultRequest": IntentResultRequest,
-    "raiseIntentResultResponse": RaiseIntentResultResponse,
-    "contextListenerUnsubscribe": ContextListenerUnsubscribeRequest,
-    "heartbeatAcknowledgmentRequest": HeartbeatAcknowledgmentRequest,
-    "registerExternalHandler": RegisterExternalHandlerRequest,
-    "unregisterExternalHandler": UnregisterExternalHandlerRequest,
-    "intentResult": ExternalIntentResultRequest,
-}
 
 
 class MessageParseError(Exception):
