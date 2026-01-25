@@ -32,9 +32,9 @@ nav:
   - Embedding API: embedding-api.md
   - Plugins: plugins.md
   - External intent handlers: external-intent-handlers.md
+  - Private channels: private-channels.md
   - Docker deployment: docker.md
   - System flowchart: system_flowchart.md
-  - FDC3 spec gap checklist: fdc3-spec-gap-checklist.md
   - API Reference:
       - API Guide: api-guide.md
       - Desktop Agent: api.md
