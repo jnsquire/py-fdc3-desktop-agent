@@ -59,6 +59,7 @@ dev = [
   "datamodel-code-generator>=0.26",
   "httpx>=0.28",
   "rich>=13.0",
+  "playwright>=1.40",
   "pre-commit>=4.0",
   "mkdocs>=1.5",
   "mkdocstrings[python]>=0.23",

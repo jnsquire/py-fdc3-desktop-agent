@@ -2,7 +2,8 @@
 description: Knows the project development rules
 tools:
   [
-    "execute/runTests",
+    "vscode",
+    "execute",
     "read",
     "edit",
     "search",

@@ -26,6 +26,8 @@ docker run -p 9000:9000 \
 docker-compose up -d
 ```
 
+For a quick Docker compose start, see [getting-started.md](getting-started.md).
+
 ## Docker Configuration
 
 The Docker image is pre-configured with the following defaults:

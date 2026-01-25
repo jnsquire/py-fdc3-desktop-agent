@@ -24,7 +24,10 @@ extra_css:
 
 nav:
   - Overview: index.md
+  - Getting started: getting-started.md
   - Configuration: configuration.md
+  - Automation: automation.md
+  - Deployments: deployments.md
   - Bridging (experimental): bridging.md
   - Embedding API: embedding-api.md
   - Plugins: plugins.md

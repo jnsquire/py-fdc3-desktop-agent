@@ -57,11 +57,7 @@ python -m uvicorn fdc3.desktop_agent.server:app --host localhost --port 8000 --r
 
 For quick iterations you can rerun the development command above with `--reload` enabled to receive instant restarts.
 
-### Running tests
-
-```bash
-python -m pytest tests/ -v
-```
+For running tests and development workflows, see [../CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ## Distributed Adapters (optional)
 

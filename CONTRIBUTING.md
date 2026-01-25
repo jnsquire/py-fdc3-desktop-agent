@@ -25,6 +25,13 @@ uv run ruff check --fix
 uv run ruff format
 ```
 
+## Documentation preview
+
+```bash
+mkdocs build
+mkdocs serve --dev-addr 127.0.0.1:8001
+```
+
 ## Developer setup
 
 This repository includes helper scripts to bootstrap a developer environment and install git hooks.
@@ -137,6 +144,6 @@ docker run -d --name=consul -p 8500:8500 consul:latest agent -dev -client=0.0.0.
 
 - Open issues for bugs or design discussions.
 - Keep changes small and focused; update tests when adding behavior.
-- Run `ruff` and `black` locally to keep style consistent.
+- Run `ruff` locally to keep style consistent.
 
 Thanks for contributing!
