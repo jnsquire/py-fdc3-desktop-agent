@@ -71,7 +71,7 @@ python examples/tui_chat_client.py --name Alice --channel demo
 
 ### Admin UI preview
 
-![Admin UI preview](documentation/assets/admin-ui-preview.svg)
+![Admin UI preview](documentation/assets/admin-ui-preview.png)
 
 ## Architecture overview
 

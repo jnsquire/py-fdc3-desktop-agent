@@ -51,7 +51,6 @@ ParsedMessage = Union[
 ]
 
 
-
 class MessageParseError(Exception):
     """Raised when a message cannot be parsed or validated."""
 

@@ -57,7 +57,7 @@ python -m uvicorn fdc3.desktop_agent.server:app --host localhost --port 8000 --r
 
 For quick iterations you can rerun the development command above with `--reload` enabled to receive instant restarts.
 
-For running tests and development workflows, see [../CONTRIBUTING.md](../CONTRIBUTING.md).
+For running tests and development workflows, see the [contributing guide](https://github.com/jnsquire/py-fdc3-desktop-agent/blob/main/CONTRIBUTING.md).
 
 ## Distributed Adapters (optional)
 
