@@ -1,7 +1,8 @@
 import copy
 import uuid
 import threading
-from typing import Dict, List, Optional, Callable, Any, Set, TypedDict
+from typing import Dict, List, Optional, Callable, Any, Set
+from typing_extensions import TypedDict
 import inspect
 import json
 import asyncio

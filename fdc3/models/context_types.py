@@ -6,7 +6,8 @@ typing for examples and small apps. Fields are modeled to be permissive where
 the FDC3 schema allows extensions.
 """
 
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, Dict, List, Optional
+from typing_extensions import TypedDict
 
 
 class ContextBase(TypedDict, total=False):
