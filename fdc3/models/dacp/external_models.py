@@ -105,6 +105,7 @@ class ForwardedIntentPayload(BaseModel):
     timeout: int | None = Field(default=None, description="Optional timeout in seconds")
 
 
+@register_message_type("forwardedIntent")
 class ForwardedIntentMessage(BaseModel):
     """Message sent to external handler when forwarding an intent."""
 
@@ -120,6 +121,7 @@ class RegisterExternalHandlerResponsePayload(BaseModel):
     )
 
 
+@register_message_type("registerExternalHandlerResponse")
 class RegisterExternalHandlerResponse(BaseModel):
     """Response sent after successfully registering an external handler."""
 
@@ -134,6 +136,7 @@ class UnregisterExternalHandlerResponsePayload(BaseModel):
     pass
 
 
+@register_message_type("unregisterExternalHandlerResponse")
 class UnregisterExternalHandlerResponse(BaseModel):
     """Response sent after unregistering an external handler."""
 

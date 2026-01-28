@@ -1,49 +1,7 @@
 from pydantic import BaseModel
 from typing import Any, Optional, Dict, Literal
 
-from fdc3.models.dacp.dacp import (
-    BroadcastEvent,
-    IntentEvent,
-    AddContextListenerResponse,
-    AddIntentListenerResponse,
-    ContextListenerUnsubscribeResponse,
-    IntentListenerUnsubscribeResponse,
-    JoinUserChannelResponse,
-    LeaveCurrentChannelResponse,
-    CreatePrivateChannelResponse,
-    CreatePrivateChannelInvitationResponse,
-    JoinPrivateChannelResponse,
-    LeavePrivateChannelResponse,
-    PrivateChannelAddEventListenerResponse,
-    PrivateChannelEvent,
-)
-from fdc3.models.dacp.external_models import (
-    ForwardedIntentMessage,
-    RegisterExternalHandlerResponse,
-    UnregisterExternalHandlerResponse,
-)
-
-# Helper: map a raw message dict to an appropriate Pydantic model instance.
-# Returns the model instance on success or raises ValidationError on failure.
-_MODEL_MAP: Dict[str, type[BaseModel]] = {
-    "broadcastEvent": BroadcastEvent,
-    "intentEvent": IntentEvent,
-    "forwardedIntent": ForwardedIntentMessage,
-    "addContextListenerResponse": AddContextListenerResponse,
-    "addIntentListenerResponse": AddIntentListenerResponse,
-    "contextListenerUnsubscribeResponse": ContextListenerUnsubscribeResponse,
-    "intentListenerUnsubscribeResponse": IntentListenerUnsubscribeResponse,
-    "registerExternalHandlerResponse": RegisterExternalHandlerResponse,
-    "unregisterExternalHandlerResponse": UnregisterExternalHandlerResponse,
-    "joinUserChannelResponse": JoinUserChannelResponse,
-    "leaveCurrentChannelResponse": LeaveCurrentChannelResponse,
-    "createPrivateChannelResponse": CreatePrivateChannelResponse,
-    "createPrivateChannelInvitationResponse": CreatePrivateChannelInvitationResponse,
-    "joinPrivateChannelResponse": JoinPrivateChannelResponse,
-    "leavePrivateChannelResponse": LeavePrivateChannelResponse,
-    "privateChannelAddEventListenerResponse": PrivateChannelAddEventListenerResponse,
-    "privateChannelEvent": PrivateChannelEvent,
-}
+from fdc3.models.dacp.dacp import MESSAGE_TYPE_MAP
 
 
 def parse_message(msg: Any) -> Optional[BaseModel]:
@@ -66,7 +24,7 @@ def parse_message(msg: Any) -> Optional[BaseModel]:
     t = data.get("type")
     if not isinstance(t, str):
         return None
-    model = _MODEL_MAP.get(t)
+    model = MESSAGE_TYPE_MAP.get(t)
     if not model:
         return None
     # Use Pydantic v2 validation API.

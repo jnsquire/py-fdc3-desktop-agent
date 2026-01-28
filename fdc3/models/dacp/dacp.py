@@ -70,6 +70,12 @@ class AgentResponseMeta(BaseModel):
 
 
 class AgentResponse(BaseModel):
+    # NOTE: Concrete response classes (e.g. `openResponse`,
+    # `getAppMetadataResponse`, etc.) are intentionally NOT registered in
+    # `MESSAGE_TYPE_MAP`. We register request/event message types that need
+    # direct parsing. Responses are parsed via this generic `AgentResponse`
+    # envelope instead to centralize error handling and avoid over-eager
+    # Pydantic validation of agent-generated responses leaking into callers.
     type: str
     payload: Union[dict, "ErrorResponsePayload"]  # Or specific error payload
     meta: AgentResponseMeta = Field(default_factory=AgentResponseMeta)
@@ -137,6 +143,8 @@ class OpenResponsePayload(BaseModel):
     appIdentifier: Optional[AppIdentifier] = None
 
 
+# Agent open responses can vary by implementation; parse via the
+# generic `AgentResponse` envelope to avoid strict validation.
 class OpenResponse(BaseModel):
     type: Literal["openResponse"]
     payload: OpenResponsePayload
@@ -160,6 +168,7 @@ class BroadcastEventPayload(BaseModel):
     context: Fdc3Context
 
 
+@register_message_type("broadcastEvent")
 class BroadcastEvent(BaseModel):
     type: Literal["broadcastEvent"]
     payload: BroadcastEventPayload
@@ -183,6 +192,7 @@ class AddContextListenerResponsePayload(BaseModel):
     listenerUuid: ListenerUuid
 
 
+@register_message_type("addContextListenerResponse")
 class AddContextListenerResponse(BaseModel):
     type: Literal["addContextListenerResponse"]
     payload: AddContextListenerResponsePayload
@@ -204,6 +214,7 @@ class ContextListenerUnsubscribeResponsePayload(BaseModel):
     pass
 
 
+@register_message_type("contextListenerUnsubscribeResponse")
 class ContextListenerUnsubscribeResponse(BaseModel):
     type: Literal["contextListenerUnsubscribeResponse"]
     payload: ContextListenerUnsubscribeResponsePayload
@@ -226,6 +237,8 @@ class AddEventListenerResponsePayload(BaseModel):
     listenerUuid: ListenerUuid
 
 
+# Contains a `listenerUuid` used to resolve pending listeners; handled
+# via the generic `AgentResponse` envelope and pending-response logic.
 class AddEventListenerResponse(BaseModel):
     type: Literal["addEventListenerResponse"]
     payload: AddEventListenerResponsePayload
@@ -247,6 +260,8 @@ class RemoveEventListenerResponsePayload(BaseModel):
     pass
 
 
+# Simple acknowledgement/empty payload — parsed via the generic
+# `AgentResponse` envelope rather than being registered separately.
 class RemoveEventListenerResponse(BaseModel):
     type: Literal["removeEventListenerResponse"]
     payload: RemoveEventListenerResponsePayload = Field(
@@ -271,6 +286,7 @@ class PrivateChannelEventPayload(BaseModel):
     details: Optional[dict[str, Any]] = None
 
 
+@register_message_type("privateChannelEvent")
 class PrivateChannelEvent(BaseModel):
     type: Literal["privateChannelEvent"]
     payload: PrivateChannelEventPayload
@@ -295,6 +311,8 @@ class GetUserChannelsResponsePayload(BaseModel):
     channels: List[Channel]
 
 
+# Channel list is produced by the agent and may include implementation-
+# specific fields; parse via the generic `AgentResponse` envelope.
 class GetUserChannelsResponse(BaseModel):
     type: Literal["getUserChannelsResponse"]
     payload: GetUserChannelsResponsePayload
@@ -319,6 +337,8 @@ class GetSystemChannelsResponsePayload(BaseModel):
     channels: List[Channel]
 
 
+# Deprecated (2.2 compatibility) API response — retained for
+# compatibility and parsed via the generic `AgentResponse` envelope.
 class GetSystemChannelsResponse(BaseModel):
     type: Literal["getSystemChannelsResponse"]
     payload: GetSystemChannelsResponsePayload
@@ -342,6 +362,8 @@ class GetCurrentChannelResponsePayload(BaseModel):
     channel: Optional[Channel] = None
 
 
+# `channel` may be null or agent-specific; parsed via the generic
+# `AgentResponse` envelope to accept implementation variations.
 class GetCurrentChannelResponse(BaseModel):
     type: Literal["getCurrentChannelResponse"]
     payload: GetCurrentChannelResponsePayload
@@ -367,6 +389,8 @@ class GetCurrentContextResponsePayload(BaseModel):
     context: Optional[Fdc3Context] = None
 
 
+# Context payload is arbitrary FDC3 context data; parsed via the
+# generic `AgentResponse` envelope to avoid strict per-field validation.
 class GetCurrentContextResponse(BaseModel):
     type: Literal["getCurrentContextResponse"]
     payload: GetCurrentContextResponsePayload
@@ -388,6 +412,7 @@ class JoinUserChannelResponsePayload(BaseModel):
     channel: Channel
 
 
+@register_message_type("joinUserChannelResponse")
 class JoinUserChannelResponse(BaseModel):
     type: Literal["joinUserChannelResponse"]
     payload: JoinUserChannelResponsePayload
@@ -409,6 +434,8 @@ class JoinChannelResponsePayload(BaseModel):
     channel: Channel
 
 
+# Returns a `Channel` from the agent; parse via the generic
+# `AgentResponse` envelope to avoid re-registering response types.
 class JoinChannelResponse(BaseModel):
     type: Literal["joinChannelResponse"]
     payload: JoinChannelResponsePayload
@@ -432,6 +459,7 @@ class LeaveCurrentChannelResponsePayload(BaseModel):
     pass
 
 
+@register_message_type("leaveCurrentChannelResponse")
 class LeaveCurrentChannelResponse(BaseModel):
     type: Literal["leaveCurrentChannelResponse"]
     payload: LeaveCurrentChannelResponsePayload = Field(
@@ -469,6 +497,7 @@ class CreatePrivateChannelResponsePayload(BaseModel):
     channel: Channel
 
 
+@register_message_type("createPrivateChannelResponse")
 class CreatePrivateChannelResponse(BaseModel):
     type: Literal["createPrivateChannelResponse"]
     payload: CreatePrivateChannelResponsePayload
@@ -505,6 +534,7 @@ class CreatePrivateChannelInvitationResponsePayload(BaseModel):
     invitationToken: str
 
 
+@register_message_type("createPrivateChannelInvitationResponse")
 class CreatePrivateChannelInvitationResponse(BaseModel):
     type: Literal["createPrivateChannelInvitationResponse"]
     payload: CreatePrivateChannelInvitationResponsePayload
@@ -534,6 +564,7 @@ class JoinPrivateChannelResponsePayload(BaseModel):
     channel: Channel
 
 
+@register_message_type("joinPrivateChannelResponse")
 class JoinPrivateChannelResponse(BaseModel):
     type: Literal["joinPrivateChannelResponse"]
     payload: JoinPrivateChannelResponsePayload
@@ -559,6 +590,7 @@ class LeavePrivateChannelResponsePayload(BaseModel):
     pass
 
 
+@register_message_type("leavePrivateChannelResponse")
 class LeavePrivateChannelResponse(BaseModel):
     type: Literal["leavePrivateChannelResponse"]
     payload: LeavePrivateChannelResponsePayload = Field(
@@ -591,6 +623,7 @@ class PrivateChannelAddEventListenerResponsePayload(BaseModel):
     listenerUuid: ListenerUuid
 
 
+@register_message_type("privateChannelAddEventListenerResponse")
 class PrivateChannelAddEventListenerResponse(BaseModel):
     type: Literal["privateChannelAddEventListenerResponse"]
     payload: PrivateChannelAddEventListenerResponsePayload
@@ -616,6 +649,8 @@ class PrivateChannelDisconnectResponsePayload(BaseModel):
     pass
 
 
+# Internal lifecycle acknowledgement from the agent; parsed via the
+# generic `AgentResponse` envelope rather than being separately registered.
 class PrivateChannelDisconnectResponse(BaseModel):
     type: Literal["privateChannelDisconnectResponse"]
     payload: PrivateChannelDisconnectResponsePayload = Field(
@@ -640,6 +675,8 @@ class GetInfoResponsePayload(BaseModel):
     implementationMetadata: ImplementationMetadata
 
 
+# `implementationMetadata` can include vendor-specific fields; parse via
+# the generic `AgentResponse` envelope to accept implementation details.
 class GetInfoResponse(BaseModel):
     type: Literal["getInfoResponse"]
     payload: GetInfoResponsePayload
@@ -662,6 +699,8 @@ class GetAppMetadataResponsePayload(BaseModel):
     appMetadata: AppMetadata
 
 
+# `appMetadata` can come from external registries and vary by agent;
+# parse via the generic `AgentResponse` envelope.
 class GetAppMetadataResponse(BaseModel):
     type: Literal["getAppMetadataResponse"]
     payload: GetAppMetadataResponsePayload
@@ -684,6 +723,7 @@ class AddIntentListenerResponsePayload(BaseModel):
     listenerUuid: ListenerUuid
 
 
+@register_message_type("addIntentListenerResponse")
 class AddIntentListenerResponse(BaseModel):
     type: Literal["addIntentListenerResponse"]
     payload: AddIntentListenerResponsePayload
@@ -705,6 +745,7 @@ class IntentListenerUnsubscribeResponsePayload(BaseModel):
     pass
 
 
+@register_message_type("intentListenerUnsubscribeResponse")
 class IntentListenerUnsubscribeResponse(BaseModel):
     type: Literal["intentListenerUnsubscribeResponse"]
     payload: IntentListenerUnsubscribeResponsePayload
@@ -730,6 +771,8 @@ class FindIntentResponsePayload(BaseModel):
     appIntent: AppIntent
 
 
+# Contains nested `AppIntent` data; parsed via the generic
+# `AgentResponse` envelope to avoid duplicate type registration.
 class FindIntentResponse(BaseModel):
     type: Literal["findIntentResponse"]
     payload: FindIntentResponsePayload
@@ -753,6 +796,8 @@ class FindIntentsByContextResponsePayload(BaseModel):
     appIntents: List[AppIntent]
 
 
+# Returns a list of `AppIntent` entries from the agent; parsed via the
+# generic `AgentResponse` envelope to accept implementation-specific items.
 class FindIntentsByContextResponse(BaseModel):
     type: Literal["findIntentsByContextResponse"]
     payload: FindIntentsByContextResponsePayload
@@ -775,6 +820,8 @@ class FindInstancesResponsePayload(BaseModel):
     instances: List[AppIdentifier]
 
 
+# Returns `AppIdentifier` instances from the agent; parsed via the
+# generic `AgentResponse` envelope to allow implementation variations.
 class FindInstancesResponse(BaseModel):
     type: Literal["findInstancesResponse"]
     payload: FindInstancesResponsePayload
@@ -799,6 +846,8 @@ class RaiseIntentResponsePayload(BaseModel):
     intentResolution: IntentResolution
 
 
+# Contains `IntentResolution` from the agent; parsed via the generic
+# `AgentResponse` envelope to centralize result handling.
 class RaiseIntentResponse(BaseModel):
     type: Literal["raiseIntentResponse"]
     payload: RaiseIntentResponsePayload
@@ -823,6 +872,8 @@ class RaiseIntentForContextResponsePayload(BaseModel):
     intentResolution: IntentResolution
 
 
+# Contains `IntentResolution` for context-based raises; parsed via the
+# generic `AgentResponse` envelope to centralize result handling.
 class RaiseIntentForContextResponse(BaseModel):
     type: Literal["raiseIntentForContextResponse"]
     payload: RaiseIntentForContextResponsePayload
@@ -836,6 +887,7 @@ class IntentEventPayload(BaseModel):
     originatingApp: Optional["AppIdentifier"] = None
 
 
+@register_message_type("intentEvent")
 class IntentEvent(BaseModel):
     type: Literal["intentEvent"]
     payload: IntentEventPayload
@@ -858,6 +910,8 @@ class IntentResultResponsePayload(BaseModel):
     pass
 
 
+# Simple intent-result acknowledgement (empty payload); parsed via the
+# generic `AgentResponse` envelope to keep response handling uniform.
 class IntentResultResponse(BaseModel):
     type: Literal["intentResultResponse"]
     payload: IntentResultResponsePayload
