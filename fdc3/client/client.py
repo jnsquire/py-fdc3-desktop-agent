@@ -63,9 +63,8 @@ from fdc3.models.dacp.dacp import (
     JoinPrivateChannelRequest,
     LeavePrivateChannelRequest,
     PrivateChannelAddEventListenerRequest,
-)
-from fdc3.models.dacp import BroadcastEvent, ForwardedIntentMessage, IntentEvent
-from fdc3.models.dacp.dacp import (
+    BroadcastEvent,
+    IntentEvent,
     JoinUserChannelRequestPayload,
     CreatePrivateChannelRequestPayload,
     CreatePrivateChannelInvitationRequestPayload,
@@ -73,6 +72,7 @@ from fdc3.models.dacp.dacp import (
     LeavePrivateChannelRequestPayload,
     PrivateChannelAddEventListenerRequestPayload,
 )
+from fdc3.models.dacp.external_models import ForwardedIntentMessage
 from fdc3.models.dacp.enums import PrivateChannelEventListenerTypes
 from fdc3.models.identifiers import DisplayMetadata
 from fdc3.models.context_types import (
@@ -399,161 +399,104 @@ class FDC3Client:
         meta = msg.meta or {}
         logger.debug(f"Received message type={t} meta={meta}")
 
-        # WCP handshake messages
+        # Try to parse into a known model early. Not all message types are in _MODEL_MAP.
+        model = None
+        try:
+            model = parse_message(msg)
+        except ValidationError:
+            # We log the error but don't exit, as some types might handle validation differently
+            # or we might want to still resolve a pending response if possible.
+            logger.debug(f"Parsing failed for {t}")
+
+        # 1. SPECIAL: WCP Handshake & Identity Management
         if t == "WCP3Handshake":
             await self._send_wcp4_validate(
                 meta.get("connectionAttemptUuid") or str(uuid.uuid4())
             )
+            return
 
-        elif t == "WCP5ValidateAppIdentityResponse":
+        if t == "WCP5ValidateAppIdentityResponse":
             self._instance_uuid = payload.get("instanceUuid")
             logger.info(f"WCP handshake complete, instanceUuid={self._instance_uuid}")
             self._handshake_complete.set()
-
-        elif t == "WCP5ValidateAppIdentityFailedResponse":
-            logger.error(f"WCP handshake failed: {payload.get('message')}")
-            self._handshake_complete.set()
-
-        # DACP messages
-        elif t in (
-            "registerExternalHandlerResponse",
-            "unregisterExternalHandlerResponse",
-        ):
-            request_uuid = meta.get("requestUuid", "")
-            if t == "registerExternalHandlerResponse":
-                handler_uuid = payload.get("handler_uuid")
-                logger.debug(
-                    f"Received registerExternalHandlerResponse: requestUuid={request_uuid} "
-                    f"handler_uuid={handler_uuid} pending_keys={list(self._pending_responses.keys())}"
-                )
-            if request_uuid:
-                err = payload.get("error")
-                if err:
-                    self._resolve_pending_response(request_uuid, error=err)
-                else:
-                    result = (
-                        payload.get("handler_uuid")
-                        if t == "registerExternalHandlerResponse"
-                        else None
-                    )
-                    self._resolve_pending_response(request_uuid, result=result)
-
-        elif t in (
-            "joinUserChannelResponse",
-            "leaveCurrentChannelResponse",
-            "createPrivateChannelResponse",
-            "createPrivateChannelInvitationResponse",
-            "joinPrivateChannelResponse",
-            "leavePrivateChannelResponse",
-            "privateChannelAddEventListenerResponse",
-        ):
-            request_uuid = self._extract_listener_uuid(meta.get("requestUuid", ""))
-            payload = msg.payload or {}
-            error = payload.get("error") if isinstance(payload, dict) else None
-            if request_uuid:
-                if error:
-                    self._resolve_pending_response(request_uuid, error=error)
-                else:
-                    self._resolve_pending_response(request_uuid, result=payload)
             return
 
-        elif t == "privateChannelEvent":
-            payload = msg.payload or {}
+        if t == "WCP5ValidateAppIdentityFailedResponse":
+            logger.error(f"WCP handshake failed: {payload.get('message')}")
+            self._handshake_complete.set()
+            return
+
+        # 2. EVENTS: Emit to appropriate event emitters
+        if t == "privateChannelEvent":
             await self.private_channel_event_handlers.emit(payload)
             return
 
-        elif t == "forwardedIntent":
-            try:
-                model = parse_message(msg)
-            except ValidationError as exc:
-                logger.exception("Invalid forwardedIntent payload")
-                # If we have a request UUID, inform the agent/caller with an intentResult error
-                request_uuid = (
-                    payload.get("request_uuid")
-                    or payload.get("requestUuid")
-                    or meta.get("requestUuid")
-                    or meta.get("request_uuid")
-                )
-                if request_uuid:
-                    try:
-                        await self.send_intent_result(
-                            request_uuid,
-                            error=f"Invalid forwardedIntent payload: {exc}",
-                        )
-                    except Exception:
-                        logger.exception(
-                            "Failed to send intentResult error for forwardedIntent"
-                        )
-                return
-
-            if model is None:
-                logger.debug("No model mapping for forwardedIntent; dropping message")
-                return
-
-            if not isinstance(model, ForwardedIntentMessage):
-                logger.debug("Unexpected forwardedIntent model type: %s", type(model))
-                return
-
-            await self.forwarded_intent_handlers.emit(model)
-
-        elif t == "addContextListenerResponse":
-            request_uuid = meta.get("requestUuid", "")
-            if request_uuid:
-                listener = self._extract_listener_uuid(payload.get("listenerUuid"))
-                self._resolve_pending_response(request_uuid, result=listener)
-
-        elif t == "addIntentListenerResponse":
-            request_uuid = meta.get("requestUuid", "")
-            if request_uuid:
-                listener = self._extract_listener_uuid(payload.get("listenerUuid"))
-                self._resolve_pending_response(request_uuid, result=listener)
-
-        elif t in (
-            "contextListenerUnsubscribeResponse",
-            "intentListenerUnsubscribeResponse",
-        ):
-            request_uuid = meta.get("requestUuid", "")
-            if request_uuid:
-                self._resolve_pending_response(request_uuid, result=None)
-
-        elif t == "broadcastEvent":
-            try:
-                model = parse_message(msg)
-            except ValidationError:
-                logger.exception("Invalid broadcastEvent payload")
-                # Drop unparsable payloads
-                return
-
-            if model is None:
-                logger.debug("No model mapping for broadcastEvent; dropping message")
-                return
-
-            if not isinstance(model, BroadcastEvent):
-                logger.debug("Unexpected broadcastEvent model type: %s", type(model))
-                return
-
+        if t == "broadcastEvent" and isinstance(model, BroadcastEvent):
             await self.broadcast_handlers.emit(model)
+            return
 
-        elif t == "intentEvent":
-            try:
-                model = parse_message(msg)
-            except ValidationError:
-                logger.exception("Invalid intentEvent payload")
-                # Drop unparsable payloads
-                return
-
-            if model is None:
-                logger.debug("No model mapping for intentEvent; dropping message")
-                return
-
-            if not isinstance(model, IntentEvent):
-                logger.debug("Unexpected intentEvent model type: %s", type(model))
-                return
-
+        if t == "intentEvent" and isinstance(model, IntentEvent):
             await self.intent_event_handlers.emit(model)
+            return
 
-        else:
-            logger.debug(f"Unhandled message type: {t}")
+        if t == "forwardedIntent":
+            if isinstance(model, ForwardedIntentMessage):
+                await self.forwarded_intent_handlers.emit(model)
+                return
+
+            # Error handling for invalid forwardedIntent
+            logger.exception("Invalid forwardedIntent payload")
+            req_uuid = self._extract_listener_uuid(
+                payload.get("request_uuid")
+                or payload.get("requestUuid")
+                or meta.get("requestUuid")
+                or meta.get("request_uuid")
+            )
+            if req_uuid:
+                try:
+                    await self.send_intent_result(
+                        req_uuid, error="Invalid forwardedIntent payload"
+                    )
+                except Exception:
+                    logger.exception("Failed to send intentResult error")
+            return
+
+        # 3. RESPONSES: Resolve pending futures registered via send_dacp_request
+        request_uuid = self._extract_listener_uuid(meta.get("requestUuid"))
+        if request_uuid:
+            error = payload.get("error")
+            if error:
+                self._resolve_pending_response(request_uuid, error=error)
+                return
+
+            # Consolidate resolution result mapping
+            result: Any = model or payload  # Default to parsed model or raw payload
+
+            # Some types require extracting specific result fields from the payload
+            if t in ("addContextListenerResponse", "addIntentListenerResponse"):
+                listener_uuid = payload.get("listenerUuid")
+                if model and hasattr(model, "payload"):
+                    listener_uuid = getattr(
+                        model.payload, "listenerUuid", listener_uuid
+                    )
+                result = self._extract_listener_uuid(listener_uuid)
+
+            elif t == "registerExternalHandlerResponse":
+                result = payload.get("handler_uuid")
+                if model and hasattr(model, "payload"):
+                    result = getattr(model.payload, "handler_uuid", result)
+
+            elif t in (
+                "contextListenerUnsubscribeResponse",
+                "intentListenerUnsubscribeResponse",
+                "unregisterExternalHandlerResponse",
+            ):
+                result = None
+
+            self._resolve_pending_response(request_uuid, result=result)
+            return
+
+        logger.debug(f"Unhandled message type: {t}")
 
     async def _send_wcp4_validate(self, connection_uuid: str) -> None:
         """Send WCP4ValidateAppIdentity for self-registration."""

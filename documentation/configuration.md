@@ -33,6 +33,15 @@ To allow all origins (not recommended for production):
 export FDC3_ALLOWED_ORIGINS="*"
 ```
 
+## Production Hardening
+
+For production deployments, ensure the following configurations are set:
+
+1.  **Transport Security**: Use a reverse proxy (e.g., Nginx) to terminate TLS for WebSocket (`wss://`) traffic.
+2.  **Allowed Origins**: Set `FDC3_ALLOWED_ORIGINS` to your specific UI domains to prevent unauthorized site connections.
+3.  **Persistence**: Configure a persistent SQLite file via `FDC3_DB_PATH` rather than the default `:memory:` storage.
+4.  **Process Management**: Use a process manager like `systemd` or `pm2` to ensure the agent restarts on failure.
+
 ## Running the Agent
 
 Start the server with `python -m uvicorn fdc3.desktop_agent.server:app` (the `uv` shim shown below is optional and simply invokes the same command).

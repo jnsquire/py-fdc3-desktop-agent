@@ -25,7 +25,7 @@ import webbrowser
 from typing import Any, Dict, Optional
 
 from fdc3.client import FDC3Client
-from fdc3.models.dacp import ForwardedIntentMessage
+from fdc3.models.dacp.external_models import ForwardedIntentMessage
 
 logger = logging.getLogger(__name__)
 

@@ -173,11 +173,11 @@ When an intent is raised:
 
 The result object controls how the intent is processed:
 
-| Field     | Type            | Description                                             |
-| --------- | --------------- | ------------------------------------------------------- |
-| `handled` | `bool`          | `True` if the plugin handled the intent                 |
+| Field     | Type           | Description                                                  |
+| --------- | -------------- | ------------------------------------------------------------ |
+| `handled` | `bool`         | `True` if the plugin handled the intent                      |
 | `result`  | `dict \| None` | The result to return to the caller (if handled successfully) |
-| `error`   | `str \| None`  | Error message to return (if handled but failed)         |
+| `error`   | `str \| None`  | Error message to return (if handled but failed)              |
 
 ```python
 # Successfully handled
@@ -188,4 +188,46 @@ IntentHandlerResult(handled=True, error="Failed to process")
 
 # Not handled - let another plugin or default resolution try
 IntentHandlerResult(handled=False)
+```
+
+## Real-world Example: Market Data Enrichment
+
+Plugins can be used to enrich FDC3 contexts via external APIs during intent handling.
+
+```python
+from fdc3.desktop_agent.plugins.interfaces import IntentHandlerPlugin, IntentHandlerResult
+import httpx
+
+class MarketDataPlugin(IntentHandlerPlugin):
+    """Enrich ViewQuote intents with real-time data from an external API."""
+
+    @property
+    def name(self) -> str:
+        return "market-data-enricher"
+
+    @property
+    def handled_intents(self) -> list[str]:
+        return ["ViewQuote"]
+
+    async def handle_intent(self, intent: str, context: dict, source: dict, target: dict | None = None):
+        ticker = context.get("id", {}).get("ticker")
+        if not ticker:
+            return IntentHandlerResult(handled=False)
+
+        async with httpx.AsyncClient() as client:
+            # Example enrichment logic: fetch quote data
+            try:
+                res = await client.get(f"https://api.marketdata.com/v1/quote/{ticker}")
+                res.raise_for_status()
+                data = res.json()
+                return IntentHandlerResult(
+                    handled=True,
+                    result={
+                        "ticker": ticker,
+                        "price": data["last"],
+                        "change": data["changePercent"]
+                    }
+                )
+            except Exception as e:
+                return IntentHandlerResult(handled=True, error=f"Market API Error: {str(e)}")
 ```

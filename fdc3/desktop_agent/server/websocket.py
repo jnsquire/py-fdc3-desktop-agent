@@ -18,10 +18,21 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from ..core import core_services
 from ..handlers import AccessControlHandler, WCPHandler, DACPHandler
+from ..handlers.protocols import MessageSender
 from .connection_manager import AgentClientConnectionManager
 from ..types import WcpSessions
 
 logger = logging.getLogger(__name__)
+
+
+class WebSocketSender(MessageSender):
+    """Implementation of MessageSender for FastAPI's WebSocket."""
+
+    def __init__(self, websocket: WebSocket):
+        self._ws = websocket
+
+    async def send_model(self, model) -> None:
+        await self._ws.send_text(model.model_dump_json())
 
 
 async def websocket_endpoint(
@@ -56,6 +67,7 @@ async def websocket_endpoint(
         return
 
     await websocket.accept()
+    sender = WebSocketSender(websocket)
     session_id = None
     dacp_active = False
     heartbeat_task = None
@@ -72,7 +84,7 @@ async def websocket_endpoint(
 
                 heartbeat_event = HeartbeatEvent(meta=HBMeta())
                 try:
-                    await websocket.send_text(heartbeat_event.model_dump_json())
+                    await sender.send_model(heartbeat_event)
                 except Exception as e:
                     logger.error(f"Failed to send heartbeat: {e}")
                     break
@@ -88,7 +100,7 @@ async def websocket_endpoint(
 
             if not dacp_active:
                 transition = await wcp_handler.handle_message(
-                    message, session_id or "", wcp_sessions, websocket
+                    message, session_id or "", wcp_sessions, sender
                 )
                 if transition == "dacp":
                     dacp_active = True
@@ -123,7 +135,7 @@ async def websocket_endpoint(
                         logger.exception("Failed to register instance connection")
             else:
                 await dacp_handler.handle_message(
-                    message, session_id or "", wcp_sessions, websocket
+                    message, session_id or "", wcp_sessions, sender
                 )
 
     except WebSocketDisconnect:

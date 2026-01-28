@@ -31,6 +31,7 @@ nav:
   - Bridging (experimental): bridging.md
   - Embedding API: embedding-api.md
   - Plugins: plugins.md
+  - Data Science Integration: notebooks.md
   - External intent handlers: external-intent-handlers.md
   - Private channels: private-channels.md
   - Docker deployment: docker.md
@@ -51,11 +52,13 @@ plugins:
             heading_level: 3
             show_root_heading: true
             members_order: source
-            show_signature_annotations: true
+            show_signature_annotations: false
+            signature_crossrefs: true
+            separate_signature: true
             show_symbol_type_heading: true
             show_symbol_type_toc: true
             show_source: false
-            show_if_no_docstring: true
+            show_if_no_docstring: false
             merge_init_into_class: true
             inherited_members: true
             filters:

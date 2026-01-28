@@ -11,8 +11,6 @@ from pydantic import BaseModel
 from fdc3.models.primitives import RequestUuid
 from pathlib import Path
 
-from fastapi import WebSocket
-
 from fdc3.models.dacp.dacp import (
     AgentResponse,
     AgentResponseMeta,
@@ -22,6 +20,7 @@ from fdc3.models.dacp.dacp import (
 )
 from fdc3.models.identifiers import AppIdentifier
 from fdc3.models.identifiers import IntentResolution
+from .protocols import MessageSender
 from ..launcher.web_launcher import WebEndpointLauncher, WebBrowserLauncher
 
 logger = logging.getLogger(__name__)
@@ -86,7 +85,7 @@ class SystemIntentHandler:
         intent: str,
         context: Optional[Dict[str, Any]],
         target: Optional[AppIdentifier],
-        websocket: WebSocket,
+        sender: MessageSender,
         request_uuid: RequestUuid,
     ) -> Optional[BaseModel]:
         """Handle a system intent and return response"""

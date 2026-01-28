@@ -1,14 +1,24 @@
 from pydantic import BaseModel
 from typing import Any, Optional, Dict, Literal
 
-from fdc3.models.dacp import (
+from fdc3.models.dacp.dacp import (
     BroadcastEvent,
     IntentEvent,
-    ForwardedIntentMessage,
     AddContextListenerResponse,
     AddIntentListenerResponse,
     ContextListenerUnsubscribeResponse,
     IntentListenerUnsubscribeResponse,
+    JoinUserChannelResponse,
+    LeaveCurrentChannelResponse,
+    CreatePrivateChannelResponse,
+    CreatePrivateChannelInvitationResponse,
+    JoinPrivateChannelResponse,
+    LeavePrivateChannelResponse,
+    PrivateChannelAddEventListenerResponse,
+    PrivateChannelEvent,
+)
+from fdc3.models.dacp.external_models import (
+    ForwardedIntentMessage,
     RegisterExternalHandlerResponse,
     UnregisterExternalHandlerResponse,
 )
@@ -25,6 +35,14 @@ _MODEL_MAP: Dict[str, type[BaseModel]] = {
     "intentListenerUnsubscribeResponse": IntentListenerUnsubscribeResponse,
     "registerExternalHandlerResponse": RegisterExternalHandlerResponse,
     "unregisterExternalHandlerResponse": UnregisterExternalHandlerResponse,
+    "joinUserChannelResponse": JoinUserChannelResponse,
+    "leaveCurrentChannelResponse": LeaveCurrentChannelResponse,
+    "createPrivateChannelResponse": CreatePrivateChannelResponse,
+    "createPrivateChannelInvitationResponse": CreatePrivateChannelInvitationResponse,
+    "joinPrivateChannelResponse": JoinPrivateChannelResponse,
+    "leavePrivateChannelResponse": LeavePrivateChannelResponse,
+    "privateChannelAddEventListenerResponse": PrivateChannelAddEventListenerResponse,
+    "privateChannelEvent": PrivateChannelEvent,
 }
 
 

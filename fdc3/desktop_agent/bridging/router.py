@@ -1,50 +1,30 @@
 from __future__ import annotations
 
 import logging
-import uuid
-from datetime import datetime, timezone
 from typing import Optional
 
+from pydantic import BaseModel
 from fdc3.models.dacp.dacp import (
-    IntentEvent,
-    IntentEventPayload,
     AgentEventMeta,
-    BroadcastEvent,
-    BroadcastEventPayload,
     PrivateChannelEvent,
     PrivateChannelEventPayload,
     FDC3EventMessage,
     FDC3EventMessagePayload,
 )
 from fdc3.models.identifiers import FDC3Event
-from fdc3.models.identifiers import AppIdentifier
-from fdc3.desktop_agent.api import OpenError, ResolveError
+from ..handlers.protocols import MessageSender
 
 logger = logging.getLogger(__name__)
 
 
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+class BridgeSender(MessageSender):
+    """Message sender for the bridge that captures the response model."""
 
+    def __init__(self):
+        self.response: Optional[BaseModel] = None
 
-def _make_uuid() -> str:
-    return str(uuid.uuid4())
-
-
-def _response_type_for(request_type: str) -> str:
-    # Spec convention: functionNameRequest -> functionNameResponse
-    if request_type.endswith("Request"):
-        return request_type[: -len("Request")] + "Response"
-    return request_type + "Response"
-
-
-def _normalize_app_id(app_id: str | None) -> str | None:
-    if not app_id:
-        return None
-    if "@" in app_id:
-        base, _ = app_id.split("@", 1)
-        return base or app_id
-    return app_id
+    async def send_model(self, model: BaseModel) -> None:
+        self.response = model
 
 
 class BridgeRequestRouter:
@@ -57,12 +37,14 @@ class BridgeRequestRouter:
         launcher,
         connection_manager,
         core_services,
+        dacp_handler,
         local_desktop_agent_name: str | None,
     ):
         self._storage = storage
         self._launcher = launcher
         self._connection_manager = connection_manager
         self._core = core_services
+        self._dacp_handler = dacp_handler
         self._local_name = local_desktop_agent_name
 
     def set_local_desktop_agent_name(self, name: str | None) -> None:
@@ -76,11 +58,7 @@ class BridgeRequestRouter:
         if not request_uuid:
             return None
 
-        # Fire-and-forget
-        if msg_type == "broadcastRequest":
-            await self._handle_broadcast(payload)
-            return None
-
+        # Keep bridge-specific handling if not in DACP registry
         if msg_type == "privateChannelEvent":
             await self._handle_private_channel_event(payload, meta)
             return None
@@ -97,56 +75,87 @@ class BridgeRequestRouter:
             await self._handle_fdc3_event(payload, meta)
             return None
 
-        response_payload: dict | None = None
+        # Try DACP handler
+        sender = BridgeSender()
 
-        if msg_type == "openRequest":
-            response_payload = await self._handle_open(payload)
-        elif msg_type == "getAppMetadataRequest":
-            response_payload = await self._handle_get_app_metadata(payload)
-        elif msg_type == "findInstancesRequest":
-            response_payload = await self._handle_find_instances(payload)
-        elif msg_type == "findIntentRequest":
-            response_payload = await self._handle_find_intent(payload)
-        elif msg_type == "findIntentsByContextRequest":
-            response_payload = await self._handle_find_intents_by_context(payload)
-        elif msg_type == "raiseIntentRequest":
-            response_payload = await self._handle_raise_intent(payload, meta)
+        # Bridge uses "Request" suffix, DACP internally uses simplified names.
+        dacp_msg = msg
+        if msg_type and msg_type.endswith("Request"):
+            simplified_type = msg_type[: -len("Request")]
+            # Map bridge request types to DACP internal names
+            if simplified_type in [
+                "open",
+                "broadcast",
+                "getAppMetadata",
+                "findInstances",
+                "findIntent",
+                "findIntentsByContext",
+                "raiseIntent",
+            ]:
+                dacp_msg = msg.copy()
+                dacp_msg["type"] = simplified_type
 
-        if response_payload is None:
-            response_payload = {"error": "MalformedMessage"}
+        await self._dacp_handler.handle_message(dacp_msg, "", {}, sender)
 
-        request_type = msg_type or "unknown"
-        return {
-            "type": _response_type_for(request_type),
-            "payload": response_payload,
-            "meta": {
-                "requestUuid": request_uuid,
-                "responseUuid": _make_uuid(),
-                "timestamp": _utc_now_iso(),
-            },
-        }
+        if sender.response:
+            resp_dict = sender.response.model_dump(exclude_none=True)
+            # Ensure type matches what bridge expects ("Request" -> "Response")
+            if msg_type and msg_type.endswith("Request"):
+                expected_type = msg_type[: -len("Request")] + "Response"
+                if resp_dict.get("type") != expected_type:
+                    resp_dict["type"] = expected_type
 
-    async def _handle_broadcast(self, payload: dict) -> None:
-        context = payload.get("context")
-        if not isinstance(context, dict) or not context.get("type"):
-            return
-        channel_id = payload.get("channelId")
-        # Broadcast to all local listeners/channel members.
-        # No local source instance to exclude.
-        targets = self._core.context_router.broadcast_context(
-            context,
-            source_instance_uuid="",
-            channel_id=channel_id if isinstance(channel_id, str) else None,
-        )
-        for target_uuid in targets:
-            event = BroadcastEvent(
-                type="broadcastEvent",
-                payload=BroadcastEventPayload(context=context),
-                meta=AgentEventMeta(),
-            )
-            await self._connection_manager.send_to_instance(
-                target_uuid, event.model_dump_json()
-            )
+            # Special case mappings for bridge compatibility
+            r_payload = resp_dict.get("payload") or {}
+
+            # openResponse: ensure desktopAgent is set in appIdentifier
+            if resp_dict.get("type") == "openResponse":
+                app_id = r_payload.get("appIdentifier")
+                if (
+                    app_id
+                    and isinstance(app_id, dict)
+                    and not app_id.get("desktopAgent")
+                ):
+                    app_id["desktopAgent"] = self._local_name
+
+            # findInstancesResponse: DACP uses 'instances', Bridge expects 'appIdentifiers'
+            if resp_dict.get("type") == "findInstancesResponse":
+                if "instances" in r_payload and "appIdentifiers" not in r_payload:
+                    r_payload["appIdentifiers"] = r_payload.pop("instances")
+                # Also ensure desktopAgent is set
+                for ai in r_payload.get("appIdentifiers") or []:
+                    if isinstance(ai, dict) and not ai.get("desktopAgent"):
+                        ai["desktopAgent"] = self._local_name
+
+            # getAppMetadataResponse: ensure desktopAgent is set
+            if resp_dict.get("type") == "getAppMetadataResponse":
+                m = r_payload.get("appMetadata")
+                if m and isinstance(m, dict) and not m.get("desktopAgent"):
+                    m["desktopAgent"] = self._local_name
+
+            # raiseIntentResponse: ensure desktopAgent is set in source
+            if resp_dict.get("type") == "raiseIntentResponse":
+                res = r_payload.get("intentResolution")
+                if res and isinstance(res, dict):
+                    source = res.get("source")
+                    if (
+                        source
+                        and isinstance(source, dict)
+                        and not source.get("desktopAgent")
+                    ):
+                        source["desktopAgent"] = self._local_name
+
+            # findIntentResponse: each app needs desktopAgent
+            if resp_dict.get("type") == "findIntentResponse":
+                app_intent = r_payload.get("appIntent")
+                if app_intent and isinstance(app_intent, dict):
+                    for a in app_intent.get("apps") or []:
+                        if isinstance(a, dict) and not a.get("desktopAgent"):
+                            a["desktopAgent"] = self._local_name
+
+            return resp_dict
+
+        return None
 
     async def _handle_private_channel_event(self, payload: dict, meta: dict) -> None:
         channel_id = payload.get("channelId")
@@ -233,159 +242,3 @@ class BridgeRequestRouter:
 
         for inst in instances:
             await self._connection_manager.send_to_instance(inst.instance_uuid, message)
-
-    async def _handle_open(self, payload: dict) -> dict:
-        app = payload.get("app") or {}
-        context = payload.get("context")
-        app_id = _normalize_app_id(app.get("appId"))
-        if not app_id:
-            return {"error": OpenError.AppNotFound.value}
-
-        app_metadata = await self._storage.apps.get_app_metadata(app_id)
-        if not app_metadata:
-            return {"error": OpenError.AppNotFound.value}
-
-        launch_config = await self._storage.launch_configs.get_launch_config(app_id)
-        if not launch_config:
-            return {"error": OpenError.AppNotFound.value}
-
-        app_payload = dict(app)
-        app_payload["appId"] = app_id
-        launch_result = await self._launcher.launch_app(
-            app_id, launch_config, context, app_payload
-        )
-        if not launch_result.success:
-            return {"error": OpenError.ErrorOnLaunch.value}
-
-        if not launch_result.instance_id or not launch_result.instance_uuid:
-            return {"error": OpenError.ErrorOnLaunch.value}
-
-        # Register pending instance and wait for connection (min 15s)
-        self._core.app_registry.register_pending_instance(
-            app_id, launch_result.instance_id, launch_result.instance_uuid
-        )
-
-        connected = await self._core.app_registry.wait_for_instance_connection(
-            launch_result.instance_uuid, timeout=15.0
-        )
-
-        if not connected:
-            self._core.app_registry.unregister_instance(launch_result.instance_uuid)
-            return {"error": OpenError.AppTimeout.value}
-
-        return {
-            "appIdentifier": {
-                "appId": app_id,
-                "instanceId": launch_result.instance_id,
-                "desktopAgent": self._local_name,
-            }
-        }
-
-    async def _handle_get_app_metadata(self, payload: dict) -> dict:
-        app = payload.get("app") or {}
-        app_id = _normalize_app_id(app.get("appId"))
-        if not app_id:
-            return {"error": OpenError.AppNotFound.value}
-
-        meta = await self._storage.apps.get_app_metadata(app_id)
-        if not meta:
-            return {"error": OpenError.AppNotFound.value}
-
-        return {
-            "appMetadata": {
-                "appId": meta.app_id,
-                "name": meta.name,
-                "version": meta.version,
-                "description": meta.description,
-                "icons": meta.icons,
-                "desktopAgent": self._local_name,
-            }
-        }
-
-    async def _handle_find_instances(self, payload: dict) -> dict:
-        app = payload.get("app") or {}
-        app_id = _normalize_app_id(app.get("appId"))
-        if not app_id:
-            return {"appIdentifiers": []}
-
-        instances = self._core.app_registry.get_connected_instances_for_app(app_id)
-        return {
-            "appIdentifiers": [
-                {
-                    "appId": i.app_id,
-                    "instanceId": i.instance_id,
-                    "desktopAgent": self._local_name,
-                }
-                for i in instances
-            ]
-        }
-
-    async def _handle_find_intent(self, payload: dict) -> dict:
-        intent = payload.get("intent")
-        if not intent:
-            return {"error": ResolveError.NoAppsFound.value}
-
-        apps = await self._storage.apps.list_apps()
-        matching = [a for a in apps if intent in (a.intents or [])]
-
-        if not matching:
-            return {"error": ResolveError.NoAppsFound.value}
-
-        return {
-            "appIntent": {
-                "intent": {"name": intent},
-                "apps": [
-                    {
-                        "appId": a.app_id,
-                        "name": a.name,
-                        "version": a.version,
-                        "description": a.description,
-                        "icons": a.icons,
-                        "desktopAgent": self._local_name,
-                    }
-                    for a in matching
-                ],
-            }
-        }
-
-    async def _handle_find_intents_by_context(self, payload: dict) -> dict:
-        # This implementation does not yet track intent->contextType mappings.
-        # Return empty rather than misleading matches.
-        return {"appIntents": []}
-
-    async def _handle_raise_intent(self, payload: dict, meta: dict) -> dict:
-        intent = payload.get("intent")
-        context = payload.get("context")
-        if not intent:
-            return {"error": ResolveError.NoAppsFound.value}
-
-        # Resolve to a local listener (simple policy)
-        resolution = self._core.intent_resolver.resolve_intent(intent, context, None)
-        if resolution is None:
-            return {"error": ResolveError.NoAppsFound.value}
-
-        # Deliver intent event to the resolved instance.
-        targets = self._core.intent_resolver.deliver_intent_event(
-            intent, context, meta.get("source")
-        )
-
-        for target_uuid in targets:
-            event = IntentEvent(
-                type="intentEvent",
-                payload=IntentEventPayload(
-                    intent=intent,
-                    context=context,
-                    originatingApp=meta.get("source"),
-                ),
-                meta=AgentEventMeta(),
-            )
-            await self._connection_manager.send_to_instance(
-                target_uuid, event.model_dump_json()
-            )
-
-        # Ensure returned resolution includes the local desktopAgent.
-        source = getattr(resolution, "source", None)
-        if isinstance(source, AppIdentifier) and self._local_name:
-            source.desktopAgent = self._local_name
-
-        return {"intentResolution": resolution.model_dump()}

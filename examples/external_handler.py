@@ -8,7 +8,7 @@ This connects, performs WCP handshake, registers a handler for a test intent,
 and replies with a simple payload.
 """
 
-from fdc3.models.dacp import ForwardedIntentMessage
+from fdc3.models.dacp.external_models import ForwardedIntentMessage
 
 import argparse
 import asyncio

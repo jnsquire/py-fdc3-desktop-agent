@@ -134,7 +134,7 @@ class OpenRequest(BaseModel):
 
 
 class OpenResponsePayload(BaseModel):
-    pass  # Success or error - error handled at envelope level
+    appIdentifier: Optional[AppIdentifier] = None
 
 
 class OpenResponse(BaseModel):
@@ -146,6 +146,7 @@ class OpenResponse(BaseModel):
 # broadcast
 class BroadcastRequestPayload(BaseModel):
     context: Fdc3Context  # Context data
+    channelId: Optional[str] = None  # Optional channel override (used by bridge)
 
 
 @register_message_type("broadcast")
@@ -441,11 +442,22 @@ class LeaveCurrentChannelResponse(BaseModel):
 
 # private channel management
 class CreatePrivateChannelRequestPayload(BaseModel):
+    """Payload for creating a private channel.
+
+    The caller becomes the channel owner and is joined automatically.
+    """
+
     displayMetadata: Optional[DisplayMetadata] = None
 
 
 @register_message_type("createPrivateChannel")
 class CreatePrivateChannelRequest(BaseModel):
+    """Create a private channel owned by the caller.
+
+    The response contains the created channel metadata, including the assigned
+    ``channelId``.
+    """
+
     type: Literal["createPrivateChannel"]
     payload: CreatePrivateChannelRequestPayload = Field(
         default_factory=CreatePrivateChannelRequestPayload
@@ -464,18 +476,32 @@ class CreatePrivateChannelResponse(BaseModel):
 
 
 class CreatePrivateChannelInvitationRequestPayload(BaseModel):
+    """Payload for issuing a private channel invitation.
+
+    ``instanceId`` can be supplied to scope the invitation to a specific app
+    instance.
+    """
+
     channelId: str
     instanceId: Optional[str] = None
 
 
 @register_message_type("createPrivateChannelInvitation")
 class CreatePrivateChannelInvitationRequest(BaseModel):
+    """Create a one-time invitation token for a private channel.
+
+    Owners must invite participants before they can join. The returned
+    ``invitationToken`` is consumed on the first successful join.
+    """
+
     type: Literal["createPrivateChannelInvitation"]
     payload: CreatePrivateChannelInvitationRequestPayload
     meta: AppRequestMeta = Field(default_factory=AppRequestMeta)
 
 
 class CreatePrivateChannelInvitationResponsePayload(BaseModel):
+    """Response payload containing the invitation token."""
+
     invitationToken: str
 
 
@@ -486,12 +512,19 @@ class CreatePrivateChannelInvitationResponse(BaseModel):
 
 
 class JoinPrivateChannelRequestPayload(BaseModel):
+    """Payload for joining a private channel.
+
+    Non-owners must provide ``invitationToken``. Tokens are single-use.
+    """
+
     channelId: str
     invitationToken: Optional[str] = None
 
 
 @register_message_type("joinPrivateChannel")
 class JoinPrivateChannelRequest(BaseModel):
+    """Join a private channel using a valid invitation token."""
+
     type: Literal["joinPrivateChannel"]
     payload: JoinPrivateChannelRequestPayload
     meta: AppRequestMeta = Field(default_factory=AppRequestMeta)
@@ -508,11 +541,15 @@ class JoinPrivateChannelResponse(BaseModel):
 
 
 class LeavePrivateChannelRequestPayload(BaseModel):
+    """Payload for leaving a private channel."""
+
     channelId: str
 
 
 @register_message_type("leavePrivateChannel")
 class LeavePrivateChannelRequest(BaseModel):
+    """Leave a private channel."""
+
     type: Literal["leavePrivateChannel"]
     payload: LeavePrivateChannelRequestPayload
     meta: AppRequestMeta = Field(default_factory=AppRequestMeta)
@@ -531,12 +568,20 @@ class LeavePrivateChannelResponse(BaseModel):
 
 
 class PrivateChannelAddEventListenerRequestPayload(BaseModel):
+    """Payload for subscribing to private channel events.
+
+    ``eventType`` can be provided to filter events (e.g. add/remove listeners,
+    disconnects).
+    """
+
     channelId: str
     eventType: Optional[PrivateChannelEventListenerTypes] = None
 
 
 @register_message_type("privateChannelAddEventListener")
 class PrivateChannelAddEventListenerRequest(BaseModel):
+    """Subscribe to private channel lifecycle events."""
+
     type: Literal["privateChannelAddEventListener"]
     payload: PrivateChannelAddEventListenerRequestPayload
     meta: AppRequestMeta = Field(default_factory=AppRequestMeta)
@@ -553,11 +598,15 @@ class PrivateChannelAddEventListenerResponse(BaseModel):
 
 
 class PrivateChannelDisconnectRequestPayload(BaseModel):
+    """Payload to disconnect a private channel session."""
+
     channelId: str
 
 
 @register_message_type("privateChannelDisconnect")
 class PrivateChannelDisconnectRequest(BaseModel):
+    """Disconnect from a private channel and fire lifecycle events."""
+
     type: Literal["privateChannelDisconnect"]
     payload: PrivateChannelDisconnectRequestPayload
     meta: AppRequestMeta = Field(default_factory=AppRequestMeta)

@@ -326,6 +326,7 @@ def create_lifespan(
                 launcher=launcher,
                 connection_manager=instance_connection_manager,
                 core_services=core_services,
+                dacp_handler=dacp_handler,
                 local_desktop_agent_name=None,
             )
 

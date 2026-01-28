@@ -6,11 +6,22 @@
 A production‑ready FDC3 Desktop Agent for Python that exposes WebSocket (WCP/DACP), GraphQL, and Admin UI
 endpoints for browser‑based applications.
 
+## Specification Compatibility
+
+| Feature | Support | Version |
+| --- | --- | --- |
+| Context Sharing | Full | 2.0 |
+| Intent Resolution | Full | 2.0 |
+| App Metadata | Full | 2.0 |
+| Web Connection Protocol (WCP) | Partial | 2.0 |
+| Content Metadata | Full | 2.0 |
+
 ## Who is this for?
 
 - FDC3‑enabled web apps that need a local Desktop Agent.
 - Developers embedding FDC3 into desktop shells or internal tooling.
 - Teams evaluating Desktop Agent Bridging (BCP/BMP) for multi‑agent setups.
+- **Quant & Data Scientists** wanting to bridge Python analysis (Jupyter/Streamlit) with desktop context.
 
 ## What’s included
 
@@ -94,6 +105,7 @@ Documentation overview:
 - Embedding API: [documentation/embedding-api.md](documentation/embedding-api.md) (published: https://jnsquire.github.io/py-fdc3-desktop-agent/embedding-api/)
 - Docker deployment: [documentation/docker.md](documentation/docker.md) (published: https://jnsquire.github.io/py-fdc3-desktop-agent/docker/)
 - Plugin API: [documentation/plugins.md](documentation/plugins.md) (published: https://jnsquire.github.io/py-fdc3-desktop-agent/plugins/)
+- Notebook Integration: [documentation/notebooks.md](documentation/notebooks.md) (published: https://jnsquire.github.io/py-fdc3-desktop-agent/notebooks/)
 - External intent handlers: [documentation/external-intent-handlers.md](documentation/external-intent-handlers.md) (published: https://jnsquire.github.io/py-fdc3-desktop-agent/external-intent-handlers/)
 
 Additional references:

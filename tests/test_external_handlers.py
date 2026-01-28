@@ -2,7 +2,6 @@ import asyncio
 import json
 import pytest
 from typing import cast
-from unittest.mock import MagicMock
 from fastapi import WebSocket
 from fdc3.models.dacp.external_models import (
     RegisterExternalHandlerRequest,
@@ -41,6 +40,9 @@ class DummyWebSocket:
 
     async def send_text(self, text: str):
         self.last = text
+
+    async def send_model(self, model):
+        await self.send_text(model.model_dump_json())
 
 
 class DummyConnectionManager:
@@ -100,7 +102,7 @@ async def test_dacp_register_and_forward(tmp_path):
         reg_request,
         session_id=session_id,
         wcp_sessions=wcp_sessions,
-        websocket=cast(WebSocket, ws),
+        sender=cast(WebSocket, ws),
     )
 
     # Parse response
@@ -148,8 +150,8 @@ async def test_dacp_register_and_forward(tmp_path):
         "payload": {"request_uuid": req_uuid, "result": {"ok": True}},
     }
     result_request = ExternalIntentResultRequest.model_validate(result_msg)
-    ws = MagicMock()
-    await handler._handle_external_intent_result(result_request, websocket=ws)
+    result_ws = DummyWebSocket()
+    await handler._handle_external_intent_result(result_request, sender=result_ws)
 
     # await task completion
     res = await asyncio.wait_for(task, timeout=1.0)
@@ -166,7 +168,7 @@ async def test_dacp_register_and_forward(tmp_path):
         unreg_request,
         session_id=session_id,
         wcp_sessions=wcp_sessions,
-        websocket=cast(WebSocket, ws),
+        sender=ws,
     )
 
     # Ensure removed
@@ -229,7 +231,7 @@ async def test_register_invalid_payload_and_forward_failure():
         good_request,
         session_id=session_id,
         wcp_sessions=wcp_sessions,
-        websocket=cast(WebSocket, ws),
+        sender=cast(WebSocket, ws),
     )
     assert ws.last is not None
     resp = json.loads(ws.last)
@@ -261,7 +263,7 @@ async def test_register_invalid_payload_and_forward_failure():
         unreg_request,
         session_id=session_id,
         wcp_sessions=wcp_sessions,
-        websocket=cast(WebSocket, ws),
+        sender=cast(WebSocket, ws),
     )
     # ack was sent
     assert ws.last is not None

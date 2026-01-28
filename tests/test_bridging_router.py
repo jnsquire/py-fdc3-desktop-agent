@@ -72,6 +72,7 @@ class IntentResolverStub:
 @dataclass
 class AppRegistryStub:
     get_connected_instances_for_app: Mock = field(default_factory=Mock)
+    get_instances_for_app: Mock = field(default_factory=Mock)
     register_pending_instance: Mock = field(default_factory=Mock)
     wait_for_instance_connection: AsyncMock = field(
         default_factory=lambda: AsyncMock(return_value=True)
@@ -101,13 +102,30 @@ def router_factory(connection_manager):
         launcher=None,
         core=None,
         local_name: str | None = "local-da",
+        dacp_handler=None,
     ) -> BridgeRequestRouter:
+        from fdc3.desktop_agent.handlers.dacp import DACPHandler
+
+        storage = storage or make_storage()
+        launcher = launcher or make_launcher()
+        connection_manager_inst = connection_manager
+        core_services_inst = core or CoreServicesStub()
+
+        if dacp_handler is None:
+            dacp_handler = DACPHandler(
+                storage=storage,
+                launcher=launcher,
+                connection_manager=connection_manager_inst,
+                core=core_services_inst,
+            )
+
         return BridgeRequestRouter(
-            storage=storage or make_storage(),
-            launcher=launcher or make_launcher(),
-            connection_manager=connection_manager,
-            core_services=core or CoreServicesStub(),
+            storage=storage,
+            launcher=launcher,
+            connection_manager=connection_manager_inst,
+            core_services=core_services_inst,
             local_desktop_agent_name=local_name,
+            dacp_handler=dacp_handler,
         )
 
     return _make_router
@@ -488,7 +506,13 @@ async def test_bridge_router_find_instances_request_returns_identifiers_for_conn
                 AppInstance(app_id="app-1", instance_id="i-1"),
                 AppInstance(app_id="app-1", instance_id="i-2"),
             ]
-        )
+        ),
+        get_instances_for_app=Mock(
+            return_value=[
+                AppInstance(app_id="app-1", instance_id="i-1"),
+                AppInstance(app_id="app-1", instance_id="i-2"),
+            ]
+        ),
     )
     core = make_core(app_registry=app_registry)
 

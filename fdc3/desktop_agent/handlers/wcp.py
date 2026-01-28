@@ -10,8 +10,6 @@ import os
 import sys
 import platform
 
-from fastapi import WebSocket
-
 from ..transport.wcp.wcp import (
     WCP1Hello,
     WCP3Handshake,
@@ -28,6 +26,7 @@ from ..storage import Storage
 from ..version import __version__
 from fdc3.models.identifiers import ImplementationMetadata, AppMetadata
 from ..types import WcpIdentity, WcpSession, WcpSessions
+from .protocols import MessageSender
 
 logger = logging.getLogger(__name__)
 
@@ -39,19 +38,16 @@ class WCPHandler:
         self.storage = storage
         self._bridge_enabled = bridge_enabled
 
-    async def _send_model(self, websocket: WebSocket, model) -> None:
-        """Helper method to send a Pydantic model as JSON over WebSocket"""
-        try:
-            await websocket.send_text(model.model_dump_json())
-        except Exception as e:
-            logger.error(f"Failed to send model {model.__class__.__name__}: {e}")
+    async def _send_model(self, sender: MessageSender, model) -> None:
+        """Helper method to send a Pydantic model as JSON."""
+        await sender.send_model(model)
 
     async def handle_message(
         self,
         message: Dict[str, Any],
         session_id: str,
         wcp_sessions: WcpSessions,
-        websocket: WebSocket,
+        sender: MessageSender,
     ) -> Optional[str]:
         """
         Handle WCP message and return next phase if transition occurs.
@@ -63,11 +59,11 @@ class WCPHandler:
         msg_type = message.get("type")
 
         if msg_type == "WCP1Hello":
-            await self._handle_wcp1_hello(message, session_id, wcp_sessions, websocket)
+            await self._handle_wcp1_hello(message, session_id, wcp_sessions, sender)
 
         elif msg_type == "WCP4ValidateAppIdentity":
             transition = await self._handle_wcp4_validate_app_identity(
-                message, session_id, wcp_sessions, websocket
+                message, session_id, wcp_sessions, sender
             )
             if transition:
                 return "dacp"
@@ -83,7 +79,7 @@ class WCPHandler:
         message: Dict[str, Any],
         session_id: str,
         wcp_sessions: WcpSessions,
-        websocket: WebSocket,
+        sender: MessageSender,
     ):
         """Handle WCP1Hello message"""
         try:
@@ -109,14 +105,14 @@ class WCPHandler:
             ),
             meta=wcp1.meta,
         )
-        await self._send_model(websocket, wcp3)
+        await self._send_model(sender, wcp3)
 
     async def _handle_wcp4_validate_app_identity(
         self,
         message: Dict[str, Any],
         session_id: str,
         wcp_sessions: WcpSessions,
-        websocket: WebSocket,
+        sender: MessageSender,
     ) -> bool:
         """Handle WCP4ValidateAppIdentity message. Returns True if transitioning to DACP."""
         try:
@@ -139,7 +135,7 @@ class WCPHandler:
                 },
             )
             try:
-                await self._send_model(websocket, failed)
+                await self._send_model(sender, failed)
             except Exception:
                 logger.debug("Failed to send validation error response")
             return False
@@ -236,7 +232,7 @@ class WCPHandler:
                     "timestamp": datetime.now().isoformat(),
                 },
             )
-            await self._send_model(websocket, wcp5)
+            await self._send_model(sender, wcp5)
 
             # Register instance
             core_services.app_registry.register_instance(
@@ -260,7 +256,7 @@ class WCPHandler:
                     "timestamp": datetime.now().isoformat(),
                 },
             )
-            await self._send_model(websocket, wcp5_failed)
+            await self._send_model(sender, wcp5_failed)
             return False
 
     async def _handle_wcp6_goodbye(self, session_id: str, wcp_sessions: WcpSessions):

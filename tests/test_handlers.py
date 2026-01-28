@@ -30,6 +30,9 @@ class FakeWebSocket:
             raise RuntimeError("send failed")
         self.sent.append(data)
 
+    async def send_model(self, model):
+        await self.send_text(model.model_dump_json())
+
     async def close(self, code=1000):
         self.closed = True
 
@@ -159,7 +162,7 @@ async def test_wcp_handler_send_and_hello(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_wcp_send_model_swallow_exception():
+async def test_wcp_send_model_raises_exception():
     class FakeStorage:
         pass
 
@@ -169,10 +172,14 @@ async def test_wcp_send_model_swallow_exception():
         async def send_text(self, data):
             raise RuntimeError("boom")
 
+        async def send_model(self, model):
+            await self.send_text(model.model_dump_json())
+
     fake_model = types.SimpleNamespace(
         model_dump_json=lambda: "{}", __class__=type("M", (), {})
     )
-    await handler._send_model(cast(WebSocket, BadWS()), fake_model)
+    with pytest.raises(RuntimeError, match="boom"):
+        await handler._send_model(cast(WebSocket, BadWS()), fake_model)
 
 
 @pytest.mark.asyncio
@@ -781,16 +788,15 @@ async def test_dacp_handler_send_and_unknown_message():
         async def send_text(self, data):
             raise RuntimeError("boom")
 
+        async def send_model(self, model):
+            await self.send_text(model.model_dump_json())
+
     fake_model = types.SimpleNamespace(
         model_dump_json=lambda: "{}", __class__=type("M", (), {})
     )
-    # _send_model should swallow exceptions
-    await handler._send_model(cast(WebSocket, BadWS()), fake_model)
-
-    # unknown message type should not raise
-    await handler.handle_message(
-        {"type": "nonsense"}, "s", {}, cast(WebSocket, FakeWebSocket())
-    )
+    # _send_model should NOT swallow exceptions anymore
+    with pytest.raises(RuntimeError, match="boom"):
+        await handler._send_model(cast(WebSocket, BadWS()), fake_model)
 
 
 @pytest.mark.asyncio

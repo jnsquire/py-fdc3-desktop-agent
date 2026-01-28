@@ -8,8 +8,6 @@ import uuid
 import asyncio
 from typing import Dict, Any, Optional, cast, Iterable, Mapping
 
-from fastapi import WebSocket
-
 from fdc3.models.dacp.dacp import (
     AgentEventMeta,
     OpenRequest,
@@ -152,6 +150,7 @@ from ..types import (
     IntentEntryMapping,
 )
 from .connection_manager import WebSocketConnectionManager
+from .protocols import MessageSender
 from .system_intent import SystemIntentHandler
 from ..launcher.web_launcher import WebEndpointLauncher
 from ..version import __version__
@@ -193,11 +192,13 @@ class DACPHandler:
         launcher: ProcessLauncher,
         connection_manager: WebSocketConnectionManager,
         web_launcher: Optional[WebEndpointLauncher] = None,
+        core=None,
     ):
         self.storage = storage
         self.launcher = launcher
         self.connection_manager = connection_manager
         self.system_intent_handler = SystemIntentHandler(web_launcher=web_launcher)
+        self._core = core or core_services
         # Optional Desktop Agent Bridging client (set by server lifespan).
         self.bridge_client = None
         self._default_user_channels_ready = False
@@ -341,7 +342,7 @@ class DACPHandler:
 
     async def _send_error(
         self,
-        websocket: WebSocket,
+        sender: MessageSender,
         response_type: str,
         error: str,
         request: Any,
@@ -353,7 +354,7 @@ class DACPHandler:
             payload=ErrorResponsePayload(error=error),
             meta=self._meta_from_request(request, bridge_meta),
         )
-        await self._send_model(websocket, response)
+        await self._send_model(sender, response)
 
     @staticmethod
     def _log_bridge_error_details(bridge_resp: dict[str, Any]) -> None:
@@ -367,19 +368,16 @@ class DACPHandler:
                 error_details,
             )
 
-    async def _send_model(self, websocket: WebSocket, model) -> None:
-        """Helper method to send a Pydantic model as JSON over WebSocket"""
-        try:
-            await websocket.send_text(model.model_dump_json())
-        except Exception as e:
-            logger.error(f"Failed to send model {model.__class__.__name__}: {e}")
+    async def _send_model(self, sender: MessageSender, model) -> None:
+        """Helper method to send a Pydantic model as JSON."""
+        await sender.send_model(model)
 
     async def handle_message(
         self,
         message: Dict[str, Any],
         session_id: str,
         wcp_sessions: WcpSessions,
-        websocket: WebSocket,
+        sender: MessageSender,
     ):
         """Handle DACP message with centralized Pydantic validation."""
         msg_type = message.get("type")
@@ -402,7 +400,7 @@ class DACPHandler:
                     )
                 ),
             )
-            await self._send_model(websocket, err)
+            await self._send_model(sender, err)
             return
 
         # Dispatch to typed handlers using registry
@@ -419,15 +417,15 @@ class DACPHandler:
                 parsed,
                 session_id=session_id,
                 wcp_sessions=wcp_sessions,
-                websocket=websocket,
+                sender=sender,
             )
         else:
-            await handler(parsed, websocket=websocket)
+            await handler(parsed, sender=sender)
 
     async def _emit_user_channel_changed_event(
         self, *, instance_uuid: str, current_channel_id: str | None
     ) -> None:
-        listeners = core_services.listener_store.get_event_listeners(
+        listeners = self._core.listener_store.get_event_listeners(
             FDC3EventType.USER_CHANNEL_CHANGED.value, instance_uuid=instance_uuid
         )
         if not listeners:
@@ -462,7 +460,7 @@ class DACPHandler:
         event_type: PrivateChannelEventListenerTypes,
         details: dict[str, Any] | None = None,
     ) -> None:
-        listeners = core_services.listener_store.get_event_listeners(
+        listeners = self._core.listener_store.get_event_listeners(
             event_type.value,
             channel_id=channel_id,
         )
@@ -504,7 +502,7 @@ class DACPHandler:
     ) -> AppIdentifier:
         if instance_uuid:
             try:
-                inst = core_services.app_registry.get_instance(instance_uuid)
+                inst = self._core.app_registry.get_instance(instance_uuid)
             except Exception:
                 inst = None
             if inst is not None and getattr(inst, "app_id", None):
@@ -528,7 +526,7 @@ class DACPHandler:
         if bridge is None or not getattr(bridge, "is_connected", False):
             return
 
-        targets = core_services.channel_manager.get_remote_private_channel_listeners(
+        targets = self._core.channel_manager.get_remote_private_channel_listeners(
             channel_id
         )
         if not targets:
@@ -606,32 +604,32 @@ class DACPHandler:
         *,
         session_id: str,
         wcp_sessions: WcpSessions,
-        websocket: WebSocket,
+        sender: MessageSender,
     ) -> None:
         instance_uuid = self._get_instance_uuid(session_id, wcp_sessions)
         channel_id = request.payload.channelId
-        channel = core_services.channel_manager.get_channel(channel_id)
+        channel = self._core.channel_manager.get_channel(channel_id)
 
         if channel is None or getattr(channel, "type", None) != "private":
             await self._send_error(
-                websocket,
+                sender,
                 "privateChannelAddEventListenerResponse",
                 DACPError.NO_CHANNEL_FOUND,
                 request,
             )
             return
 
-        owner = core_services.channel_manager.get_private_channel_owner(channel_id)
+        owner = self._core.channel_manager.get_private_channel_owner(channel_id)
         if instance_uuid != owner:
             await self._send_error(
-                websocket,
+                sender,
                 "privateChannelAddEventListenerResponse",
                 DACPError.CHANNEL_ACCESS_DENIED,
                 request,
             )
             return
 
-        listener = core_services.listener_store.add_event_listener(
+        listener = self._core.listener_store.add_event_listener(
             ListenerUuid(),
             instance_uuid,
             request.payload.eventType.value if request.payload.eventType else None,
@@ -645,7 +643,7 @@ class DACPHandler:
             ),
             meta=self._meta_from_request(request),
         )
-        await self._send_model(websocket, response)
+        await self._send_model(sender, response)
 
         identity = self._get_session_identity(session_id, wcp_sessions)
         source_identity = AppIdentifier(
@@ -666,7 +664,7 @@ class DACPHandler:
         *,
         session_id: str,
         wcp_sessions: WcpSessions,
-        websocket: WebSocket,
+        sender: MessageSender,
     ) -> None:
         identity = self._get_session_identity(session_id, wcp_sessions)
         app_id = identity.appId or "unknown"
@@ -719,15 +717,15 @@ class DACPHandler:
             payload=GetInfoResponsePayload(implementationMetadata=impl),
             meta=self._meta_from_request(request),
         )
-        await self._send_model(websocket, response)
+        await self._send_model(sender, response)
 
     async def _handle_get_app_metadata(
-        self, request: GetAppMetadataRequest, *, websocket: WebSocket
+        self, request: GetAppMetadataRequest, *, sender: MessageSender
     ) -> None:
         app_id = self._normalize_app_id(request.payload.app.appId)
         if not app_id:
             await self._send_error(
-                websocket, "getAppMetadataResponse", DACPError.APP_NOT_FOUND, request
+                sender, "getAppMetadataResponse", DACPError.APP_NOT_FOUND, request
             )
             return
 
@@ -742,7 +740,7 @@ class DACPHandler:
 
         if not meta:
             await self._send_error(
-                websocket, "getAppMetadataResponse", DACPError.APP_NOT_FOUND, request
+                sender, "getAppMetadataResponse", DACPError.APP_NOT_FOUND, request
             )
             return
 
@@ -762,7 +760,7 @@ class DACPHandler:
             payload=GetAppMetadataResponsePayload(appMetadata=app_meta),
             meta=self._meta_from_request(request),
         )
-        await self._send_model(websocket, response)
+        await self._send_model(sender, response)
 
     def _ensure_default_user_channels(self) -> None:
         """Ensure a baseline set of user channels exists.
@@ -775,7 +773,7 @@ class DACPHandler:
         try:
             existing = [
                 c
-                for c in core_services.channel_manager.list_channels()
+                for c in self._core.channel_manager.list_channels()
                 if getattr(c, "type", None) == "user"
             ]
         except Exception:
@@ -786,8 +784,8 @@ class DACPHandler:
             return
 
         for channel_id, name, color in self.DEFAULT_USER_CHANNELS:
-            if core_services.channel_manager.get_channel(channel_id) is None:
-                core_services.channel_manager.create_channel(
+            if self._core.channel_manager.get_channel(channel_id) is None:
+                self._core.channel_manager.create_channel(
                     channel_id,
                     "user",
                     display_metadata=DisplayMetadata(name=name, color=color),
@@ -799,7 +797,7 @@ class DACPHandler:
         self._ensure_default_user_channels()
         return [
             self._wire_channel(c)
-            for c in core_services.channel_manager.list_channels()
+            for c in self._core.channel_manager.list_channels()
             if getattr(c, "type", None) == "user"
         ]
 
@@ -950,7 +948,7 @@ class DACPHandler:
 
         # Runtime listeners
         try:
-            listeners = getattr(core_services.listener_store, "intent_listeners", {})
+            listeners = getattr(self._core.listener_store, "intent_listeners", {})
         except Exception:
             listeners = {}
         for listener in (listeners or {}).values():
@@ -958,7 +956,7 @@ class DACPHandler:
             instance_uuid = getattr(listener, "instance_uuid", None)
             if not intent or not instance_uuid:
                 continue
-            inst = core_services.app_registry.get_instance(instance_uuid)
+            inst = self._core.app_registry.get_instance(instance_uuid)
             if inst is not None and getattr(inst, "app_id", None):
                 intent_to_apps.setdefault(intent, {}).setdefault(inst.app_id, None)
 
@@ -1025,7 +1023,7 @@ class DACPHandler:
         )
 
     async def _handle_get_user_channels(
-        self, request: GetUserChannelsRequest, *, websocket: WebSocket
+        self, request: GetUserChannelsRequest, *, sender: MessageSender
     ) -> None:
         channels = self._get_user_channels()
 
@@ -1034,10 +1032,10 @@ class DACPHandler:
             payload=GetUserChannelsResponsePayload(channels=channels),
             meta=self._meta_from_request(request),
         )
-        await self._send_model(websocket, response)
+        await self._send_model(sender, response)
 
     async def _handle_get_system_channels(
-        self, request: GetSystemChannelsRequest, *, websocket: WebSocket
+        self, request: GetSystemChannelsRequest, *, sender: MessageSender
     ) -> None:
         channels = self._get_user_channels()
 
@@ -1046,7 +1044,7 @@ class DACPHandler:
             payload=GetSystemChannelsResponsePayload(channels=channels),
             meta=self._meta_from_request(request),
         )
-        await self._send_model(websocket, response)
+        await self._send_model(sender, response)
 
     async def _handle_get_current_channel(
         self,
@@ -1054,10 +1052,10 @@ class DACPHandler:
         *,
         session_id: str,
         wcp_sessions: WcpSessions,
-        websocket: WebSocket,
+        sender: MessageSender,
     ) -> None:
         instance_uuid = self._get_instance_uuid(session_id, wcp_sessions)
-        current = core_services.channel_manager.get_current_channel(instance_uuid)
+        current = self._core.channel_manager.get_current_channel(instance_uuid)
         response = GetCurrentChannelResponse(
             type="getCurrentChannelResponse",
             payload=GetCurrentChannelResponsePayload(
@@ -1065,7 +1063,7 @@ class DACPHandler:
             ),
             meta=self._meta_from_request(request),
         )
-        await self._send_model(websocket, response)
+        await self._send_model(sender, response)
 
     async def _handle_get_current_context(
         self,
@@ -1073,20 +1071,18 @@ class DACPHandler:
         *,
         session_id: str,
         wcp_sessions: WcpSessions,
-        websocket: WebSocket,
+        sender: MessageSender,
     ) -> None:
         instance_uuid = self._get_instance_uuid(session_id, wcp_sessions)
-        current_channel = core_services.channel_manager.get_current_channel(
-            instance_uuid
-        )
+        current_channel = self._core.channel_manager.get_current_channel(instance_uuid)
         requested_channel_id = request.payload.channelId
         target_channel_id: str | None = None
 
         if requested_channel_id:
-            channel = core_services.channel_manager.get_channel(requested_channel_id)
+            channel = self._core.channel_manager.get_channel(requested_channel_id)
             if channel is None:
                 await self._send_error(
-                    websocket,
+                    sender,
                     "getCurrentContextResponse",
                     DACPError.NO_CHANNEL_FOUND,
                     request,
@@ -1097,7 +1093,7 @@ class DACPHandler:
                 or getattr(current_channel, "id", None) != requested_channel_id
             ):
                 await self._send_error(
-                    websocket,
+                    sender,
                     "getCurrentContextResponse",
                     DACPError.CHANNEL_ACCESS_DENIED,
                     request,
@@ -1109,7 +1105,7 @@ class DACPHandler:
 
         context = None
         if target_channel_id is not None:
-            context = core_services.channel_manager.get_channel_context(
+            context = self._core.channel_manager.get_channel_context(
                 target_channel_id, request.payload.contextType
             )
 
@@ -1120,7 +1116,7 @@ class DACPHandler:
             ),
             meta=self._meta_from_request(request),
         )
-        await self._send_model(websocket, response)
+        await self._send_model(sender, response)
 
     async def _handle_join_user_channel(
         self,
@@ -1128,17 +1124,17 @@ class DACPHandler:
         *,
         session_id: str,
         wcp_sessions: WcpSessions,
-        websocket: WebSocket,
+        sender: MessageSender,
     ) -> None:
         self._ensure_default_user_channels()
 
         raw_id = request.payload.channelId
         channel_id = raw_id if ":" in raw_id else f"user:{raw_id}"
 
-        channel = core_services.channel_manager.get_channel(channel_id)
+        channel = self._core.channel_manager.get_channel(channel_id)
         if channel is None or getattr(channel, "type", None) != "user":
             await self._send_error(
-                websocket,
+                sender,
                 "joinUserChannelResponse",
                 DACPError.NO_CHANNEL_FOUND,
                 request,
@@ -1146,7 +1142,7 @@ class DACPHandler:
             return
 
         instance_uuid = self._get_instance_uuid(session_id, wcp_sessions)
-        core_services.channel_manager.join_channel(instance_uuid, channel_id)
+        self._core.channel_manager.join_channel(instance_uuid, channel_id)
         logger.info(f"Instance {instance_uuid} joined channel {channel_id}")
 
         response = JoinUserChannelResponse(
@@ -1154,7 +1150,7 @@ class DACPHandler:
             payload=JoinUserChannelResponsePayload(channel=self._wire_channel(channel)),
             meta=self._meta_from_request(request),
         )
-        await self._send_model(websocket, response)
+        await self._send_model(sender, response)
         await self._emit_user_channel_changed_event(
             instance_uuid=instance_uuid, current_channel_id=channel_id
         )
@@ -1165,17 +1161,17 @@ class DACPHandler:
         *,
         session_id: str,
         wcp_sessions: WcpSessions,
-        websocket: WebSocket,
+        sender: MessageSender,
     ) -> None:
         self._ensure_default_user_channels()
 
         raw_id = request.payload.channelId
         channel_id = raw_id if ":" in raw_id else f"user:{raw_id}"
 
-        channel = core_services.channel_manager.get_channel(channel_id)
+        channel = self._core.channel_manager.get_channel(channel_id)
         if channel is None or getattr(channel, "type", None) != "user":
             await self._send_error(
-                websocket,
+                sender,
                 "joinChannelResponse",
                 DACPError.NO_CHANNEL_FOUND,
                 request,
@@ -1183,7 +1179,7 @@ class DACPHandler:
             return
 
         instance_uuid = self._get_instance_uuid(session_id, wcp_sessions)
-        core_services.channel_manager.join_channel(instance_uuid, channel_id)
+        self._core.channel_manager.join_channel(instance_uuid, channel_id)
         logger.info(f"Instance {instance_uuid} joined channel {channel_id}")
 
         response = JoinChannelResponse(
@@ -1191,7 +1187,7 @@ class DACPHandler:
             payload=JoinChannelResponsePayload(channel=self._wire_channel(channel)),
             meta=self._meta_from_request(request),
         )
-        await self._send_model(websocket, response)
+        await self._send_model(sender, response)
         await self._emit_user_channel_changed_event(
             instance_uuid=instance_uuid, current_channel_id=channel_id
         )
@@ -1202,17 +1198,17 @@ class DACPHandler:
         *,
         session_id: str,
         wcp_sessions: WcpSessions,
-        websocket: WebSocket,
+        sender: MessageSender,
     ) -> None:
         instance_uuid = self._get_instance_uuid(session_id, wcp_sessions)
-        core_services.channel_manager.leave_current_channel(instance_uuid)
+        self._core.channel_manager.leave_current_channel(instance_uuid)
 
         response = LeaveCurrentChannelResponse(
             type="leaveCurrentChannelResponse",
             payload=LeaveCurrentChannelResponsePayload(),
             meta=self._meta_from_request(request),
         )
-        await self._send_model(websocket, response)
+        await self._send_model(sender, response)
         await self._emit_user_channel_changed_event(
             instance_uuid=instance_uuid, current_channel_id=None
         )
@@ -1223,14 +1219,14 @@ class DACPHandler:
         *,
         session_id: str,
         wcp_sessions: WcpSessions,
-        websocket: WebSocket,
+        sender: MessageSender,
     ) -> None:
         channel_id = request.payload.channelId
-        channel = core_services.channel_manager.get_channel(channel_id)
+        channel = self._core.channel_manager.get_channel(channel_id)
 
         if channel is None or getattr(channel, "type", None) != "private":
             await self._send_error(
-                websocket,
+                sender,
                 "joinPrivateChannelResponse",
                 DACPError.NO_CHANNEL_FOUND,
                 request,
@@ -1238,26 +1234,26 @@ class DACPHandler:
             return
 
         instance_uuid = self._get_instance_uuid(session_id, wcp_sessions)
-        owner = core_services.channel_manager.get_private_channel_owner(channel_id)
+        owner = self._core.channel_manager.get_private_channel_owner(channel_id)
         invitation_token = request.payload.invitationToken
         if instance_uuid != owner:
             valid_invite = False
             if invitation_token:
                 valid_invite = (
-                    core_services.channel_manager.consume_private_channel_invite(
+                    self._core.channel_manager.consume_private_channel_invite(
                         channel_id, invitation_token, instance_uuid
                     )
                 )
             if not valid_invite:
                 await self._send_error(
-                    websocket,
+                    sender,
                     "joinPrivateChannelResponse",
                     DACPError.CHANNEL_ACCESS_DENIED,
                     request,
                 )
                 return
 
-        core_services.channel_manager.join_channel(instance_uuid, channel_id)
+        self._core.channel_manager.join_channel(instance_uuid, channel_id)
 
         response = JoinPrivateChannelResponse(
             type="joinPrivateChannelResponse",
@@ -1266,7 +1262,7 @@ class DACPHandler:
             ),
             meta=self._meta_from_request(request),
         )
-        await self._send_model(websocket, response)
+        await self._send_model(sender, response)
 
     async def _handle_leave_private_channel(
         self,
@@ -1274,14 +1270,14 @@ class DACPHandler:
         *,
         session_id: str,
         wcp_sessions: WcpSessions,
-        websocket: WebSocket,
+        sender: MessageSender,
     ) -> None:
         channel_id = request.payload.channelId
-        channel = core_services.channel_manager.get_channel(channel_id)
+        channel = self._core.channel_manager.get_channel(channel_id)
 
         if channel is None or getattr(channel, "type", None) != "private":
             await self._send_error(
-                websocket,
+                sender,
                 "leavePrivateChannelResponse",
                 DACPError.NO_CHANNEL_FOUND,
                 request,
@@ -1289,24 +1285,24 @@ class DACPHandler:
             return
 
         instance_uuid = self._get_instance_uuid(session_id, wcp_sessions)
-        current = core_services.channel_manager.get_current_channel(instance_uuid)
+        current = self._core.channel_manager.get_current_channel(instance_uuid)
         if current is None or getattr(current, "id", None) != channel_id:
             await self._send_error(
-                websocket,
+                sender,
                 "leavePrivateChannelResponse",
                 DACPError.CHANNEL_ACCESS_DENIED,
                 request,
             )
             return
 
-        core_services.channel_manager.leave_current_channel(instance_uuid)
+        self._core.channel_manager.leave_current_channel(instance_uuid)
 
         response = LeavePrivateChannelResponse(
             type="leavePrivateChannelResponse",
             payload=LeavePrivateChannelResponsePayload(),
             meta=self._meta_from_request(request),
         )
-        await self._send_model(websocket, response)
+        await self._send_model(sender, response)
 
     async def _handle_create_private_channel(
         self,
@@ -1314,7 +1310,7 @@ class DACPHandler:
         *,
         session_id: str,
         wcp_sessions: WcpSessions,
-        websocket: WebSocket,
+        sender: MessageSender,
     ) -> None:
         instance_uuid = self._get_instance_uuid(session_id, wcp_sessions)
         # Convert wire DisplayMetadata (from fdc3.models.identifiers) to the agent's
@@ -1328,13 +1324,13 @@ class DACPHandler:
                 glyph=getattr(wire_dm, "glyph", None),
             )
         try:
-            channel = core_services.channel_manager.create_private_channel(
+            channel = self._core.channel_manager.create_private_channel(
                 instance_uuid,
                 display_metadata=metadata,
             )
         except ValueError:
             await self._send_error(
-                websocket,
+                sender,
                 "createPrivateChannelResponse",
                 DACPError.CHANNEL_CREATION_FAILED,
                 request,
@@ -1348,7 +1344,7 @@ class DACPHandler:
             ),
             meta=self._meta_from_request(request),
         )
-        await self._send_model(websocket, response)
+        await self._send_model(sender, response)
 
     async def _handle_create_private_channel_invitation(
         self,
@@ -1356,14 +1352,14 @@ class DACPHandler:
         *,
         session_id: str,
         wcp_sessions: WcpSessions,
-        websocket: WebSocket,
+        sender: MessageSender,
     ) -> None:
         channel_id = request.payload.channelId
-        channel = core_services.channel_manager.get_channel(channel_id)
+        channel = self._core.channel_manager.get_channel(channel_id)
 
         if channel is None or getattr(channel, "type", None) != "private":
             await self._send_error(
-                websocket,
+                sender,
                 "createPrivateChannelInvitationResponse",
                 DACPError.NO_CHANNEL_FOUND,
                 request,
@@ -1371,17 +1367,17 @@ class DACPHandler:
             return
 
         instance_uuid = self._get_instance_uuid(session_id, wcp_sessions)
-        owner = core_services.channel_manager.get_private_channel_owner(channel_id)
+        owner = self._core.channel_manager.get_private_channel_owner(channel_id)
         if instance_uuid != owner:
             await self._send_error(
-                websocket,
+                sender,
                 "createPrivateChannelInvitationResponse",
                 DACPError.CHANNEL_ACCESS_DENIED,
                 request,
             )
             return
 
-        token = core_services.channel_manager.create_private_channel_invite(
+        token = self._core.channel_manager.create_private_channel_invite(
             channel_id, request.payload.instanceId
         )
 
@@ -1392,7 +1388,7 @@ class DACPHandler:
             ),
             meta=self._meta_from_request(request),
         )
-        await self._send_model(websocket, response)
+        await self._send_model(sender, response)
 
     async def _handle_private_channel_disconnect(
         self,
@@ -1400,32 +1396,32 @@ class DACPHandler:
         *,
         session_id: str,
         wcp_sessions: WcpSessions,
-        websocket: WebSocket,
+        sender: MessageSender,
     ) -> None:
         instance_uuid = self._get_instance_uuid(session_id, wcp_sessions)
         channel_id = request.payload.channelId
-        channel = core_services.channel_manager.get_channel(channel_id)
+        channel = self._core.channel_manager.get_channel(channel_id)
 
         if channel is None or getattr(channel, "type", None) != "private":
             await self._send_error(
-                websocket,
+                sender,
                 "privateChannelDisconnectResponse",
                 DACPError.NO_CHANNEL_FOUND,
                 request,
             )
             return
 
-        owner = core_services.channel_manager.get_private_channel_owner(channel_id)
+        owner = self._core.channel_manager.get_private_channel_owner(channel_id)
         if instance_uuid != owner and instance_uuid not in channel.members:
             await self._send_error(
-                websocket,
+                sender,
                 "privateChannelDisconnectResponse",
                 DACPError.CHANNEL_ACCESS_DENIED,
                 request,
             )
             return
 
-        core_services.channel_manager.destroy_private_channel(channel_id)
+        self._core.channel_manager.destroy_private_channel(channel_id)
         await self._emit_private_channel_event(
             channel_id=channel_id,
             event_type=PrivateChannelEventListenerTypes.onDisconnect,
@@ -1436,7 +1432,7 @@ class DACPHandler:
             payload=PrivateChannelDisconnectResponsePayload(),
             meta=self._meta_from_request(request),
         )
-        await self._send_model(websocket, response)
+        await self._send_model(sender, response)
 
     async def _handle_add_event_listener(
         self,
@@ -1444,10 +1440,10 @@ class DACPHandler:
         *,
         session_id: str,
         wcp_sessions: WcpSessions,
-        websocket: WebSocket,
+        sender: MessageSender,
     ) -> None:
         instance_uuid = self._get_instance_uuid(session_id, wcp_sessions)
-        listener = core_services.listener_store.add_event_listener(
+        listener = self._core.listener_store.add_event_listener(
             ListenerUuid(), instance_uuid, request.payload.eventType
         )
 
@@ -1458,19 +1454,19 @@ class DACPHandler:
             ),
             meta=self._meta_from_request(request),
         )
-        await self._send_model(websocket, response)
+        await self._send_model(sender, response)
 
     async def _handle_remove_event_listener(
-        self, request: RemoveEventListenerRequest, *, websocket: WebSocket
+        self, request: RemoveEventListenerRequest, *, sender: MessageSender
     ) -> None:
-        listener = core_services.listener_store.remove_listener(
+        listener = self._core.listener_store.remove_listener(
             request.payload.listenerUuid.root
         )
 
         channel_id = getattr(listener, "channel_id", None) if listener else None
         event_type = getattr(listener, "event_type", None) if listener else None
         if channel_id:
-            channel = core_services.channel_manager.get_channel(channel_id)
+            channel = self._core.channel_manager.get_channel(channel_id)
             if channel is not None and getattr(channel, "type", None) == "private":
                 source = getattr(request.meta, "source", None)
                 if isinstance(source, AppIdentifier):
@@ -1510,10 +1506,10 @@ class DACPHandler:
             payload=RemoveEventListenerResponsePayload(),
             meta=self._meta_from_request(request),
         )
-        await self._send_model(websocket, response)
+        await self._send_model(sender, response)
 
     async def _handle_find_intent(
-        self, request: FindIntentRequest, *, websocket: WebSocket
+        self, request: FindIntentRequest, *, sender: MessageSender
     ):
         """Handle findIntent request.
 
@@ -1544,8 +1540,8 @@ class DACPHandler:
 
             # From runtime listeners
             try:
-                listeners = (
-                    core_services.listener_store.get_intent_listeners_for_intent(intent)
+                listeners = self._core.listener_store.get_intent_listeners_for_intent(
+                    intent
                 )
             except Exception:
                 listeners = []
@@ -1554,7 +1550,7 @@ class DACPHandler:
                 instance_uuid = getattr(listener, "instance_uuid", None)
                 if not instance_uuid:
                     continue
-                inst = core_services.app_registry.get_instance(instance_uuid)
+                inst = self._core.app_registry.get_instance(instance_uuid)
                 if inst is not None and getattr(inst, "app_id", None):
                     app_ids.add(inst.app_id)
 
@@ -1564,14 +1560,14 @@ class DACPHandler:
                 target_instance_id = target.instanceId
                 if not target_app_id:
                     await self._send_error(
-                        websocket,
+                        sender,
                         "findIntentResponse",
                         DACPError.TARGET_APP_UNAVAILABLE,
                         request,
                     )
                     return
                 if target_instance_id:
-                    instances = core_services.app_registry.get_instances_for_app(
+                    instances = self._core.app_registry.get_instances_for_app(
                         target_app_id
                     )
                     if not any(
@@ -1579,7 +1575,7 @@ class DACPHandler:
                         for i in instances
                     ):
                         await self._send_error(
-                            websocket,
+                            sender,
                             "findIntentResponse",
                             DACPError.TARGET_INSTANCE_UNAVAILABLE,
                             request,
@@ -1594,7 +1590,7 @@ class DACPHandler:
                         known = None
                     if not known:
                         await self._send_error(
-                            websocket,
+                            sender,
                             "findIntentResponse",
                             DACPError.TARGET_APP_UNAVAILABLE,
                             request,
@@ -1604,7 +1600,7 @@ class DACPHandler:
 
             if not app_ids:
                 await self._send_error(
-                    websocket, "findIntentResponse", DACPError.NO_APPS_FOUND, request
+                    sender, "findIntentResponse", DACPError.NO_APPS_FOUND, request
                 )
                 return
 
@@ -1628,7 +1624,7 @@ class DACPHandler:
                     request.payload.resultType,
                 )
                 await self._send_error(
-                    websocket, "findIntentResponse", DACPError.NO_APPS_FOUND, request
+                    sender, "findIntentResponse", DACPError.NO_APPS_FOUND, request
                 )
                 return
 
@@ -1645,15 +1641,15 @@ class DACPHandler:
                 payload=FindIntentResponsePayload(appIntent=app_intent),
                 meta=self._meta_from_request(request),
             )
-            await self._send_model(websocket, response)
+            await self._send_model(sender, response)
         except Exception:
             logger.exception("Error handling findIntent")
             await self._send_error(
-                websocket, "findIntentResponse", DACPError.RESOLVER_UNAVAILABLE, request
+                sender, "findIntentResponse", DACPError.RESOLVER_UNAVAILABLE, request
             )
 
     async def _handle_find_intents_by_context(
-        self, request: FindIntentsByContextRequest, *, websocket: WebSocket
+        self, request: FindIntentsByContextRequest, *, sender: MessageSender
     ):
         """Handle findIntentsByContext request.
 
@@ -1673,7 +1669,7 @@ class DACPHandler:
 
             if not app_intents:
                 await self._send_error(
-                    websocket,
+                    sender,
                     "findIntentsByContextResponse",
                     DACPError.NO_APPS_FOUND,
                     request,
@@ -1685,18 +1681,18 @@ class DACPHandler:
                 payload=FindIntentsByContextResponsePayload(appIntents=app_intents),
                 meta=self._meta_from_request(request),
             )
-            await self._send_model(websocket, response)
+            await self._send_model(sender, response)
         except Exception:
             logger.exception("Error handling findIntentsByContext")
             await self._send_error(
-                websocket,
+                sender,
                 "findIntentsByContextResponse",
                 DACPError.RESOLVER_UNAVAILABLE,
                 request,
             )
 
     async def _handle_find_instances(
-        self, request: FindInstancesRequest, *, websocket: WebSocket
+        self, request: FindInstancesRequest, *, sender: MessageSender
     ):
         """Handle findInstances request.
 
@@ -1708,13 +1704,13 @@ class DACPHandler:
             requested_instance_id = request.payload.app.instanceId
             if not app_id:
                 await self._send_error(
-                    websocket,
+                    sender,
                     "findInstancesResponse",
                     DACPError.TARGET_APP_UNAVAILABLE,
                     request,
                 )
                 return
-            instances = core_services.app_registry.get_instances_for_app(app_id)
+            instances = self._core.app_registry.get_instances_for_app(app_id)
 
             result: list[AppIdentifier] = []
             for inst in instances:
@@ -1732,11 +1728,11 @@ class DACPHandler:
                 payload=FindInstancesResponsePayload(instances=result),
                 meta=self._meta_from_request(request),
             )
-            await self._send_model(websocket, response)
+            await self._send_model(sender, response)
         except Exception:
             logger.exception("Error handling findInstances")
             await self._send_error(
-                websocket,
+                sender,
                 "findInstancesResponse",
                 DACPError.RESOLVER_UNAVAILABLE,
                 request,
@@ -1745,7 +1741,7 @@ class DACPHandler:
     async def _handle_open(
         self,
         request: OpenRequest,
-        websocket: WebSocket,
+        sender: MessageSender,
         *,
         session_id: str | None = None,
         wcp_sessions: WcpSessions | None = None,
@@ -1783,7 +1779,7 @@ class DACPHandler:
                     resolved = await self._resolve_app_id_by_name(app_value)
                 if not resolved:
                     await self._send_error(
-                        websocket, "openResponse", DACPError.APP_NOT_FOUND, request
+                        sender, "openResponse", DACPError.APP_NOT_FOUND, request
                     )
                     return
                 app_identity = AppIdentifier(
@@ -1792,17 +1788,17 @@ class DACPHandler:
 
             if app_identity is None:
                 await self._send_error(
-                    websocket, "openResponse", DACPError.APP_NOT_FOUND, request
+                    sender, "openResponse", DACPError.APP_NOT_FOUND, request
                 )
                 return
 
             # If the request targets a remote Desktop Agent (Agent Bridging), forward it.
             target_da = getattr(app_identity, "desktopAgent", None)
-            if target_da:
+            if target_da and session_id:
                 bridge = getattr(self, "bridge_client", None)
                 if bridge is None or not getattr(bridge, "is_connected", False):
                     await self._send_error(
-                        websocket,
+                        sender,
                         "openResponse",
                         BridgingError.NotConnectedToBridge.value,
                         request,
@@ -1812,7 +1808,7 @@ class DACPHandler:
                     bridge, "has_connected_agent"
                 ) and not bridge.has_connected_agent(target_da):
                     await self._send_error(
-                        websocket,
+                        sender,
                         "openResponse",
                         OpenError.DesktopAgentNotFound.value,
                         request,
@@ -1839,7 +1835,7 @@ class DACPHandler:
                     )
                 except asyncio.TimeoutError:
                     await self._send_error(
-                        websocket,
+                        sender,
                         "openResponse",
                         BridgingError.ResponseToBridgeTimedOut.value,
                         request,
@@ -1848,7 +1844,7 @@ class DACPHandler:
                 except RuntimeError as exc:
                     if str(exc) == BridgingError.NotConnectedToBridge.value:
                         await self._send_error(
-                            websocket,
+                            sender,
                             "openResponse",
                             BridgingError.NotConnectedToBridge.value,
                             request,
@@ -1856,7 +1852,7 @@ class DACPHandler:
                         return
                     if str(exc) == BridgingError.AgentDisconnected.value:
                         await self._send_error(
-                            websocket,
+                            sender,
                             "openResponse",
                             BridgingError.AgentDisconnected.value,
                             request,
@@ -1876,10 +1872,12 @@ class DACPHandler:
                 else:
                     response = OpenResponse(
                         type="openResponse",
-                        payload=OpenResponsePayload(),
+                        payload=OpenResponsePayload(
+                            appIdentifier=payload.get("appIdentifier")
+                        ),
                         meta=self._meta_from_request(request, bridge_meta),
                     )
-                await self._send_model(websocket, response)
+                await self._send_model(sender, response)
                 return
 
             app_id = app_identity.appId
@@ -1888,14 +1886,12 @@ class DACPHandler:
             app_metadata = await self.storage.apps.get_app_metadata(app_id)
             if not app_metadata:
                 await self._send_error(
-                    websocket, "openResponse", DACPError.APP_NOT_FOUND, request
+                    sender, "openResponse", DACPError.APP_NOT_FOUND, request
                 )
                 return
 
             # Check existing instances
-            existing_instances = core_services.app_registry.get_instances_for_app(
-                app_id
-            )
+            existing_instances = self._core.app_registry.get_instances_for_app(app_id)
             requested_instance_id = getattr(request.payload.app, "instanceId", None)
 
             if requested_instance_id:
@@ -1910,26 +1906,35 @@ class DACPHandler:
                 if existing_instance:
                     response = OpenResponse(
                         type="openResponse",
-                        payload=OpenResponsePayload(),
+                        payload=OpenResponsePayload(
+                            appIdentifier=AppIdentifier(
+                                appId=app_id, instanceId=existing_instance.instance_id
+                            )
+                        ),
                         meta=self._meta_from_request(request),
                     )
-                    await self._send_model(websocket, response)
+                    await self._send_model(sender, response)
                     return
             elif existing_instances:
                 # Reuse existing instance
+                inst = existing_instances[0]
                 response = OpenResponse(
                     type="openResponse",
-                    payload=OpenResponsePayload(),
+                    payload=OpenResponsePayload(
+                        appIdentifier=AppIdentifier(
+                            appId=app_id, instanceId=inst.instance_id
+                        )
+                    ),
                     meta=self._meta_from_request(request),
                 )
-                await self._send_model(websocket, response)
+                await self._send_model(sender, response)
                 return
 
             # Get launch config
             launch_config = await self.storage.launch_configs.get_launch_config(app_id)
             if not launch_config:
                 await self._send_error(
-                    websocket, "openResponse", DACPError.APP_NOT_FOUND, request
+                    sender, "openResponse", DACPError.APP_NOT_FOUND, request
                 )
                 return
 
@@ -1941,39 +1946,41 @@ class DACPHandler:
             if launch_result.success:
                 if not launch_result.instance_id or not launch_result.instance_uuid:
                     await self._send_error(
-                        websocket, "openResponse", DACPError.ERROR_ON_LAUNCH, request
+                        sender, "openResponse", DACPError.ERROR_ON_LAUNCH, request
                     )
                     return
 
                 # Register as pending
-                core_services.app_registry.register_pending_instance(
+                self._core.app_registry.register_pending_instance(
                     app_id, launch_result.instance_id, launch_result.instance_uuid
                 )
 
                 # Wait for connection
-                connected = (
-                    await core_services.app_registry.wait_for_instance_connection(
-                        launch_result.instance_uuid, timeout=15.0
-                    )
+                connected = await self._core.app_registry.wait_for_instance_connection(
+                    launch_result.instance_uuid, timeout=15.0
                 )
 
                 if connected:
                     response = OpenResponse(
                         type="openResponse",
-                        payload=OpenResponsePayload(),
+                        payload=OpenResponsePayload(
+                            appIdentifier=AppIdentifier(
+                                appId=app_id, instanceId=launch_result.instance_id
+                            )
+                        ),
                         meta=self._meta_from_request(request),
                     )
-                    await self._send_model(websocket, response)
+                    await self._send_model(sender, response)
                 else:
-                    core_services.app_registry.unregister_instance(
+                    self._core.app_registry.unregister_instance(
                         launch_result.instance_uuid
                     )
                     await self._send_error(
-                        websocket, "openResponse", DACPError.APP_TIMEOUT, request
+                        sender, "openResponse", DACPError.APP_TIMEOUT, request
                     )
             else:
                 await self._send_error(
-                    websocket, "openResponse", DACPError.ERROR_ON_LAUNCH, request
+                    sender, "openResponse", DACPError.ERROR_ON_LAUNCH, request
                 )
 
         except Exception as e:
@@ -1981,7 +1988,7 @@ class DACPHandler:
             # Try to send error response if possible
             try:
                 await self._send_error(
-                    websocket, "openResponse", DACPError.ERROR_ON_LAUNCH, request
+                    sender, "openResponse", DACPError.ERROR_ON_LAUNCH, request
                 )
             except Exception:
                 pass
@@ -1992,22 +1999,30 @@ class DACPHandler:
         *,
         session_id: str,
         wcp_sessions: WcpSessions,
-        websocket: WebSocket,
+        sender: MessageSender,
     ):
         """Handle broadcast request"""
         source_instance_uuid = self._get_instance_uuid(session_id, wcp_sessions)
         normalized_context = self._normalize_context(request.payload.context)
         context_payload = normalized_context or request.payload.context
-        current_channel = core_services.channel_manager.get_current_channel(
-            source_instance_uuid
-        )
-        channel_id = current_channel.id if current_channel else None
+
+        # Use payload channelId if provided (e.g. from bridge), else current channel
+        channel_id = request.payload.channelId
+        if channel_id is None:
+            current_channel = self._core.channel_manager.get_current_channel(
+                source_instance_uuid
+            )
+            channel_id = current_channel.id if current_channel else None
 
         # Forward to Desktop Agent Bridge (best-effort). The bridge won't echo
         # back to this agent, so we still deliver locally.
         try:
             bridge = getattr(self, "bridge_client", None)
-            if bridge is not None and getattr(bridge, "is_connected", False):
+            if (
+                bridge is not None
+                and getattr(bridge, "is_connected", False)
+                and session_id
+            ):
                 source_identity = self._get_session_identity(session_id, wcp_sessions)
                 await bridge.send_request_no_wait(
                     request_type="broadcastRequest",
@@ -2024,7 +2039,7 @@ class DACPHandler:
             # Best-effort: local broadcast must still succeed.
             pass
 
-        targets = core_services.context_router.broadcast_context(
+        targets = self._core.context_router.broadcast_context(
             context_payload, source_instance_uuid, channel_id=channel_id
         )
 
@@ -2049,22 +2064,22 @@ class DACPHandler:
         *,
         session_id: str,
         wcp_sessions: WcpSessions,
-        websocket: WebSocket,
+        sender: MessageSender,
     ):
         """Handle add context listener request"""
         source_instance_uuid = self._get_instance_uuid(session_id, wcp_sessions)
 
-        current_channel = core_services.channel_manager.get_current_channel(
+        current_channel = self._core.channel_manager.get_current_channel(
             source_instance_uuid
         )
         requested_channel_id = request.payload.channelId
         target_channel_id: str | None = None
 
         if requested_channel_id:
-            channel = core_services.channel_manager.get_channel(requested_channel_id)
+            channel = self._core.channel_manager.get_channel(requested_channel_id)
             if channel is None:
                 await self._send_error(
-                    websocket,
+                    sender,
                     "addContextListenerResponse",
                     DACPError.NO_CHANNEL_FOUND,
                     request,
@@ -2075,7 +2090,7 @@ class DACPHandler:
                 or getattr(current_channel, "id", None) != requested_channel_id
             ):
                 await self._send_error(
-                    websocket,
+                    sender,
                     "addContextListenerResponse",
                     DACPError.CHANNEL_ACCESS_DENIED,
                     request,
@@ -2085,7 +2100,7 @@ class DACPHandler:
         elif current_channel is not None:
             target_channel_id = current_channel.id
 
-        listener = core_services.listener_store.add_context_listener(
+        listener = self._core.listener_store.add_context_listener(
             ListenerUuid(),
             source_instance_uuid,
             request.payload.contextType,
@@ -2107,7 +2122,7 @@ class DACPHandler:
             )
 
         if target_channel_id is not None:
-            initial_context = core_services.channel_manager.get_channel_context(
+            initial_context = self._core.channel_manager.get_channel_context(
                 target_channel_id, request.payload.contextType
             )
             normalized = self._normalize_context(initial_context)
@@ -2128,7 +2143,7 @@ class DACPHandler:
             ),
             meta=self._meta_from_request(request),
         )
-        await self._send_model(websocket, response)
+        await self._send_model(sender, response)
 
     async def _handle_add_intent_listener(
         self,
@@ -2136,12 +2151,12 @@ class DACPHandler:
         *,
         session_id: str,
         wcp_sessions: WcpSessions,
-        websocket: WebSocket,
+        sender: MessageSender,
     ):
         """Handle add intent listener request"""
         source_instance_uuid = self._get_instance_uuid(session_id, wcp_sessions)
 
-        listener = core_services.listener_store.add_intent_listener(
+        listener = self._core.listener_store.add_intent_listener(
             ListenerUuid(), source_instance_uuid, request.payload.intent
         )
 
@@ -2152,25 +2167,25 @@ class DACPHandler:
             ),
             meta=self._meta_from_request(request),
         )
-        await self._send_model(websocket, response)
+        await self._send_model(sender, response)
 
     async def _handle_intent_listener_unsubscribe(
-        self, request: IntentListenerUnsubscribeRequest, *, websocket: WebSocket
+        self, request: IntentListenerUnsubscribeRequest, *, sender: MessageSender
     ):
         """Handle intent listener unsubscribe"""
-        core_services.listener_store.remove_listener(request.payload.listenerUuid.root)
+        self._core.listener_store.remove_listener(request.payload.listenerUuid.root)
 
         response = IntentListenerUnsubscribeResponse(
             type="intentListenerUnsubscribeResponse",
             payload=IntentListenerUnsubscribeResponsePayload(),
             meta=self._meta_from_request(request),
         )
-        await self._send_model(websocket, response)
+        await self._send_model(sender, response)
 
     async def _handle_raise_intent(
         self,
         request: RaiseIntentRequest,
-        websocket: WebSocket,
+        sender: MessageSender,
         *,
         session_id: str | None = None,
         wcp_sessions: WcpSessions | None = None,
@@ -2207,10 +2222,10 @@ class DACPHandler:
         try:
             target_da = getattr(target, "desktopAgent", None) if target else None
             bridge = getattr(self, "bridge_client", None)
-            if target_da:
+            if target_da and session_id:
                 if bridge is None or not getattr(bridge, "is_connected", False):
                     await self._send_error(
-                        websocket,
+                        sender,
                         "raiseIntentResponse",
                         BridgingError.NotConnectedToBridge.value,
                         request,
@@ -2220,7 +2235,7 @@ class DACPHandler:
                     bridge, "has_connected_agent"
                 ) and not bridge.has_connected_agent(target_da):
                     await self._send_error(
-                        websocket,
+                        sender,
                         "raiseIntentResponse",
                         ResolveError.DesktopAgentNotFound.value,
                         request,
@@ -2255,7 +2270,7 @@ class DACPHandler:
                     )
                 except asyncio.TimeoutError:
                     await self._send_error(
-                        websocket,
+                        sender,
                         "raiseIntentResponse",
                         BridgingError.ResponseToBridgeTimedOut.value,
                         request,
@@ -2264,7 +2279,7 @@ class DACPHandler:
                 except RuntimeError as exc:
                     if str(exc) == BridgingError.NotConnectedToBridge.value:
                         await self._send_error(
-                            websocket,
+                            sender,
                             "raiseIntentResponse",
                             BridgingError.NotConnectedToBridge.value,
                             request,
@@ -2272,7 +2287,7 @@ class DACPHandler:
                         return
                     if str(exc) == BridgingError.AgentDisconnected.value:
                         await self._send_error(
-                            websocket,
+                            sender,
                             "raiseIntentResponse",
                             BridgingError.AgentDisconnected.value,
                             request,
@@ -2301,7 +2316,7 @@ class DACPHandler:
                         ),
                         meta=self._meta_from_request(request, bridge_meta),
                     )
-                await self._send_model(websocket, response)
+                await self._send_model(sender, response)
                 return
         except Exception:
             # Fall back to local resolution.
@@ -2313,33 +2328,31 @@ class DACPHandler:
                 request.payload.intent,
                 self._context_as_dict(normalized_context),
                 target,
-                websocket,
+                sender,
                 request.meta.requestUuid,
             )
             if response:
-                await self._send_model(websocket, response)
+                await self._send_model(sender, response)
                 return
 
         # Check if a plugin handles this intent
         plugin_result = await self._try_plugin_handler(request)
         if plugin_result is not None:
-            await self._send_model(websocket, plugin_result)
+            await self._send_model(sender, plugin_result)
             return
 
         # Check if an external handler can handle this intent
-        external_result = await self._try_external_handler(request, websocket)
+        external_result = await self._try_external_handler(request, sender)
         if external_result is not None:
             # external_result is either an AgentResponse or RaiseIntentResponse
-            await self._send_model(websocket, external_result)
+            await self._send_model(sender, external_result)
             return
 
         # Not a system intent or plugin, try normal resolution
-        resolution: IntentResolution | None = (
-            core_services.intent_resolver.resolve_intent(
-                request.payload.intent,
-                self._context_as_dict(normalized_context),
-                target,
-            )
+        resolution: IntentResolution | None = self._core.intent_resolver.resolve_intent(
+            request.payload.intent,
+            self._context_as_dict(normalized_context),
+            target,
         )
 
         if resolution:
@@ -2350,15 +2363,15 @@ class DACPHandler:
                 ),
                 meta=self._meta_from_request(request),
             )
-            await self._send_model(websocket, response)
+            await self._send_model(sender, response)
 
             # Send intent event to listeners, preferring the calculated resolution
             # to avoid races between resolution and listener changes.
             if hasattr(
-                core_services.intent_resolver, "deliver_intent_event_with_resolution"
+                self._core.intent_resolver, "deliver_intent_event_with_resolution"
             ):
                 targets = (
-                    core_services.intent_resolver.deliver_intent_event_with_resolution(
+                    self._core.intent_resolver.deliver_intent_event_with_resolution(
                         request.payload.intent,
                         self._context_as_dict(normalized_context),
                         resolution,
@@ -2366,7 +2379,7 @@ class DACPHandler:
                     )
                 )
             else:
-                targets = core_services.intent_resolver.deliver_intent_event(
+                targets = self._core.intent_resolver.deliver_intent_event(
                     request.payload.intent,
                     self._context_as_dict(normalized_context),
                     request.meta.source,
@@ -2387,11 +2400,11 @@ class DACPHandler:
                 )
         else:
             await self._send_error(
-                websocket, "raiseIntentResponse", DACPError.NO_APPS_FOUND, request
+                sender, "raiseIntentResponse", DACPError.NO_APPS_FOUND, request
             )
 
     async def _handle_raise_intent_for_context(
-        self, request: RaiseIntentForContextRequest, *, websocket: WebSocket
+        self, request: RaiseIntentForContextRequest, *, sender: MessageSender
     ):
         """Handle raise intent for context request"""
         try:
@@ -2413,7 +2426,7 @@ class DACPHandler:
                 target_instance_id = target.instanceId
                 if not target_app_id:
                     await self._send_error(
-                        websocket,
+                        sender,
                         "raiseIntentForContextResponse",
                         DACPError.TARGET_APP_UNAVAILABLE,
                         request,
@@ -2421,7 +2434,7 @@ class DACPHandler:
                     return
 
                 if target_instance_id:
-                    instances = core_services.app_registry.get_instances_for_app(
+                    instances = self._core.app_registry.get_instances_for_app(
                         target_app_id
                     )
                     if not any(
@@ -2429,7 +2442,7 @@ class DACPHandler:
                         for inst in instances
                     ):
                         await self._send_error(
-                            websocket,
+                            sender,
                             "raiseIntentForContextResponse",
                             DACPError.TARGET_INSTANCE_UNAVAILABLE,
                             request,
@@ -2450,7 +2463,7 @@ class DACPHandler:
                         known = None
 
                     await self._send_error(
-                        websocket,
+                        sender,
                         "raiseIntentForContextResponse",
                         DACPError.TARGET_APP_UNAVAILABLE
                         if known is None
@@ -2462,7 +2475,7 @@ class DACPHandler:
             if not app_intents:
                 if has_constraints:
                     await self._send_error(
-                        websocket,
+                        sender,
                         "raiseIntentForContextResponse",
                         DACPError.NO_APPS_FOUND,
                         request,
@@ -2472,7 +2485,7 @@ class DACPHandler:
                 # Fall back to runtime listeners to infer intent ambiguity
                 try:
                     listeners = getattr(
-                        core_services.listener_store, "intent_listeners", {}
+                        self._core.listener_store, "intent_listeners", {}
                     )
                 except Exception:
                     listeners = {}
@@ -2485,7 +2498,7 @@ class DACPHandler:
 
                 if not intents:
                     await self._send_error(
-                        websocket,
+                        sender,
                         "raiseIntentForContextResponse",
                         DACPError.NO_APPS_FOUND,
                         request,
@@ -2494,7 +2507,7 @@ class DACPHandler:
 
                 if len(intents) != 1:
                     await self._send_error(
-                        websocket,
+                        sender,
                         "raiseIntentForContextResponse",
                         DACPError.RESOLVER_UNAVAILABLE,
                         request,
@@ -2505,7 +2518,7 @@ class DACPHandler:
             else:
                 if len(app_intents) != 1:
                     await self._send_error(
-                        websocket,
+                        sender,
                         "raiseIntentForContextResponse",
                         DACPError.RESOLVER_UNAVAILABLE,
                         request,
@@ -2514,7 +2527,7 @@ class DACPHandler:
 
                 intent = app_intents[0].intent.name
             resolution: IntentResolution | None = (
-                core_services.intent_resolver.resolve_intent(
+                self._core.intent_resolver.resolve_intent(
                     intent,
                     self._context_as_dict(normalized_context),
                     request.payload.target,
@@ -2523,7 +2536,7 @@ class DACPHandler:
 
             if not resolution:
                 await self._send_error(
-                    websocket,
+                    sender,
                     "raiseIntentForContextResponse",
                     DACPError.NO_APPS_FOUND,
                     request,
@@ -2540,15 +2553,15 @@ class DACPHandler:
                 ),
                 meta=self._meta_from_request(request),
             )
-            await self._send_model(websocket, response)
+            await self._send_model(sender, response)
 
             # Send intent event to listeners (mirrors raiseIntent behavior), preferring
             # the calculated resolution to avoid races.
             if hasattr(
-                core_services.intent_resolver, "deliver_intent_event_with_resolution"
+                self._core.intent_resolver, "deliver_intent_event_with_resolution"
             ):
                 targets = (
-                    core_services.intent_resolver.deliver_intent_event_with_resolution(
+                    self._core.intent_resolver.deliver_intent_event_with_resolution(
                         intent,
                         self._context_as_dict(normalized_context),
                         resolution,
@@ -2556,7 +2569,7 @@ class DACPHandler:
                     )
                 )
             else:
-                targets = core_services.intent_resolver.deliver_intent_event(
+                targets = self._core.intent_resolver.deliver_intent_event(
                     intent,
                     self._context_as_dict(normalized_context),
                     request.meta.source,
@@ -2577,14 +2590,14 @@ class DACPHandler:
         except Exception:
             logger.exception("Error handling raiseIntentForContext")
             await self._send_error(
-                websocket,
+                sender,
                 "raiseIntentForContextResponse",
                 DACPError.RESOLVER_UNAVAILABLE,
                 request,
             )
 
     async def _handle_intent_result_request(
-        self, request: IntentResultRequest, *, websocket: WebSocket
+        self, request: IntentResultRequest, *, sender: MessageSender
     ):
         """Handle intent result request"""
         logger.debug(f"Received intent result: {request.payload.intentResult}")
@@ -2594,25 +2607,25 @@ class DACPHandler:
             payload=IntentResultResponsePayload(),
             meta=self._meta_from_request(request),
         )
-        await self._send_model(websocket, response)
+        await self._send_model(sender, response)
 
     async def _handle_raise_intent_result_response(
-        self, request: RaiseIntentResultResponse, *, websocket: WebSocket
+        self, request: RaiseIntentResultResponse, *, sender: MessageSender
     ):
         """Handle raise intent result response"""
         logger.debug(f"Intent result acknowledged: {request.meta.requestUuid}")
 
     async def _handle_context_listener_unsubscribe(
-        self, request: ContextListenerUnsubscribeRequest, *, websocket: WebSocket
+        self, request: ContextListenerUnsubscribeRequest, *, sender: MessageSender
     ):
         """Handle context listener unsubscribe"""
-        listener = core_services.listener_store.remove_listener(
+        listener = self._core.listener_store.remove_listener(
             request.payload.listenerUuid.root
         )
 
         if listener:
             instance_uuid = listener.instance_uuid
-            channel = core_services.channel_manager.get_current_channel(instance_uuid)
+            channel = self._core.channel_manager.get_current_channel(instance_uuid)
             if channel and getattr(channel, "type", None) == "private":
                 details: dict[str, Any] = {
                     "listenerUuid": request.payload.listenerUuid.root
@@ -2632,10 +2645,10 @@ class DACPHandler:
             payload=ContextListenerUnsubscribeResponsePayload(),
             meta=self._meta_from_request(request),
         )
-        await self._send_model(websocket, response)
+        await self._send_model(sender, response)
 
     async def _handle_heartbeat_acknowledgment(
-        self, request: HeartbeatAcknowledgmentRequest, *, websocket: WebSocket
+        self, request: HeartbeatAcknowledgmentRequest, *, sender: MessageSender
     ):
         """Handle heartbeat acknowledgment"""
         logger.debug(
@@ -2653,7 +2666,7 @@ class DACPHandler:
         Returns:
             Response model if a plugin handled the intent, None otherwise.
         """
-        plugins = core_services.plugin_registry.get_plugins_for_intent(
+        plugins = self._core.plugin_registry.get_plugins_for_intent(
             request.payload.intent
         )
 
@@ -2708,7 +2721,7 @@ class DACPHandler:
         *,
         session_id: str,
         wcp_sessions: WcpSessions,
-        websocket: WebSocket,
+        sender: MessageSender,
     ) -> None:
         """Handle external handler registration - message already validated by parser."""
         logger.debug(
@@ -2720,7 +2733,7 @@ class DACPHandler:
 
         try:
             instance_uuid = self._get_instance_uuid(session_id, wcp_sessions)
-            handler_uuid = await core_services.register_external_handler(
+            handler_uuid = await self._core.register_external_handler(
                 instance_uuid,
                 request.payload.handler_id,
                 request.payload.intents,
@@ -2740,11 +2753,11 @@ class DACPHandler:
                 handler_uuid,
                 request.meta.requestUuid.root,
             )
-            await websocket.send_text(response.model_dump_json())
+            await sender.send_model(response)
         except Exception:
             logger.exception("Failed to register external handler")
             await self._send_error(
-                websocket,
+                sender,
                 "registerExternalHandlerResponse",
                 DACPError.INTERNAL_ERROR,
                 request,
@@ -2756,34 +2769,32 @@ class DACPHandler:
         *,
         session_id: str,
         wcp_sessions: WcpSessions,
-        websocket: WebSocket,
+        sender: MessageSender,
     ):
         """Handle external handler unregistration - message already validated by parser."""
         try:
-            await core_services.unregister_external_handler(
-                request.payload.handler_uuid
-            )
+            await self._core.unregister_external_handler(request.payload.handler_uuid)
 
             # Send success response using Pydantic model
             response = UnregisterExternalHandlerResponse(
                 meta=self._meta_from_request(request),
             )
-            await websocket.send_text(response.model_dump_json())
+            await sender.send_model(response)
         except Exception:
             logger.exception("Failed to unregister external handler")
             await self._send_error(
-                websocket,
+                sender,
                 "unregisterExternalHandlerResponse",
                 DACPError.INTERNAL_ERROR,
                 request,
             )
 
     async def _handle_external_intent_result(
-        self, request: ExternalIntentResultRequest, *, websocket: WebSocket
+        self, request: ExternalIntentResultRequest, *, sender: MessageSender
     ) -> None:
         """Handle intent result from external handler - message already validated by parser."""
         try:
-            core_services.resolve_pending_intent(
+            self._core.resolve_pending_intent(
                 request.payload.request_uuid,
                 result=request.payload.result,
                 error=request.payload.error,
@@ -2792,19 +2803,19 @@ class DACPHandler:
             logger.exception("Failed to handle external intent result")
 
     async def _try_external_handler(
-        self, request: RaiseIntentRequest, websocket: WebSocket
+        self, request: RaiseIntentRequest, sender: MessageSender
     ) -> RaiseIntentResponse | AgentResponse | None:
         """Try to handle intent via registered external handlers.
 
         Args:
             request: The validated RaiseIntentRequest from the client.
-            websocket: The WebSocket connection to respond on.
+            sender: The message sender to respond on.
 
         Returns:
             Response model if an external handler processed the intent, None otherwise.
         """
         # Find registered external handlers for this intent
-        handlers = core_services.external_registry.get_handlers_for_intent(
+        handlers = self._core.external_registry.get_handlers_for_intent(
             request.payload.intent
         )
         if not handlers:
@@ -2828,7 +2839,7 @@ class DACPHandler:
         )
 
         # Create pending future for response correlation
-        fut = core_services.create_pending_intent(request_uuid)
+        fut = self._core.create_pending_intent(request_uuid)
 
         try:
             # Send forwarded intent message using Pydantic serialization
@@ -2839,7 +2850,7 @@ class DACPHandler:
             logger.exception(
                 f"Failed to forward intent to external handler {handler.handler_id}: {e}"
             )
-            core_services.resolve_pending_intent(request_uuid, error=str(e))
+            self._core.resolve_pending_intent(request_uuid, error=str(e))
             return None
 
         try:

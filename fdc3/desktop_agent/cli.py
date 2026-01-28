@@ -46,13 +46,142 @@ def _build_command(argv: List[str]) -> Optional[List[str]]:
     return None
 
 
+async def _register_app(json_path: str) -> int:
+    import json
+    from fdc3.desktop_agent.storage import SqliteStorage, AppMetadata, LaunchConfig
+    from fdc3.desktop_agent.config import DesktopAgentConfig
+
+    try:
+        with open(json_path, "r") as f:
+            data = json.load(f)
+    except Exception as e:
+        print(f"Error reading JSON file {json_path}: {e}")
+        return 1
+
+    config = DesktopAgentConfig()
+    storage = SqliteStorage(config.db_path)
+    await storage.initialize()
+
+    try:
+        app_id = data.get("appId") or data.get("app_id")
+        if not app_id:
+            print("Error: 'appId' is required in the JSON file.")
+            return 1
+
+        metadata = AppMetadata(
+            app_id=app_id,
+            name=data.get("name") or data.get("title") or app_id,
+            version=data.get("version", ""),
+            description=data.get("description", ""),
+            icons=data.get("icons", []),
+            intents=[
+                i if isinstance(i, str) else i.get("name")
+                for i in data.get("intents", [])
+                if isinstance(i, str) or (isinstance(i, dict) and i.get("name"))
+            ],
+            allowed_origins=data.get("allowedOrigins")
+            or data.get("allowed_origins", []),
+        )
+        await storage.apps.add_app(metadata)
+
+        launch_data = data.get("launch")
+        if launch_data:
+            launch_config = LaunchConfig(
+                app_id=app_id,
+                command=launch_data.get("command", ""),
+                args=launch_data.get("args", []),
+                env=launch_data.get("env", {}),
+                cwd=launch_data.get("cwd", ""),
+                timeout=launch_data.get("timeout", 30),
+            )
+            await storage.launch_configs.set_launch_config(launch_config)
+
+        print(f"Successfully registered app '{app_id}' in {config.db_path}")
+        return 0
+    except Exception as e:
+        print(f"Error registering app: {e}")
+        return 1
+    finally:
+        await storage.close()
+
+
+async def _list_apps() -> int:
+    from fdc3.desktop_agent.storage import SqliteStorage
+    from fdc3.desktop_agent.config import DesktopAgentConfig
+
+    config = DesktopAgentConfig()
+    storage = SqliteStorage(config.db_path)
+    await storage.initialize()
+
+    try:
+        apps = await storage.apps.list_apps()
+        if not apps:
+            print(f"No apps registered in {config.db_path}")
+            return 0
+
+        print(f"Apps registered in {config.db_path}:")
+        for app in apps:
+            print(f" - {app.app_id} ({app.name})")
+        return 0
+    finally:
+        await storage.close()
+
+
+async def _remove_app(app_id: str) -> int:
+    from fdc3.desktop_agent.storage import SqliteStorage
+    from fdc3.desktop_agent.config import DesktopAgentConfig
+
+    config = DesktopAgentConfig()
+    storage = SqliteStorage(config.db_path)
+    await storage.initialize()
+
+    try:
+        await storage.apps.remove_app(app_id)
+        await storage.launch_configs.remove_launch_config(app_id)
+        print(f"Removed app '{app_id}' and its launch config from {config.db_path}")
+        return 0
+    finally:
+        await storage.close()
+
+
 def main(argv: List[str] | None = None) -> int:
-    """Launch the desktop agent.
+    """Launch the desktop agent or manage the app directory.
 
     If no arguments are provided, starts uvicorn in dev mode with reload.
     """
     if argv is None:
         argv = sys.argv[1:]
+
+    # Handle management subcommands
+    if argv and argv[0] in ("register-app", "list-apps", "remove-app"):
+        import argparse
+        import asyncio
+
+        parser = argparse.ArgumentParser(
+            prog="fdc3-agent", description="FDC3 App Directory Management"
+        )
+        subparsers = parser.add_subparsers(dest="command")
+
+        reg_parser = subparsers.add_parser(
+            "register-app", help="Register an app from JSON definition"
+        )
+        reg_parser.add_argument(
+            "json_file", help="Path to the JSON file containing app metadata"
+        )
+
+        subparsers.add_parser("list-apps", help="List all registered apps")
+
+        rem_parser = subparsers.add_parser("remove-app", help="Remove an app by its ID")
+        rem_parser.add_argument("app_id", help="The appId to remove")
+
+        args = parser.parse_args(argv)
+
+        if args.command == "register-app":
+            return asyncio.run(_register_app(args.json_file))
+        elif args.command == "list-apps":
+            return asyncio.run(_list_apps())
+        elif args.command == "remove-app":
+            return asyncio.run(_remove_app(args.app_id))
 
     if not argv:
         argv = [
