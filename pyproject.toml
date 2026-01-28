@@ -8,6 +8,7 @@ requires = [
   "mkdocs>=1.5",
   "mkdocstrings[python]>=0.23",
   "pymdown-extensions>=10.0",
+  "mkdocs-material>=9.7",
 ]
 build-backend = "hatchling.build"
 
@@ -64,6 +65,7 @@ dev = [
   "mkdocs>=1.5",
   "mkdocstrings[python]>=0.23",
   "pymdown-extensions>=10.0",
+  "mkdocs-material>=9.7",
   "textual>=0.26",
 ]
 
