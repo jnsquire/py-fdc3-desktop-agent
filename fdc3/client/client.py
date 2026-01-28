@@ -1,6 +1,6 @@
 """Async client for connecting external intent handlers to the desktop agent.
 
-The primary entry point is :class:`~fdc3.client.client.FDC3Client`, which
+The primary entry point is `FDC3Client`, which
 implements the WebSocket Connection Protocol (WCP) handshake and provides
 helpers for registering an external handler, subscribing to context/intent
 notifications, and sending results.
@@ -40,7 +40,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 from .events import EventEmitter
 
-from pydantic import ValidationError
+from pydantic import ValidationError, BaseModel
 from fdc3.client.models import (
     parse_message,
     Message,
@@ -95,7 +95,7 @@ class FDC3Client:
     - establish a WebSocket connection to an agent;
     - complete the WCP handshake;
     - register/unregister an external handler and supported intents;
-    - receive forwarded intents and broadcasts via :class:`~fdc3.client.events.EventEmitter`.
+    - receive forwarded intents and broadcasts via `EventEmitter`.
 
     Notes:
         - This is an asyncio-based client.
@@ -164,8 +164,21 @@ class FDC3Client:
             return raw
         return f"user:{raw}"
 
-    async def send_dacp_request(self, request, timeout: float = 5.0) -> Any:
-        """Send a DACP request model and wait for the correlated response."""
+    async def send_dacp_request(self, request: BaseModel, timeout: float = 5.0) -> Any:
+        """Send a DACP request model and wait for the correlated response.
+
+        Args:
+            request: A Pydantic DACP request model (e.g., generated from the
+                `fdc3.models.dacp` module) that includes a `meta.requestUuid`.
+            timeout: Seconds to wait for the correlated response.
+
+        Returns:
+            The parsed response payload (model or raw dict) returned by the agent.
+
+        Raises:
+            asyncio.TimeoutError: If a response is not received within `timeout`.
+            RuntimeError: If the client is not connected or handshake not complete.
+        """
         await self._ensure_handshake()
         ws = self._ensure_connected()
 
@@ -258,6 +271,15 @@ class FDC3Client:
         If the message doesn't include a `requestUuid` in `meta`, one will be generated
         and injected into the message meta.
         """
+        # Args/doc are intentionally present for internal clarity — this helper
+        # is used across public request helpers.
+        #
+        # Args:
+        #     msg: A validated `Message` RootModel instance.
+        #     timeout: Seconds to wait for the correlated response.
+        #
+        # Returns:
+        #     The correlated response payload or model.
         ws = self._ensure_connected()
 
         # Ensure message has a requestUuid in meta
@@ -290,9 +312,8 @@ class FDC3Client:
     async def connect(self) -> None:
         """Connect to the agent and complete the WCP handshake.
 
-        After this returns successfully, :meth:`wait_for_handshake` should be
-        satisfied and request/response helper methods (e.g.
-        :meth:`register_handler`) can be used.
+        After this returns successfully, ``wait_for_handshake`` should be
+        satisfied and request/response helper methods (e.g. ``register_handler``) can be used.
 
         Raises:
             Exception: If the websocket connection or handshake fails.
@@ -577,7 +598,7 @@ class FDC3Client:
             timeout: Seconds to wait for the correlated response.
 
         Returns:
-            Listener UUID that can be passed to :meth:`remove_context_listener`.
+            Listener UUID that can be passed to ``remove_context_listener``.
         """
         msg = AddContextListener(payload={"contextType": context_type})
         return await self._send_and_wait(msg, timeout=timeout)
@@ -597,14 +618,27 @@ class FDC3Client:
             )
 
     async def add_intent_listener(self, intent: str, timeout: float = 5.0) -> str:
-        """Register an intent listener and return its listener UUID."""
+        """Register an intent listener and return its listener UUID.
+
+        Args:
+            intent: The intent name to listen for (e.g., "ViewChart").
+            timeout: Seconds to wait for the agent's response.
+
+        Returns:
+            Listener UUID that can be passed to ``remove_intent_listener``.
+        """
         msg = AddIntentListener(payload={"intent": intent})
         return await self._send_and_wait(msg, timeout=timeout)
 
     async def remove_intent_listener(
         self, listener_uuid: str, timeout: float = 5.0
     ) -> None:
-        """Unsubscribe a previously-registered intent listener."""
+        """Unsubscribe a previously-registered intent listener.
+
+        Args:
+            listener_uuid: The UUID returned from ``add_intent_listener``.
+            timeout: Seconds to wait for the agent's response.
+        """
         msg = IntentListenerUnsubscribe(
             payload={"listenerUuid": {"root": listener_uuid}}
         )
@@ -621,7 +655,12 @@ class FDC3Client:
     # - `intent_event_handlers`
 
     async def unregister_handler(self, handler_uuid: str, timeout: float = 5.0) -> None:
-        """Unregister a handler by its UUID."""
+        """Unregister a handler by its UUID.
+
+        Args:
+            handler_uuid: The UUID returned from ``register_handler``.
+            timeout: Seconds to wait for the agent's response.
+        """
         msg = UnregisterExternalHandler(payload={"handler_uuid": handler_uuid})
         try:
             await self._send_and_wait(msg, timeout=timeout)
@@ -701,7 +740,17 @@ class FDC3Client:
         *,
         display_metadata: Optional[DisplayMetadata] = None,
     ) -> None:
-        """Create a user channel via the agent GraphQL API."""
+        """Create a user channel via the agent GraphQL API.
+
+        Args:
+            channel_id: The desired channel identifier (e.g., "demo" or
+                "user:demo").
+            display_metadata: Optional `DisplayMetadata` providing a human name
+                and color for the channel.
+
+        Raises:
+            httpx.HTTPError: If the GraphQL request fails.
+        """
         channel_id = self._format_channel_id(channel_id)
         parsed = urllib.parse.urlparse(self.agent_url)
         scheme = "https" if parsed.scheme == "wss" else "http"
@@ -735,7 +784,18 @@ class FDC3Client:
         *,
         auto_create: bool = False,
     ) -> Dict[str, Any]:
-        """Join a user channel, optionally auto-creating it if missing."""
+        """Join a user channel, optionally auto-creating it if missing.
+
+        Args:
+            channel_id: The channel identifier (e.g., "demo" or "user:demo").
+            auto_create: If True and the channel doesn't exist, create it first.
+
+        Returns:
+            The agent's response payload for the join request.
+
+        Raises:
+            Exception: If the channel doesn't exist and auto_create is False.
+        """
         channel_id = self._format_channel_id(channel_id)
         request = JoinUserChannelRequest(
             type="joinUserChannel",
@@ -753,7 +813,13 @@ class FDC3Client:
             raise
 
     async def leave_current_channel(self) -> None:
-        """Leave the currently joined channel."""
+        """Leave the currently joined channel.
+
+        This sends a DACP `leaveCurrentChannel` request to the agent.
+
+        Raises:
+            Exception: If the agent returns an error or the request fails.
+        """
         # LeaveCurrentChannelRequest requires the literal `type` field
         request = LeaveCurrentChannelRequest(type="leaveCurrentChannel")
         await self.send_dacp_request(request)
@@ -761,7 +827,14 @@ class FDC3Client:
     async def create_private_channel(
         self, display_name: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Create a private channel and return the response payload."""
+        """Create a private channel and return the response payload.
+
+        Args:
+            display_name: Optional human-readable name for the channel.
+
+        Returns:
+            The agent's response payload containing the new channel's metadata.
+        """
         display_metadata = DisplayMetadata(name=display_name) if display_name else None
         request = CreatePrivateChannelRequest(
             type="createPrivateChannel",
@@ -774,7 +847,15 @@ class FDC3Client:
     async def create_private_channel_invite(
         self, channel_id: str, instance_id: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Create a private channel invitation."""
+        """Create a private channel invitation.
+
+        Args:
+            channel_id: The private channel to create an invitation for.
+            instance_id: Optional target instance to restrict the invitation to.
+
+        Returns:
+            The agent's response containing the invitation token.
+        """
         request = CreatePrivateChannelInvitationRequest(
             type="createPrivateChannelInvitation",
             payload=CreatePrivateChannelInvitationRequestPayload(
@@ -784,7 +865,15 @@ class FDC3Client:
         return await self.send_dacp_request(request)
 
     async def join_private_channel(self, channel_id: str, token: str) -> Dict[str, Any]:
-        """Join a private channel using an invitation token."""
+        """Join a private channel using an invitation token.
+
+        Args:
+            channel_id: The private channel to join.
+            token: The invitation token received from the channel creator.
+
+        Returns:
+            The agent's response payload confirming the join.
+        """
         request = JoinPrivateChannelRequest(
             type="joinPrivateChannel",
             payload=JoinPrivateChannelRequestPayload(
@@ -794,7 +883,11 @@ class FDC3Client:
         return await self.send_dacp_request(request)
 
     async def leave_private_channel(self, channel_id: str) -> None:
-        """Leave a private channel."""
+        """Leave a private channel.
+
+        Args:
+            channel_id: The private channel to leave.
+        """
         request = LeavePrivateChannelRequest(
             type="leavePrivateChannel",
             payload=LeavePrivateChannelRequestPayload(channelId=channel_id),
@@ -807,7 +900,15 @@ class FDC3Client:
         *,
         event_type: Optional[PrivateChannelEventListenerTypes] = None,
     ) -> Dict[str, Any]:
-        """Subscribe to private channel events for a channel."""
+        """Subscribe to private channel events for a channel.
+
+        Args:
+            channel_id: The private channel to subscribe to.
+            event_type: Optionally filter to a specific event type.
+
+        Returns:
+            The agent's response payload containing listener details.
+        """
         request = PrivateChannelAddEventListenerRequest(
             type="privateChannelAddEventListener",
             payload=PrivateChannelAddEventListenerRequestPayload(
@@ -818,7 +919,14 @@ class FDC3Client:
 
     # ─── Chat helpers ──────────────────────────────────────────────────────
     async def build_message(self, text: str) -> MessageContext:
-        """Build a minimal `fdc3.message` payload for a chat message."""
+        """Build a minimal `fdc3.message` payload for a chat message.
+
+        Args:
+            text: The plain text content of the message.
+
+        Returns:
+            A `MessageContext` object ready for use in chat operations.
+        """
         return MessageContext(type="fdc3.message", text={"text/plain": text})
 
     async def get_chat_room(
@@ -830,8 +938,15 @@ class FDC3Client:
     ) -> ChatRoomContext:
         """Return a `fdc3.chat.room` object for a given channel id.
 
-        If `auto_create` is True, attempt to ensure a corresponding user
-        channel exists on the agent (best-effort using `create_user_channel`).
+        Args:
+            channel_id: The channel identifier to build a chat room for.
+            provider_name: Optional provider name to include in the room.
+            auto_create: If True, attempt to create a user channel on the agent
+                (best-effort) before returning the room object.
+
+        Returns:
+            A `ChatRoomContext` representing the chat room for the given
+            `channel_id`.
         """
         if auto_create:
             try:
@@ -859,7 +974,7 @@ class FDC3Client:
         appropriate context object.
 
         This constructs the `chatRoom` and `message` objects and calls
-        :meth:`broadcast` with the resulting context.
+        ``broadcast`` with the resulting context.
         """
         room = await self.get_chat_room(
             channel_id, provider_name=provider_name, auto_create=auto_create_room
@@ -897,6 +1012,12 @@ class FDC3Client:
 
         This will cause the agent to deliver the context to the channel the
         sending instance is currently joined to.
+
+        Args:
+            context: An FDC3 context object (dict or Pydantic model) to broadcast.
+
+        Example:
+            >>> await client.broadcast({"type": "fdc3.instrument", "id": {"ticker": "AAPL"}})
         """
         await self._ensure_handshake()
         ws = self._ensure_connected()

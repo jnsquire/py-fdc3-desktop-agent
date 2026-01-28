@@ -6,18 +6,56 @@ site_url: https://jnsquire.github.io/py-fdc3-desktop-agent/
 docs_dir: documentation
 
 theme:
-  name: readthedocs
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - toc.follow
 
 markdown_extensions:
   - pymdownx.superfences:
       custom_fences:
         - name: mermaid
           class: mermaid
-          format: !!python/name:pymdownx.superfences.fence_div_format
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - admonition
+  - pymdownx.details
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
 
 extra_javascript:
-  - assets/mermaid.min.js
-  - assets/mermaid-init.js
+  - https://unpkg.com/mermaid@10/dist/mermaid.min.js
 
 extra_css:
   - assets/mermaid-zoom.css
@@ -52,7 +90,7 @@ plugins:
             heading_level: 3
             show_root_heading: true
             members_order: source
-            show_signature_annotations: false
+            show_signature_annotations: true
             signature_crossrefs: true
             separate_signature: true
             show_symbol_type_heading: true

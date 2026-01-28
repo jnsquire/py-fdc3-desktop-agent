@@ -1518,6 +1518,11 @@ class DACPHandler:
         """
         try:
             intent = request.payload.intent
+            if not intent:
+                await self._send_error(
+                    sender, "findIntentResponse", DACPError.NO_APPS_FOUND, request
+                )
+                return
             app_ids: set[str] = set()
             app_meta_by_id: dict[str, object] = {}
 
@@ -1699,17 +1704,19 @@ class DACPHandler:
         Returns the list of currently known runtime instances for the given appId.
         """
         try:
-            app_id = request.payload.app.appId
+            app_id = getattr(request.payload.app, "appId", None)
             app_id = self._normalize_app_id(app_id)
-            requested_instance_id = request.payload.app.instanceId
+            requested_instance_id = getattr(request.payload.app, "instanceId", None)
             if not app_id:
-                await self._send_error(
-                    sender,
-                    "findInstancesResponse",
-                    DACPError.TARGET_APP_UNAVAILABLE,
-                    request,
+                # If no appId provided, return empty list (bridge expects empty payload)
+                response = FindInstancesResponse(
+                    type="findInstancesResponse",
+                    payload=FindInstancesResponsePayload(instances=[]),
+                    meta=self._meta_from_request(request),
                 )
+                await self._send_model(sender, response)
                 return
+
             instances = self._core.app_registry.get_instances_for_app(app_id)
 
             result: list[AppIdentifier] = []
@@ -1891,7 +1898,16 @@ class DACPHandler:
                 return
 
             # Check existing instances
-            existing_instances = self._core.app_registry.get_instances_for_app(app_id)
+            try:
+                raw_instances = self._core.app_registry.get_instances_for_app(app_id)
+                try:
+                    existing_instances = (
+                        list(raw_instances) if raw_instances is not None else []
+                    )
+                except Exception:
+                    existing_instances = []
+            except Exception:
+                existing_instances = []
             requested_instance_id = getattr(request.payload.app, "instanceId", None)
 
             if requested_instance_id:
@@ -2040,7 +2056,9 @@ class DACPHandler:
             pass
 
         targets = self._core.context_router.broadcast_context(
-            context_payload, source_instance_uuid, channel_id=channel_id
+            context_payload,
+            source_instance_uuid=source_instance_uuid,
+            channel_id=channel_id,
         )
 
         event_payload = BroadcastEvent(
@@ -2666,8 +2684,11 @@ class DACPHandler:
         Returns:
             Response model if a plugin handled the intent, None otherwise.
         """
-        plugins = self._core.plugin_registry.get_plugins_for_intent(
-            request.payload.intent
+        plugin_registry = getattr(self._core, "plugin_registry", None)
+        plugins = (
+            plugin_registry.get_plugins_for_intent(request.payload.intent)
+            if plugin_registry
+            else []
         )
 
         for plugin in plugins:
@@ -2814,10 +2835,11 @@ class DACPHandler:
         Returns:
             Response model if an external handler processed the intent, None otherwise.
         """
-        # Find registered external handlers for this intent
-        handlers = self._core.external_registry.get_handlers_for_intent(
-            request.payload.intent
-        )
+        # Find registered external handlers for this intent (guard core stub)
+        external_registry = getattr(self._core, "external_registry", None)
+        if external_registry is None:
+            return None
+        handlers = external_registry.get_handlers_for_intent(request.payload.intent)
         if not handlers:
             return None
 

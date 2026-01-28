@@ -7,7 +7,7 @@ validated, the connection transitions to DACP for the remainder of the
 connection.
 
 This is primarily an internal module; most embedding use-cases should
-use :func:`fdc3.desktop_agent.server.create_app`.
+    use `create_app`.
 """
 
 import asyncio

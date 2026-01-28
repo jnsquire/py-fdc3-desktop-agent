@@ -1,6 +1,6 @@
 """FastAPI application factory for the FDC3 Desktop Agent server.
 
-The primary entry point is :func:`create_app`, which wires together storage,
+The primary entry point is `create_app`, which wires together storage,
 launching, access-control, HTTP routes, GraphQL, and the WebSocket endpoint.
 """
 

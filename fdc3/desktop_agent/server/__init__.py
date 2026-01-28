@@ -5,8 +5,8 @@ that implements WCP/DACP messaging.
 
 Most users will interact with:
 
-- :func:`create_app` to embed the agent in another Python process.
-- :data:`app` for the default application instance.
+- `create_app` to embed the agent in another Python process.
+- `app` for the default application instance.
 
 Submodules:
     - ``app_factory``: FastAPI application factory.
