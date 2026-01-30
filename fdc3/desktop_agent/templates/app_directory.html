@@ -4,78 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FDC3 Desktop Agent - App Directory</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-            background-color: #f5f5f5;
-        }
-        .header {
-            background: #2c3e50;
-            color: white;
-            padding: 20px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-        }
-        .section {
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .app-card {
-            border: 1px solid #ddd;
-            padding: 15px;
-            margin-bottom: 10px;
-            border-radius: 4px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .app-info h3 {
-            margin: 0 0 5px 0;
-        }
-        .app-info p {
-            margin: 0;
-            color: #666;
-        }
-        .btn {
-            background: #3498db;
-            color: white;
-            padding: 8px 16px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            text-decoration: none;
-            display: inline-block;
-        }
-        .btn:hover {
-            background: #2980b9;
-        }
-        .btn-danger {
-            background: #e74c3c;
-        }
-        .btn-danger:hover {
-            background: #c0392b;
-        }
-        .status {
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 12px;
-            font-weight: bold;
-        }
-        .status-running {
-            background: #27ae60;
-            color: white;
-        }
-        .status-stopped {
-            background: #95a5a6;
-            color: white;
-        }
-    </style>
+    <link rel="stylesheet" href="styles.css">
 </head>
 <body>
     <div class="header">
@@ -84,14 +13,33 @@
         <div style="margin-top:10px;">
             <a href="/admin" style="color: #3498db; text-decoration: none;">← Back to Admin</a>
         </div>
+        </nav>
     </div>
+
+    <a class="skip-link" href="#main">Skip to content</a>
+    <main id="main">
 
     <div class="section">
         <h2>Installed Applications</h2>
+        <div class="controls">
+            <input id="app-search" placeholder="Search by name or id" aria-label="Search applications" style="max-width:360px;display:inline-block;margin-right:12px" />
+            <label for="app-page-size" class="meta" style="margin-left:6px;">Per page:</label>
+            <select id="app-page-size" style="width:80px;display:inline-block;margin-left:6px"><option>5</option><option selected>10</option><option>25</option></select>
+            <div id="app-stats" class="meta" style="display:inline-block;margin-left:12px;color:var(--muted)"></div>
+        </div>
         <div id="apps-list">
             <p>Loading applications...</p>
         </div>
+        <div class="pagination" style="display:flex;align-items:center;gap:8px;margin-top:8px">
+            <button id="app-prev" class="btn" disabled>Prev</button>
+            <span id="app-page-info" class="meta">Page 1</span>
+            <button id="app-next" class="btn">Next</button>
+        </div>
     </div>
+
+    </main>
+
+    <div id="status" class="status" role="status" aria-live="polite"></div>
 
     <div class="section">
         <h2>Quick Actions</h2>
@@ -100,64 +48,7 @@
         <a href="/system-settings" class="btn">System Settings</a>
     </div>
 
-    <script>
-        // Load applications via GraphQL
-        async function loadApps() {
-            try {
-                const response = await fetch('/graphql', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        query: `
-                            query {
-                                apps {
-                                    appId
-                                    name
-                                    version
-                                    description
-                                    intents
-                                }
-                            }
-                        `
-                    })
-                });
-
-                const data = await response.json();
-                displayApps(data.data.apps);
-            } catch (error) {
-                document.getElementById('apps-list').innerHTML =
-                    '<p>Error loading applications: ' + error.message + '</p>';
-            }
-        }
-
-        function displayApps(apps) {
-            const container = document.getElementById('apps-list');
-
-            if (!apps || apps.length === 0) {
-                container.innerHTML = '<p>No applications installed.</p>';
-                return;
-            }
-
-            container.innerHTML = apps.map(app => `
-                <div class="app-card">
-                    <div class="app-info">
-                        <h3>${app.name}</h3>
-                        <p><strong>ID:</strong> ${app.appId}</p>
-                        <p><strong>Version:</strong> ${app.version || 'N/A'}</p>
-                        <p><strong>Description:</strong> ${app.description || 'No description'}</p>
-                        <p><strong>Intents:</strong> ${app.intents ? app.intents.join(', ') : 'None'}</p>
-                    </div>
-                    <div>
-                        <span class="status status-stopped">Not Running</span>
-                    </div>
-                </div>
-            `).join('');
-        }
-
-        // Load apps on page load
-        loadApps();
-    </script>
+    <script src="js/common.js"></script>
+    <script src="js/app_directory.js"></script>
 </body>
-</html>
+</html> 

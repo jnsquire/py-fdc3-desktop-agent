@@ -84,9 +84,9 @@ Inbound (bridge -> this agent):
 - Recommended contents and structure (example):
 
   {
-    "app": { "appId": "com.example.app", "name": "Example", "version": "1.2.3", "intents": ["fdc3.openAppDirectory"] },
-    "runtime": { "python": "C:/path/to/python.exe", "platform": "Windows-10-10.0.19041", "agentUrl": "ws://localhost:8000/ws" },
-    "launcher": { "type": "subprocess", "capabilities": ["env", "cwd"] }
+  "app": { "appId": "com.example.app", "name": "Example", "version": "1.2.3", "intents": ["fdc3.openAppDirectory"] },
+  "runtime": { "python": "C:/path/to/python.exe", "platform": "Windows-10-10.0.19041", "agentUrl": "ws://localhost:8000/ws" },
+  "launcher": { "type": "subprocess", "capabilities": ["env", "cwd"] }
   }
 
 - Implementation notes:
@@ -124,9 +124,23 @@ Inbound (bridge -> this agent):
   - Emit structured logs with context (requestUuid, instanceUuid) for easier debugging.
 
 ## References
+
 - `fdc3/desktop_agent/handlers/wcp.py`
-- `fdc3/desktop_agent/handlers/dacp.py`
+- `fdc3/desktop_agent/handlers/dacp/` — DACP handler package (see below)
 - `fdc3/desktop_agent/server/__init__.py`
 - `fdc3/desktop_agent/core/channel_manager.py`
 
-*** End of notes
+## DACP Handler Module Structure
+
+The DACP handler was refactored from a single monolithic file into a package with domain-focused modules using a mixin pattern:
+
+- `fdc3/desktop_agent/handlers/dacp/__init__.py` — Public exports (`DACPHandler`, `dacp_handler`, `DACPError`)
+- `fdc3/desktop_agent/handlers/dacp/base.py` — Core `DACPHandler` class, shared utilities (`_send_error`, `_send_model`, `_emit_*`, `_wire_channel`, bridging helpers)
+- `fdc3/desktop_agent/handlers/dacp/app.py` — `AppHandlersMixin` with app lifecycle handlers (`open`, `getAppMetadata`, `findInstances`, `getInfo`)
+- `fdc3/desktop_agent/handlers/dacp/channel.py` — `ChannelHandlersMixin` with channel handlers (user channels, private channels, context broadcast/listeners)
+- `fdc3/desktop_agent/handlers/dacp/event.py` — `EventHandlersMixin` with event subscription handlers (`addEventListener`, `removeEventListener`)
+- `fdc3/desktop_agent/handlers/dacp/intent.py` — `IntentHandlersMixin` with intent handlers (`findIntent`, `raiseIntent`, external handler registration)
+- `fdc3/desktop_agent/handlers/dacp/registry.py` — `@dacp_handler` decorator and `DACPError` exception
+- `fdc3/desktop_agent/handlers/dacp/models.py` — Shared Pydantic models
+
+The `DACPHandler` class inherits from all mixin classes, and handler discovery uses MRO traversal to find all `@dacp_handler`-decorated methods. A compatibility shim at `fdc3/desktop_agent/handlers/dacp.py` preserves backward compatibility for existing imports.

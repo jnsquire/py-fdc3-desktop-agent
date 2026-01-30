@@ -36,11 +36,15 @@ import threading
 import json
 import logging
 import uuid
+import urllib.parse
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
-from .events import EventEmitter
+from typing import Any, Dict, List, Optional, Protocol, Tuple, runtime_checkable
 
-from pydantic import ValidationError, BaseModel
+import httpx
+from pydantic import ValidationError
+from websockets.asyncio.client import connect, ClientConnection
+
+from .events import EventEmitter
 from fdc3.client.models import (
     parse_message,
     Message,
@@ -57,12 +61,17 @@ from fdc3.client.models import (
 )
 from fdc3.models.dacp.dacp import (
     JoinUserChannelRequest,
+    JoinUserChannelResponse,
     LeaveCurrentChannelRequest,
     CreatePrivateChannelRequest,
+    CreatePrivateChannelResponse,
     CreatePrivateChannelInvitationRequest,
+    CreatePrivateChannelInvitationResponse,
     JoinPrivateChannelRequest,
+    JoinPrivateChannelResponse,
     LeavePrivateChannelRequest,
     PrivateChannelAddEventListenerRequest,
+    PrivateChannelAddEventListenerResponse,
     BroadcastEvent,
     IntentEvent,
     JoinUserChannelRequestPayload,
@@ -80,11 +89,17 @@ from fdc3.models.context_types import (
     ChatRoomContext,
     MessageContext,
 )
-import urllib.parse
-import httpx
-from websockets.asyncio.client import connect, ClientConnection
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class DACPRequest(Protocol):
+    """Protocol for DACP request models with meta attribute."""
+
+    meta: Any
+
+    def model_dump_json(self) -> str: ...
 
 
 class FDC3Client:
@@ -164,7 +179,9 @@ class FDC3Client:
             return raw
         return f"user:{raw}"
 
-    async def send_dacp_request(self, request: BaseModel, timeout: float = 5.0) -> Any:
+    async def send_dacp_request(
+        self, request: DACPRequest, timeout: float = 5.0
+    ) -> Any:
         """Send a DACP request model and wait for the correlated response.
 
         Args:
@@ -783,7 +800,7 @@ class FDC3Client:
         channel_id: str,
         *,
         auto_create: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> JoinUserChannelResponse:
         """Join a user channel, optionally auto-creating it if missing.
 
         Args:
@@ -791,7 +808,7 @@ class FDC3Client:
             auto_create: If True and the channel doesn't exist, create it first.
 
         Returns:
-            The agent's response payload for the join request.
+            The JoinUserChannelResponse containing the joined channel details.
 
         Raises:
             Exception: If the channel doesn't exist and auto_create is False.
@@ -826,14 +843,14 @@ class FDC3Client:
 
     async def create_private_channel(
         self, display_name: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """Create a private channel and return the response payload.
+    ) -> CreatePrivateChannelResponse:
+        """Create a private channel and return the response.
 
         Args:
             display_name: Optional human-readable name for the channel.
 
         Returns:
-            The agent's response payload containing the new channel's metadata.
+            The CreatePrivateChannelResponse containing the new channel's metadata.
         """
         display_metadata = DisplayMetadata(name=display_name) if display_name else None
         request = CreatePrivateChannelRequest(
@@ -846,7 +863,7 @@ class FDC3Client:
 
     async def create_private_channel_invite(
         self, channel_id: str, instance_id: Optional[str] = None
-    ) -> Dict[str, Any]:
+    ) -> CreatePrivateChannelInvitationResponse:
         """Create a private channel invitation.
 
         Args:
@@ -854,7 +871,7 @@ class FDC3Client:
             instance_id: Optional target instance to restrict the invitation to.
 
         Returns:
-            The agent's response containing the invitation token.
+            The CreatePrivateChannelInvitationResponse containing the invitation token.
         """
         request = CreatePrivateChannelInvitationRequest(
             type="createPrivateChannelInvitation",
@@ -864,7 +881,9 @@ class FDC3Client:
         )
         return await self.send_dacp_request(request)
 
-    async def join_private_channel(self, channel_id: str, token: str) -> Dict[str, Any]:
+    async def join_private_channel(
+        self, channel_id: str, token: str
+    ) -> JoinPrivateChannelResponse:
         """Join a private channel using an invitation token.
 
         Args:
@@ -872,7 +891,7 @@ class FDC3Client:
             token: The invitation token received from the channel creator.
 
         Returns:
-            The agent's response payload confirming the join.
+            The JoinPrivateChannelResponse confirming the join.
         """
         request = JoinPrivateChannelRequest(
             type="joinPrivateChannel",
@@ -899,7 +918,7 @@ class FDC3Client:
         channel_id: str,
         *,
         event_type: Optional[PrivateChannelEventListenerTypes] = None,
-    ) -> Dict[str, Any]:
+    ) -> PrivateChannelAddEventListenerResponse:
         """Subscribe to private channel events for a channel.
 
         Args:
@@ -907,7 +926,7 @@ class FDC3Client:
             event_type: Optionally filter to a specific event type.
 
         Returns:
-            The agent's response payload containing listener details.
+            The PrivateChannelAddEventListenerResponse containing listener details.
         """
         request = PrivateChannelAddEventListenerRequest(
             type="privateChannelAddEventListener",

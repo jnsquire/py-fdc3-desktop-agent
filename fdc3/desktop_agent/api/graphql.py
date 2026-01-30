@@ -109,6 +109,23 @@ class ChannelType:
     color: Optional[str]
     member_count: int
 
+    @staticmethod
+    def from_channel(channel) -> "ChannelType":
+        """Convert a Channel object to ChannelType."""
+        return ChannelType(
+            id=channel.id,
+            type=channel.type,
+            display_name=(
+                channel.display_metadata.name if channel.display_metadata else None
+            ),
+            color=(
+                getattr(channel.display_metadata, "color", None)
+                if channel.display_metadata
+                else None
+            ),
+            member_count=len(channel.members),
+        )
+
 
 # Define the GraphQL schema
 @strawberry.type
@@ -139,6 +156,7 @@ class Query:
                 for app in apps
             ]
         except Exception:
+            logging.exception("Error fetching apps")
             return []
 
     @strawberry.field
@@ -160,6 +178,7 @@ class Query:
                 for config in configs
             ]
         except Exception:
+            logging.exception("Error fetching launch configs")
             return []
 
     @strawberry.field
@@ -184,22 +203,7 @@ class Query:
             return []
 
         channels = core_services.channel_manager.list_channels()
-        return [
-            ChannelType(
-                id=channel.id,
-                type=channel.type,
-                display_name=(
-                    channel.display_metadata.name if channel.display_metadata else None
-                ),
-                color=(
-                    getattr(channel.display_metadata, "color", None)
-                    if channel.display_metadata
-                    else None
-                ),
-                member_count=len(channel.members),
-            )
-            for channel in channels
-        ]
+        return [ChannelType.from_channel(channel) for channel in channels]
 
     @strawberry.field
     def version(self) -> str:
@@ -285,44 +289,16 @@ class Mutation:
             input.channel_id, input.channel_type, display_metadata
         )
 
-        return ChannelType(
-            id=channel.id,
-            type=channel.type,
-            display_name=(
-                channel.display_metadata.name if channel.display_metadata else None
-            ),
-            color=(
-                getattr(channel.display_metadata, "color", None)
-                if channel.display_metadata
-                else None
-            ),
-            member_count=len(channel.members),
-        )
+        return ChannelType.from_channel(channel)
 
     @strawberry.mutation
     def delete_channel(self, channel_id: str) -> bool:
         """Delete a channel"""
-        if channel_id in core_services.channel_manager.channels:
-            # Emit deleted event before removing
-            core_services.channel_manager._emit_event("deleted", channel_id)
-            del core_services.channel_manager.channels[channel_id]
-            core_services.channel_manager.clear_channel_context(channel_id)
-            # Remove any instance associations with this channel
-            instances_to_remove = [
-                inst_uuid
-                for inst_uuid, ch_id in core_services.channel_manager.instance_channels.items()
-                if ch_id == channel_id
-            ]
-            for inst_uuid in instances_to_remove:
-                del core_services.channel_manager.instance_channels[inst_uuid]
-            return True
-        return False
+        return core_services.channel_manager.delete_channel(channel_id)
 
     @strawberry.mutation
     def broadcast_to_channel(self, channel_id: str, context: str) -> bool:
         """Broadcast a context to a channel (context as JSON string)"""
-        import json
-
         try:
             context_data = json.loads(context)
             core_services.channel_manager.broadcast_to_channel(

@@ -35,6 +35,7 @@ dependencies = [
   "strawberry-graphql>=0.250",
   "jinja2>=3.0",
   "aiosqlite>=0.20",
+  "psutil>=5.9",
 ]
 
 # Optional dependencies for distributed adapters

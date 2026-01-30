@@ -71,3 +71,7 @@ class AgentClientConnectionManager:
                 pass
         self._active_connections.clear()
         self._connections.clear()
+
+    def get_active_connection_count(self) -> int:
+        """Get count of active agent-client WebSocket connections."""
+        return len(self._active_connections)

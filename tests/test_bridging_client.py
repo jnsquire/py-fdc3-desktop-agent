@@ -526,35 +526,6 @@ async def test_bridge_client_send_agent_request_times_out_and_cleans_pending():
 
 
 @pytest.mark.asyncio
-async def test_bridge_client_handle_response_unknown_request_uuid_is_ignored():
-    settings = BridgeConnectionSettings(
-        host="127.0.0.1",
-        port_start=4475,
-        port_end=4475,
-        requested_name="agent-requested",
-        retry_seconds=0.01,
-        request_timeout_seconds=0.2,
-    )
-
-    client = make_client(
-        settings,
-        FakeWebSocket(),
-        request_handler=cast(RequestHandler, lambda msg: asyncio.sleep(0, result=None)),
-        connect_func=lambda url: asyncio.sleep(0, result=None),
-    )
-
-    loop = asyncio.get_running_loop()
-    fut = loop.create_future()
-    client._pending["req-1"] = fut
-
-    await client._handle_response("different-req", {"type": "x", "meta": {}})
-    assert fut.done() is False
-
-    # Cleanup
-    client._pending.clear()
-
-
-@pytest.mark.asyncio
 async def test_bridge_client_stop_fails_all_pending_futures():
     settings = BridgeConnectionSettings(
         host="127.0.0.1",

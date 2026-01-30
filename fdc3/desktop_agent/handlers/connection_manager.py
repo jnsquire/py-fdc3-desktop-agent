@@ -52,6 +52,10 @@ class WebSocketConnectionManager:
         """Get list of connected instance UUIDs"""
         return list(self.connections.keys())
 
+    def get_connection_count(self) -> int:
+        """Get count of connected instances."""
+        return len(self.connections)
+
     async def close_all(self):
         """Close all active WebSocket connections."""
         conns = list(self.connections.items())

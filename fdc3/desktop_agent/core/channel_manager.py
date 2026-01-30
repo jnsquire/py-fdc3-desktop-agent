@@ -108,6 +108,46 @@ class ChannelManager:
         self._emit_event("created", channel_id)
         return channel
 
+    def delete_channel(self, channel_id: str) -> bool:
+        """Delete a channel and clean up all associated state.
+
+        Removes the channel, clears its context, and disassociates any
+        instances that were members of the channel.
+
+        Returns:
+            True if the channel was deleted, False if it didn't exist.
+        """
+        with self._lock:
+            if channel_id not in self.channels:
+                return False
+
+            # Remove the channel
+            del self.channels[channel_id]
+
+            # Clear channel context
+            self.channel_contexts.pop(channel_id, None)
+
+            # Remove any instance associations with this channel
+            instances_to_remove = [
+                inst_uuid
+                for inst_uuid, ch_id in self.instance_channels.items()
+                if ch_id == channel_id
+            ]
+            for inst_uuid in instances_to_remove:
+                del self.instance_channels[inst_uuid]
+
+            # Clean up private channel state if applicable
+            self.private_channel_owners.pop(channel_id, None)
+            self.private_channel_participants.pop(channel_id, None)
+            self.private_channel_invites.pop(channel_id, None)
+            self.remote_private_channel_listeners.pop(channel_id, None)
+
+            logger.info(f"delete_channel: deleted channel_id={channel_id}")
+
+        # Emit event outside the lock
+        self._emit_event("deleted", channel_id)
+        return True
+
     def create_private_channel(
         self,
         owner_instance_uuid: str,

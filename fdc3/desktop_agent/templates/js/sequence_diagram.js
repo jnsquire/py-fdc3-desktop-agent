@@ -1,0 +1,131 @@
+import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+
+mermaid.initialize({ startOnLoad: false, theme: 'default' });
+
+// GraphQL websocket subscription client (minimal)
+let socket = null;
+let subId = '1';
+
+// Diagram state
+const participants = new Map(); // id -> { pid, labelFull }
+let participantSeq = 0;
+const messages = []; // array of mermaid lines
+const MAX_LINES = 200;
+
+function shortLabel(id) {
+  if (!id) return 'system';
+  return id.length > 12 ? id.slice(0, 12) : id;
+}
+
+function escapeLabel(s) {
+  return String(s).replace(/"/g, '\\"').replace(/\n/g, ' ');
+}
+
+function ensureParticipant(id) {
+  const key = id || 'system';
+  if (!participants.has(key)) {
+    const pid = 'p' + (++participantSeq);
+    const labelFull = key;
+    participants.set(key, { pid, labelFull });
+  }
+  return participants.get(key).pid;
+}
+
+function buildDiagram() {
+  const parts = Array.from(participants.values()).map(({ pid, labelFull }) => `participant ${pid} as "${escapeLabel(labelFull)}"`);
+  const body = parts.concat(messages).join('\n');
+  return `sequenceDiagram\n${body}`;
+}
+
+async function renderDiagram() {
+  const target = document.getElementById('mermaidTarget');
+  const d = buildDiagram();
+  try {
+    const { svg } = await mermaid.render('diagram_' + Date.now(), d);
+    target.innerHTML = svg;
+  } catch (e) {
+    target.innerHTML = `<pre style="white-space:pre-wrap">${d}</pre>`;
+    console.warn('Mermaid render failed', e);
+  }
+}
+
+function appendEvent(ev) {
+  const t = ev.eventType;
+  const ch = ev.channelId || 'channel';
+  const inst = ev.instanceUuid || 'system';
+  let ctx = '';
+  try { ctx = ev.context ? JSON.stringify(JSON.parse(ev.context)) : ''; } catch(e){ ctx = String(ev.context) }
+
+  if (t === 'broadcast') {
+    const sender = ensureParticipant(inst);
+    const chan = ensureParticipant(ch);
+    const label = ctx ? escapeLabel(ctx) : 'broadcast';
+    messages.push(`${sender}-->>${chan}: ${label}`);
+  } else if (t === 'joined') {
+    const who = ensureParticipant(inst);
+    const chEsc = escapeLabel(ch);
+    messages.push(`Note over ${who}: joined ${chEsc}`);
+  } else if (t === 'left') {
+    const who = ensureParticipant(inst);
+    const chEsc = escapeLabel(ch);
+    messages.push(`Note over ${who}: left ${chEsc}`);
+  } else if (t === 'created' || t === 'deleted') {
+    const cpid = ensureParticipant(ch);
+    messages.push(`Note over ${cpid}: ${t}`);
+  } else {
+    const who = ensureParticipant(inst);
+    messages.push(`Note over ${who}: ${t}`);
+  }
+
+  if (messages.length > MAX_LINES) messages.shift();
+  renderDiagram();
+}
+
+function startSubscription() {
+  const channel = document.getElementById('channel').value.trim();
+  const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const host = location.host;
+  const url = `${wsProto}://${host}/graphql`;
+
+  socket = new WebSocket(url, 'graphql-ws');
+  socket.onopen = () => {
+    socket.send(JSON.stringify({ type: 'connection_init', payload: {} }));
+    setTimeout(() => {
+      const query = `subscription ($channelId: String) { channelEvents(channelId: $channelId) { eventType channelId instanceUuid context timestamp } }`;
+      const payload = { query, variables: { channelId: channel || null } };
+      socket.send(JSON.stringify({ id: subId, type: 'start', payload }));
+    }, 50);
+  };
+
+  socket.onmessage = (msg) => {
+    try {
+      const data = JSON.parse(msg.data);
+      if (data.type === 'data' && data.id === subId) {
+        const ev = data.payload.data.channelEvents;
+        appendEvent(ev);
+      }
+    } catch (e) { console.warn('Invalid WS message', e); }
+  };
+
+  socket.onclose = () => { document.getElementById('start').disabled = false; document.getElementById('stop').disabled = true; };
+
+  document.getElementById('start').disabled = true;
+  document.getElementById('stop').disabled = false;
+}
+
+function stopSubscription() {
+  if (socket && socket.readyState === WebSocket.OPEN) { socket.send(JSON.stringify({ id: subId, type: 'stop' })); socket.close(); }
+  document.getElementById('start').disabled = false; document.getElementById('stop').disabled = true;
+}
+
+function clearDiagram() {
+  participants.clear();
+  messages.length = 0;
+  document.getElementById('mermaidTarget').innerHTML = '';
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('start').addEventListener('click', startSubscription);
+  document.getElementById('stop').addEventListener('click', stopSubscription);
+  document.getElementById('clear').addEventListener('click', clearDiagram);
+});

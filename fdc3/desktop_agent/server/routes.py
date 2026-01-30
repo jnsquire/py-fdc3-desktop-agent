@@ -2,8 +2,26 @@
 
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import RedirectResponse
+from typing import cast
+import psutil
+
+from .lifespan import AppState
 
 router = APIRouter()
+
+
+def _format_bytes(num_bytes: int) -> str:
+    if num_bytes < 0:
+        return "0 B"
+    units = ["B", "KB", "MB", "GB", "TB"]
+    size = float(num_bytes)
+    for unit in units:
+        if size < 1024 or unit == units[-1]:
+            if unit == "B":
+                return f"{int(size)} {unit}"
+            return f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} TB"
 
 
 @router.get("/admin")
@@ -28,6 +46,44 @@ async def system_settings_page(request: Request):
 async def diagnostics_page(request: Request):
     """System diagnostics and health checks"""
     return RedirectResponse(url=str(request.url_for("ui", path="diagnostics.html")))
+
+
+@router.get("/api/diagnostics/metrics")
+async def diagnostics_metrics(request: Request):
+    """Return real-time system metrics for the diagnostics UI."""
+    state = cast(AppState, request.app.state)
+    storage = state.storage
+    registered_apps = 0
+    try:
+        apps = await storage.apps.list_apps()
+        registered_apps = len([app for app in apps if app is not None])
+    except Exception:
+        registered_apps = 0
+
+    instance_manager = state.instance_connection_manager
+    agent_manager = state.agent_client_manager
+    active_connections = 0
+
+    try:
+        active_connections += instance_manager.get_connection_count()
+    except Exception:
+        pass
+
+    try:
+        active_connections += agent_manager.get_active_connection_count()
+    except Exception:
+        pass
+
+    process = psutil.Process()
+    memory_bytes = int(process.memory_info().rss)
+
+    return {
+        "serverStatus": "running",
+        "activeConnections": active_connections,
+        "registeredApps": registered_apps,
+        "memoryUsageBytes": memory_bytes,
+        "memoryUsageHuman": _format_bytes(memory_bytes),
+    }
 
 
 @router.get("/channel-monitor")

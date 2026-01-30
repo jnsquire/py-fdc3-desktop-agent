@@ -4,24 +4,19 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Channel Monitor</title>
-    <style>
-        body { font-family: Arial, sans-serif; max-width: 1000px; margin: 0 auto; padding: 20px; }
-        .header { background:#2c3e50; color:#fff; padding:16px; border-radius:6px; margin-bottom:16px }
-        .controls { margin-bottom:12px }
-        .events { border:1px solid #ddd; padding:12px; border-radius:6px; max-height:480px; overflow:auto; background:#fff }
-        .event { border-bottom:1px solid #f1f1f1; padding:8px 0 }
-        .meta { color:#666; font-size:12px }
-        .btn { background:#3498db; color:#fff; padding:8px 12px; border-radius:4px; text-decoration:none; border:none }
-    </style>
+    <link rel="stylesheet" href="styles.css">
 </head>
 <body>
     <div class="header">
         <h1>Channel Monitor</h1>
         <p>Subscribe to realtime channel events via GraphQL subscription.</p>
         <div style="margin-top:10px;">
-            <a href="/admin" style="color: #3498db; text-decoration: none;">← Back to Admin</a>
+            <nav class="nav" role="navigation"><a href="/admin">← Back to Admin</a></nav>
         </div>
     </div>
+
+    <a class="skip-link" href="#main">Skip to content</a>
+    <main id="main">
 
     <div class="controls">
         <label for="channel">Channel ID (leave empty for all):</label>
@@ -34,73 +29,11 @@
         <p class="meta">No events yet.</p>
     </div>
 
-    <script>
-        // Minimal graphql-ws client implementation (works with Strawberry's websocket transport)
-        let socket = null;
-        let subId = '1';
+    </main>
 
-        function appendEvent(ev) {
-            const out = document.getElementById('events');
-            if (out.querySelector('.meta')) out.querySelector('.meta').remove();
-            const div = document.createElement('div');
-            div.className = 'event';
-            const ctx = ev.context ? JSON.stringify(JSON.parse(ev.context), null, 2) : '';
-            div.innerHTML = `<div><strong>${ev.eventType}</strong> — <em>${ev.channelId}</em></div>` +
-                             `<div class="meta">instance: ${ev.instanceUuid || 'system'} — ${ev.timestamp}</div>` +
-                             `<pre style="background:#f9f9f9;padding:8px;border-radius:4px">${ctx}</pre>`;
-            out.prepend(div);
-        }
+    <div id="status" class="status" role="status" aria-live="polite"></div> 
 
-        function startSubscription() {
-            const channel = document.getElementById('channel').value.trim();
-            const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
-            const host = location.host;
-            const url = `${wsProto}://${host}/graphql`;
-
-            socket = new WebSocket(url, 'graphql-ws');
-            socket.onopen = () => {
-                // init
-                socket.send(JSON.stringify({ type: 'connection_init', payload: {} }));
-                // wait briefly then start
-                setTimeout(() => {
-                    const query = `subscription ($channelId: String) { channelEvents(channelId: $channelId) { eventType channelId instanceUuid context timestamp } }`;
-                    const payload = { query, variables: { channelId: channel || null } };
-                    socket.send(JSON.stringify({ id: subId, type: 'start', payload }));
-                }, 50);
-            };
-
-            socket.onmessage = (msg) => {
-                try {
-                    const data = JSON.parse(msg.data);
-                    if (data.type === 'data' && data.id === subId) {
-                        const ev = data.payload.data.channelEvents;
-                        appendEvent(ev);
-                    }
-                } catch (e) {
-                    console.warn('Invalid WS message', e);
-                }
-            };
-
-            socket.onclose = () => {
-                document.getElementById('start').disabled = false;
-                document.getElementById('stop').disabled = true;
-            };
-
-            document.getElementById('start').disabled = true;
-            document.getElementById('stop').disabled = false;
-        }
-
-        function stopSubscription() {
-            if (socket && socket.readyState === WebSocket.OPEN) {
-                socket.send(JSON.stringify({ id: subId, type: 'stop' }));
-                socket.close();
-            }
-            document.getElementById('start').disabled = false;
-            document.getElementById('stop').disabled = true;
-        }
-
-        document.getElementById('start').addEventListener('click', startSubscription);
-        document.getElementById('stop').addEventListener('click', stopSubscription);
-    </script>
+    <script src="js/common.js"></script>
+    <script src="js/channel_monitor.js"></script>
 </body>
 </html>

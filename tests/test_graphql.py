@@ -75,6 +75,7 @@ def mock_channel_manager():
     manager.instance_channels = {"instance-1": "test-channel"}
     manager._emit_event = MagicMock()
     manager.broadcast_to_channel = MagicMock()
+    manager.delete_channel = MagicMock(return_value=True)
 
     return manager
 

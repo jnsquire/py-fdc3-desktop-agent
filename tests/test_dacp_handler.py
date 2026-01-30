@@ -1,6 +1,7 @@
 from fdc3.desktop_agent.handlers import WebSocketConnectionManager
 from fdc3.desktop_agent.launcher import ProcessLauncher
 from fdc3.desktop_agent.storage import Storage
+from fdc3.desktop_agent.types import WcpSession, WcpIdentity, WcpSessions
 import asyncio
 import json
 from types import SimpleNamespace
@@ -14,6 +15,7 @@ from fdc3.desktop_agent.api import IntentResolution
 from fdc3.desktop_agent.api import OpenError, ResolveError
 from fdc3.desktop_agent.api import BridgingError
 from fdc3.desktop_agent.handlers.dacp import DACPHandler
+from fdc3.desktop_agent.handlers.dacp.base import BridgeClientProtocol
 from fdc3.desktop_agent.launcher.interfaces import LaunchResult
 from fdc3.models.identifiers import AppIdentifier
 from fdc3.models.primitives import ListenerUuid
@@ -47,9 +49,11 @@ def _handler() -> tuple[DACPHandler, Any, Any, Any]:
     return handler, storage, launcher, connection_manager
 
 
-def _wcp_sessions(instance_uuid: str = "src-uuid") -> tuple[str, dict]:
+def _wcp_sessions(instance_uuid: str = "src-uuid") -> tuple[str, WcpSessions]:
     session_id = "s1"
-    return session_id, {session_id: {"identity": {"instanceUuid": instance_uuid}}}
+    return session_id, {
+        session_id: WcpSession(identity=WcpIdentity(instanceUuid=instance_uuid))
+    }
 
 
 class TestDACPHandlerParsingAndDispatch:
@@ -90,9 +94,10 @@ class TestDACPHandlerParsingAndDispatch:
 
         with (
             patch(
-                "fdc3.desktop_agent.handlers.dacp.parse_message", return_value=object()
+                "fdc3.desktop_agent.handlers.dacp.base.parse_message",
+                return_value=object(),
             ),
-            patch("fdc3.desktop_agent.handlers.dacp.logger") as mock_logger,
+            patch("fdc3.desktop_agent.handlers.dacp.base.logger") as mock_logger,
         ):
             await handler.handle_message(
                 message={"type": "something"},
@@ -589,13 +594,13 @@ class TestDACPHandlerGetInfo:
             },
             session_id="s1",
             wcp_sessions={
-                "s1": {
-                    "identity": {
-                        "appId": "app-1",
-                        "instanceId": "inst-1",
-                        "instanceUuid": "inst-uuid-1",
-                    }
-                }
+                "s1": WcpSession(
+                    identity=WcpIdentity(
+                        appId="app-1",
+                        instanceId="inst-1",
+                        instanceUuid="inst-uuid-1",
+                    )
+                )
             },
             sender=ws,
         )
@@ -641,7 +646,7 @@ class TestDACPHandlerGetAppMetadata:
                 "meta": {"requestUuid": "r-appmeta"},
             },
             session_id="s1",
-            wcp_sessions={"s1": {"identity": {"instanceUuid": "i1"}}},
+            wcp_sessions={"s1": WcpSession(identity=WcpIdentity(instanceUuid="i1"))},
             sender=ws,
         )
 
@@ -673,7 +678,7 @@ class TestDACPHandlerUserChannels:
                 "meta": {"requestUuid": "r1"},
             },
             session_id="s1",
-            wcp_sessions={"s1": {"identity": {"instanceUuid": "i1"}}},
+            wcp_sessions={"s1": WcpSession(identity=WcpIdentity(instanceUuid="i1"))},
             sender=ws,
         )
 
@@ -701,7 +706,7 @@ class TestDACPHandlerUserChannels:
                 "meta": {"requestUuid": "r1s"},
             },
             session_id="s1",
-            wcp_sessions={"s1": {"identity": {"instanceUuid": "i1"}}},
+            wcp_sessions={"s1": WcpSession(identity=WcpIdentity(instanceUuid="i1"))},
             sender=ws,
         )
 
@@ -882,7 +887,9 @@ class TestDACPHandlerEventListeners:
                 "meta": {"requestUuid": "r-el"},
             },
             session_id="s1",
-            wcp_sessions={"s1": {"identity": {"instanceUuid": "inst-1"}}},
+            wcp_sessions={
+                "s1": WcpSession(identity=WcpIdentity(instanceUuid="inst-1"))
+            },
             sender=ws,
         )
 
@@ -896,7 +903,9 @@ class TestDACPHandlerEventListeners:
                 "meta": {"requestUuid": "r-j"},
             },
             session_id="s1",
-            wcp_sessions={"s1": {"identity": {"instanceUuid": "inst-1"}}},
+            wcp_sessions={
+                "s1": WcpSession(identity=WcpIdentity(instanceUuid="inst-1"))
+            },
             sender=ws,
         )
 
@@ -918,7 +927,9 @@ class TestDACPHandlerEventListeners:
                 "meta": {"requestUuid": "r-l"},
             },
             session_id="s1",
-            wcp_sessions={"s1": {"identity": {"instanceUuid": "inst-1"}}},
+            wcp_sessions={
+                "s1": WcpSession(identity=WcpIdentity(instanceUuid="inst-1"))
+            },
             sender=ws,
         )
 
@@ -951,7 +962,9 @@ class TestDACPHandlerEventListeners:
                 "meta": {"requestUuid": "r-el"},
             },
             session_id="s1",
-            wcp_sessions={"s1": {"identity": {"instanceUuid": "inst-1"}}},
+            wcp_sessions={
+                "s1": WcpSession(identity=WcpIdentity(instanceUuid="inst-1"))
+            },
             sender=ws,
         )
         add_resp = json.loads(ws.send_text.call_args.args[0])
@@ -967,7 +980,9 @@ class TestDACPHandlerEventListeners:
                 "meta": {"requestUuid": "r-rel"},
             },
             session_id="s1",
-            wcp_sessions={"s1": {"identity": {"instanceUuid": "inst-1"}}},
+            wcp_sessions={
+                "s1": WcpSession(identity=WcpIdentity(instanceUuid="inst-1"))
+            },
             sender=ws,
         )
 
@@ -981,7 +996,9 @@ class TestDACPHandlerEventListeners:
                 "meta": {"requestUuid": "r-j"},
             },
             session_id="s1",
-            wcp_sessions={"s1": {"identity": {"instanceUuid": "inst-1"}}},
+            wcp_sessions={
+                "s1": WcpSession(identity=WcpIdentity(instanceUuid="inst-1"))
+            },
             sender=ws,
         )
 
@@ -1018,7 +1035,9 @@ class TestDACPHandlerEventListeners:
                 "meta": {"requestUuid": "r-pce"},
             },
             session_id="s-owner",
-            wcp_sessions={"s-owner": {"identity": {"instanceUuid": "owner-1"}}},
+            wcp_sessions={
+                "s-owner": WcpSession(identity=WcpIdentity(instanceUuid="owner-1"))
+            },
             sender=owner_ws,
         )
 
@@ -1031,7 +1050,9 @@ class TestDACPHandlerEventListeners:
                 "meta": {"requestUuid": "r-add"},
             },
             session_id="s-part",
-            wcp_sessions={"s-part": {"identity": {"instanceUuid": "participant-1"}}},
+            wcp_sessions={
+                "s-part": WcpSession(identity=WcpIdentity(instanceUuid="participant-1"))
+            },
             sender=participant_ws,
         )
 
@@ -1074,7 +1095,9 @@ class TestDACPHandlerEventListeners:
                 "meta": {"requestUuid": "r-pce2"},
             },
             session_id="s-owner",
-            wcp_sessions={"s-owner": {"identity": {"instanceUuid": "owner-2"}}},
+            wcp_sessions={
+                "s-owner": WcpSession(identity=WcpIdentity(instanceUuid="owner-2"))
+            },
             sender=ws,
         )
 
@@ -1087,7 +1110,9 @@ class TestDACPHandlerEventListeners:
                 "meta": {"requestUuid": "r-disconnect"},
             },
             session_id="s-owner",
-            wcp_sessions={"s-owner": {"identity": {"instanceUuid": "owner-2"}}},
+            wcp_sessions={
+                "s-owner": WcpSession(identity=WcpIdentity(instanceUuid="owner-2"))
+            },
             sender=ws,
         )
 
@@ -1720,7 +1745,27 @@ class TestDACPHandlerOpen:
             def has_connected_agent(name: str) -> bool:
                 return False
 
-        handler.bridge_client = _BridgeStub()
+            async def send_request_no_wait(
+                self,
+                request_type: str,
+                payload: dict,
+                source: Any,
+                destination: Any = None,
+            ) -> None:
+                pass
+
+            async def send_agent_request(
+                self,
+                *,
+                request_type: str,
+                payload: dict,
+                source: Any,
+                destination: Any = None,
+                timeout: float | None = None,
+            ) -> dict:
+                return {}
+
+        handler.bridge_client = cast(BridgeClientProtocol, _BridgeStub())
 
         from fdc3.models.dacp.dacp import OpenRequest
 
@@ -1752,6 +1797,9 @@ class TestDACPHandlerOpen:
             @staticmethod
             def has_connected_agent(name: str) -> bool:
                 return True
+
+            async def send_request_no_wait(self, *args, **kwargs) -> None:
+                pass
 
             async def send_agent_request(self, **_kwargs):
                 return {"payload": {"error": BridgingError.AgentDisconnected.value}}
@@ -2207,7 +2255,27 @@ class TestDACPHandlerRaiseIntent:
             def has_connected_agent(name: str) -> bool:
                 return False
 
-        handler.bridge_client = _BridgeStub()
+            async def send_request_no_wait(
+                self,
+                request_type: str,
+                payload: dict,
+                source: Any,
+                destination: Any = None,
+            ) -> None:
+                pass
+
+            async def send_agent_request(
+                self,
+                *,
+                request_type: str,
+                payload: dict,
+                source: Any,
+                destination: Any = None,
+                timeout: float | None = None,
+            ) -> dict:
+                return {}
+
+        handler.bridge_client = cast(BridgeClientProtocol, _BridgeStub())
 
         from fdc3.models.dacp.dacp import RaiseIntentRequest
 
@@ -2245,6 +2313,9 @@ class TestDACPHandlerRaiseIntent:
             @staticmethod
             def has_connected_agent(name: str) -> bool:
                 return True
+
+            async def send_request_no_wait(self, *args, **kwargs) -> None:
+                pass
 
             async def send_agent_request(self, **_kwargs):
                 return {"payload": {"error": BridgingError.AgentDisconnected.value}}
@@ -3036,7 +3107,7 @@ class TestDACPHandlerExternalHandlers:
 
         with (
             patch.object(handler, "_core") as cs,
-            patch("fdc3.desktop_agent.handlers.dacp.logger") as mock_logger,
+            patch("fdc3.desktop_agent.handlers.dacp.intent.logger") as mock_logger,
         ):
             cs.resolve_pending_intent.side_effect = RuntimeError("boom")
             ws = MagicMock()
@@ -3082,7 +3153,7 @@ class TestDACPHandlerExternalHandlers:
             # plugin exception -> logged, continue -> None
             plugin.handle_intent.side_effect = RuntimeError("boom")
             cs.plugin_registry.get_plugins_for_intent.return_value = [plugin]
-            with patch("fdc3.desktop_agent.handlers.dacp.logger") as mock_logger:
+            with patch("fdc3.desktop_agent.handlers.dacp.intent.logger") as mock_logger:
                 resp3 = await handler._try_plugin_handler(req)
                 assert resp3 is None
                 mock_logger.error.assert_called()
@@ -3127,7 +3198,7 @@ class TestDACPHandlerExternalHandlers:
         with (
             patch.object(handler, "_core") as cs,
             patch(
-                "fdc3.desktop_agent.handlers.dacp.asyncio.wait_for",
+                "fdc3.desktop_agent.handlers.dacp.intent.asyncio.wait_for",
                 side_effect=asyncio.TimeoutError,
             ),
         ):
@@ -3181,7 +3252,7 @@ class TestDACPHandlerExternalHandlers:
                 connection_manager, "send_to_instance", new_callable=AsyncMock
             ) as send_to,
             patch(
-                "fdc3.desktop_agent.handlers.dacp.asyncio.wait_for",
+                "fdc3.desktop_agent.handlers.dacp.intent.asyncio.wait_for",
                 new_callable=AsyncMock,
             ) as wf,
         ):

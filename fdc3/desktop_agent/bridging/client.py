@@ -14,6 +14,7 @@ from typing import (
     Mapping,
     Optional,
     Union,
+    cast,
 )
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -76,6 +77,24 @@ ChannelsStateFactory = Callable[[], ChannelsState]
 
 # Type alias for request handler
 RequestHandler = Callable[[Mapping[str, Any]], Awaitable[Optional[Mapping[str, Any]]]]
+
+
+class BridgeResponseMetaDict(TypedDict, total=False):
+    """Metadata from a bridge response (dict form)."""
+
+    requestUuid: str
+    responseUuid: str
+    timestamp: str
+    errorSources: list[str]
+    errorDetails: list[dict[str, Any]]
+
+
+class BridgeResponseDict(TypedDict, total=False):
+    """Response structure from bridge agent requests (dict form)."""
+
+    type: str
+    meta: BridgeResponseMetaDict
+    payload: dict[str, Any]
 
 
 class BridgeMeta(BaseModel):
@@ -191,7 +210,7 @@ class BridgeClient:
         self._assigned_name: Optional[str] = None
         self._connected_agents: list[dict[str, Any]] = []
 
-        self._pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
+        self._pending: dict[str, asyncio.Future[BridgeResponseDict]] = {}
         self._pending_lock = asyncio.Lock()
 
         # Used to ensure atomic processing of connectedAgentsUpdate.
@@ -396,8 +415,10 @@ class BridgeClient:
                     if isinstance(payload.addAgent, str) and payload.addAgent:
                         self._assigned_name = payload.addAgent
                     self._connected_agents = payload.allAgents
-                    if self._connected_agents_update_handler is not None:
-                        await self._connected_agents_update_handler(payload)
+
+                # Call handler outside lock to avoid blocking other operations.
+                if self._connected_agents_update_handler is not None:
+                    await self._connected_agents_update_handler(payload)
                 continue
 
             # Bridge auth failure
@@ -416,13 +437,15 @@ class BridgeClient:
 
             # Responses (meta.responseUuid present)
             if request_uuid and response_uuid:
-                await self._handle_response(request_uuid, msg_raw)
+                async with self._pending_lock:
+                    fut = self._pending.pop(request_uuid, None)
+                if fut is not None and not fut.done():
+                    fut.set_result(cast(BridgeResponseDict, msg_raw))
                 continue
 
             # Requests forwarded by bridge (requestUuid present, no responseUuid)
             if request_uuid and not response_uuid:
-                async with self._sync_lock:
-                    response = await self._request_handler(msg_raw)
+                response = await self._request_handler(msg_raw)
                 if response is not None:
                     await ws.send(json.dumps(response))
                 continue
@@ -430,14 +453,6 @@ class BridgeClient:
             logger.debug(
                 "Ignoring bridge message without request/response UUID: %s", msg_type
             )
-
-    async def _handle_response(self, request_uuid: str, msg: dict) -> None:
-        async with self._pending_lock:
-            fut = self._pending.pop(request_uuid, None)
-        if fut is None:
-            return
-        if not fut.done():
-            fut.set_result(msg)
 
     async def send_agent_request(
         self,
@@ -447,7 +462,7 @@ class BridgeClient:
         source: AppIdentifierLike,
         destination: Optional[AppIdentifierLike] = None,
         timeout: Optional[float] = None,
-    ) -> dict[str, Any]:
+    ) -> BridgeResponseDict:
         """Send an agentRequest message and await the (bridge-collated) response."""
         if self._ws is None:
             raise RuntimeError(BridgingError.NotConnectedToBridge.value)
@@ -465,7 +480,9 @@ class BridgeClient:
             request_uuid=req_uuid,
         )
 
-        fut: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
+        fut: asyncio.Future[BridgeResponseDict] = (
+            asyncio.get_running_loop().create_future()
+        )
         async with self._pending_lock:
             self._pending[req_uuid] = fut
 

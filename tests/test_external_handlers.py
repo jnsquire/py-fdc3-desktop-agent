@@ -11,6 +11,12 @@ from fdc3.models.dacp.external_models import (
 
 from fdc3.desktop_agent.core.external_registry import ExternalHandlerRegistry
 from fdc3.desktop_agent.core import core_services
+from fdc3.desktop_agent.launcher.interfaces import ProcessLauncher, LaunchResult
+from fdc3.desktop_agent.storage import (
+    Storage,
+    AppDirectoryRepository,
+    LaunchConfigRepository,
+)
 
 
 def test_external_registry_basic():
@@ -53,12 +59,67 @@ class DummyConnectionManager:
         self.sent.append((instance_uuid, message))
 
 
-class DummyStorage:
-    pass
+class DummyStorage(Storage):
+    class Apps(AppDirectoryRepository):
+        async def get_app_metadata(self, app_id):
+            return None
+
+        async def list_apps(self):
+            return []
+
+        async def add_app(self, metadata):
+            return None
+
+        async def remove_app(self, app_id):
+            return None
+
+    class LaunchConfigs(LaunchConfigRepository):
+        async def get_launch_config(self, app_id):
+            return None
+
+        async def set_launch_config(self, config):
+            return None
+
+        async def remove_launch_config(self, app_id):
+            return None
+
+        async def list_launch_configs(self):
+            return []
+
+    def __init__(self):
+        self._apps = DummyStorage.Apps()
+        self._launch_configs = DummyStorage.LaunchConfigs()
+
+    @property
+    def apps(self):
+        return self._apps
+
+    @property
+    def launch_configs(self):
+        return self._launch_configs
+
+    async def initialize(self):
+        return None
+
+    async def close(self):
+        return None
 
 
-class DummyLauncher:
-    pass
+class DummyLauncher(ProcessLauncher):
+    async def launch_app(self, *args, **kwargs):
+        return LaunchResult(success=False)
+
+    async def terminate_app(self, instance_uuid: str):
+        return True
+
+    async def is_app_running(self, instance_uuid: str):
+        return False
+
+    async def wait_for_app_exit(self, instance_uuid: str, timeout=None):
+        return True
+
+    async def stop(self):
+        return None
 
 
 @pytest.mark.asyncio
@@ -68,17 +129,8 @@ async def test_dacp_register_and_forward(tmp_path):
     storage = DummyStorage()
     launcher = DummyLauncher()
     conn_mgr = DummyConnectionManager()
-    from fdc3.desktop_agent.storage.interfaces import Storage as _Storage
-    from fdc3.desktop_agent.launcher.interfaces import (
-        ProcessLauncher as _ProcessLauncher,
-    )
-    from fdc3.desktop_agent.handlers.connection_manager import (
-        WebSocketConnectionManager as _WCM,
-    )
 
-    handler = DACPHandler(
-        cast(_Storage, storage), cast(_ProcessLauncher, launcher), cast(_WCM, conn_mgr)
-    )
+    handler = DACPHandler(storage, launcher, conn_mgr)
 
     # Prepare wcp_sessions and fake websocket
     session_id = "sess1"
@@ -195,17 +247,7 @@ async def test_register_invalid_payload_and_forward_failure():
             raise RuntimeError("send failed")
 
     conn_mgr = FailingConnMgr()
-    from fdc3.desktop_agent.storage.interfaces import Storage as _Storage
-    from fdc3.desktop_agent.launcher.interfaces import (
-        ProcessLauncher as _ProcessLauncher,
-    )
-    from fdc3.desktop_agent.handlers.connection_manager import (
-        WebSocketConnectionManager as _WCM,
-    )
-
-    handler = DACPHandler(
-        cast(_Storage, storage), cast(_ProcessLauncher, launcher), cast(_WCM, conn_mgr)
-    )
+    handler = DACPHandler(storage, launcher, conn_mgr)
 
     session_id = "sess2"
     wcp_sessions = {session_id: {"identity": {"instanceUuid": "inst-2"}}}

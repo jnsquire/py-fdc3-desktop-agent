@@ -213,7 +213,12 @@ async def main() -> None:
             join_resp = await self.client.join_user_channel(
                 self.args.channel, auto_create=True
             )
-            self.channel_id = join_resp.get("channel", {}).get("id")
+            # join_resp may be a JoinUserChannelResponse model or dict
+            if hasattr(join_resp, "payload"):
+                channel = getattr(join_resp.payload, "channel", None)
+                self.channel_id = getattr(channel, "id", None) if channel else None
+            else:
+                self.channel_id = join_resp.get("channel", {}).get("id")
             messages.write_line(f"Joined {self.channel_id}")
             # Short help for key bindings
             messages.write_line("Send: Enter | Newline: Shift+Enter or Ctrl+N")

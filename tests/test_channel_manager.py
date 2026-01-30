@@ -165,12 +165,24 @@ class TestChannelManagerCoverage:
         published = asyncio.Event()
         published_payload: dict | None = None
 
-        class DummyAdapter:
+        class DummyAdapter(DistributedLogAdapter):
+            async def start(self) -> None:
+                return None
+
+            async def stop(self) -> None:
+                return None
+
             async def publish(self, topic: str, event: dict) -> None:
                 nonlocal published_payload
                 assert topic == "channel_events"
                 published_payload = event
                 published.set()
+
+            async def subscribe(self, topic: str, callback):
+                return "sub"
+
+            async def unsubscribe(self, subscription_id: str) -> None:
+                return None
 
         manager.distributed_adapter = cast(DistributedLogAdapter, DummyAdapter())
 
@@ -204,8 +216,20 @@ class TestChannelManagerCoverage:
     def test_distributed_publish_schedule_failure_is_logged(self):
         manager = ChannelManager()
 
-        class DummyAdapter:
+        class DummyAdapter(DistributedLogAdapter):
+            async def start(self) -> None:
+                return None
+
+            async def stop(self) -> None:
+                return None
+
             async def publish(self, topic: str, event: dict) -> None:
+                return None
+
+            async def subscribe(self, topic: str, callback):
+                return "sub"
+
+            async def unsubscribe(self, subscription_id: str) -> None:
                 return None
 
         manager.distributed_adapter = cast(DistributedLogAdapter, DummyAdapter())

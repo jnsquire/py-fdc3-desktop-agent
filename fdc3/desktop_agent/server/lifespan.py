@@ -50,6 +50,8 @@ class AppState(Protocol):
     launcher: ProcessLauncher
     core_services: CoreServices
     dacp_handler: DACPHandler
+    agent_client_manager: AgentClientConnectionManager
+    instance_connection_manager: WebSocketConnectionManager
 
 
 logger = logging.getLogger(__name__)
@@ -409,6 +411,8 @@ def create_lifespan(
         # Expose the DACP handler so admin routes can programmatically raise
         # intents and deliver intent events to connected instances.
         state.dacp_handler = dacp_handler
+        state.agent_client_manager = agent_client_manager
+        state.instance_connection_manager = instance_connection_manager
 
         try:
             yield

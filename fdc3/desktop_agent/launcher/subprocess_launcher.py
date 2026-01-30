@@ -5,7 +5,8 @@ import json
 import logging
 import os
 import uuid
-from typing import Optional, Dict, Any
+from typing import Optional, Dict
+from fdc3.models.dacp.dacp import Fdc3Context
 from pathlib import Path
 from .interfaces import ProcessLauncher, LaunchResult
 from ..api import AppIdentifier
@@ -26,7 +27,7 @@ class SubprocessLauncher(ProcessLauncher):
         self,
         app_id: str,
         launch_config: LaunchConfig,
-        context: Optional[Dict[str, Any]] = None,
+        context: Optional[Fdc3Context] = None,
         target: Optional[AppIdentifier] = None,
     ) -> LaunchResult:
         """Launch an app process with the given configuration"""
