@@ -91,6 +91,7 @@ class ChannelManager:
         channel_type: str,
         display_metadata: Optional[DisplayMetadata] = None,
     ) -> ChannelInstance:
+        """Create a channel or return the existing channel with the same ID."""
         with self._lock:
             existing = self.channels.get(channel_id)
             if existing is not None:
@@ -154,6 +155,7 @@ class ChannelManager:
         channel_id: Optional[str] = None,
         display_metadata: Optional[DisplayMetadata] = None,
     ) -> ChannelInstance:
+        """Create a private channel and assign an owner instance."""
         with self._lock:
             assigned_id = channel_id or f"private:{uuid.uuid4()}"
             if assigned_id in self.channels:
@@ -171,6 +173,10 @@ class ChannelManager:
         channel_id: str,
         instance_uuid: Optional[str] = None,
     ) -> str:
+        """Create an invite token for a private channel.
+
+        If instance_uuid is provided, the token is restricted to that instance.
+        """
         with self._lock:
             channel = self.get_channel(channel_id)
             if channel is None or channel.type != "private":
@@ -184,6 +190,7 @@ class ChannelManager:
     def consume_private_channel_invite(
         self, channel_id: str, token: str, instance_uuid: str
     ) -> bool:
+        """Consume an invite token and validate instance access."""
         with self._lock:
             invites = self.private_channel_invites.get(channel_id)
             if not invites or token not in invites:
@@ -201,6 +208,7 @@ class ChannelManager:
     def get_private_channel_state(
         self, channel_id: str
     ) -> Optional[PrivateChannelState]:
+        """Return the private channel state (owner, members, invites) if valid."""
         channel = self.get_channel(channel_id)
         if channel is None or channel.type != "private":
             return None
@@ -219,10 +227,12 @@ class ChannelManager:
             }
 
     def get_channel(self, channel_id: str) -> Optional[ChannelInstance]:
+        """Return a channel instance by ID, if present."""
         with self._lock:
             return self.channels.get(channel_id)
 
     def join_channel(self, instance_uuid: str, channel_id: str):
+        """Join the given channel, leaving the current channel if necessary."""
         left_channel_id: str | None = None
         joined = False
         with self._lock:
@@ -273,6 +283,7 @@ class ChannelManager:
             self._emit_event("joined", channel_id, instance_uuid)
 
     def leave_current_channel(self, instance_uuid: str):
+        """Leave the current channel for the given instance, if any."""
         left_channel_id: str | None = None
         with self._lock:
             if instance_uuid in self.instance_channels:
@@ -314,6 +325,7 @@ class ChannelManager:
             self._emit_event("left", left_channel_id, instance_uuid)
 
     def get_current_channel(self, instance_uuid: str) -> Optional[ChannelInstance]:
+        """Return the current channel for the instance, if joined."""
         with self._lock:
             channel_id = self.instance_channels.get(instance_uuid)
             if channel_id:
@@ -321,6 +333,7 @@ class ChannelManager:
             return None
 
     def get_channel_members(self, channel_id: str) -> List[str]:
+        """Return a list of instance UUIDs currently in the channel."""
         with self._lock:
             if channel_id in self.channels:
                 members = self.channels[channel_id].members.copy()
@@ -332,12 +345,15 @@ class ChannelManager:
             return []
 
     def list_channels(self) -> List[ChannelInstance]:
+        """Return a list of all channels."""
         return list(self.channels.values())
 
     def get_private_channel_owner(self, channel_id: str) -> Optional[str]:
+        """Return the instance UUID that owns the private channel, if any."""
         return self.private_channel_owners.get(channel_id)
 
     def destroy_private_channel(self, channel_id: str) -> None:
+        """Remove all state associated with a private channel."""
         destroyed = False
         with self._lock:
             channel = self.channels.pop(channel_id, None)
@@ -373,6 +389,7 @@ class ChannelManager:
             self._emit_event("broadcast", channel_id, source_instance_uuid, context)
 
     def set_channel_context(self, channel_id: str, context: Fdc3Context) -> None:
+        """Store the latest context for a channel."""
         if not context or not isinstance(context, dict):
             return
 
@@ -389,6 +406,7 @@ class ChannelManager:
     def get_channel_context(
         self, channel_id: str, context_type: Optional[str] = None
     ) -> Optional[Fdc3Context]:
+        """Return the latest context for a channel, optionally filtered by type."""
         with self._lock:
             contexts = self.channel_contexts.get(channel_id)
             if not contexts:
@@ -399,12 +417,14 @@ class ChannelManager:
             return contexts.get(self.LAST_CONTEXT_KEY)
 
     def clear_channel_context(self, channel_id: str) -> None:
+        """Remove all stored context for a channel."""
         with self._lock:
             self.channel_contexts.pop(channel_id, None)
 
     def add_remote_private_channel_listener(
         self, channel_id: str, desktop_agent: str
     ) -> None:
+        """Track a remote agent interested in a private channel."""
         if not channel_id or not desktop_agent:
             return
         with self._lock:
@@ -415,6 +435,7 @@ class ChannelManager:
     def remove_remote_private_channel_listener(
         self, channel_id: str, desktop_agent: str
     ) -> None:
+        """Stop tracking a remote agent for a private channel."""
         if not channel_id or not desktop_agent:
             return
         with self._lock:
@@ -426,6 +447,7 @@ class ChannelManager:
                 self.remote_private_channel_listeners.pop(channel_id, None)
 
     def get_remote_private_channel_listeners(self, channel_id: str) -> Set[str]:
+        """Return remote agents listening for the private channel."""
         if not channel_id:
             return set()
         with self._lock:

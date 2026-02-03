@@ -1,22 +1,22 @@
 import strawberry
-from typing import List, Optional, AsyncGenerator
+from typing import AsyncGenerator, List, Optional
 import asyncio
 import logging
 import json
+from strawberry.types import Info
 
 # Import storage types
 from ..storage.interfaces import Storage as StorageInterface
 from ..core import core_services
+from ..core.channel_manager import ChannelInstance
 from ..version import __version__
 
-# Global storage instance - will be set by the server
-_storage: Optional[StorageInterface] = None
 
-
-def set_graphql_storage(storage_instance: StorageInterface):
-    """Set the storage instance for GraphQL queries"""
-    global _storage
-    _storage = storage_instance
+def _resolve_storage(info: Info) -> Optional[StorageInterface]:
+    context = info.context
+    if isinstance(context, dict):
+        return context.get("storage")
+    return None
 
 
 # Simple GraphQL types for admin/observability
@@ -110,19 +110,14 @@ class ChannelType:
     member_count: int
 
     @staticmethod
-    def from_channel(channel) -> "ChannelType":
+    def from_channel(channel: "ChannelInstance") -> "ChannelType":
         """Convert a Channel object to ChannelType."""
+        display_metadata = channel.display_metadata
         return ChannelType(
             id=channel.id,
             type=channel.type,
-            display_name=(
-                channel.display_metadata.name if channel.display_metadata else None
-            ),
-            color=(
-                getattr(channel.display_metadata, "color", None)
-                if channel.display_metadata
-                else None
-            ),
+            display_name=(display_metadata.name if display_metadata else None),
+            color=(display_metadata.color if display_metadata else None),
             member_count=len(channel.members),
         )
 
@@ -131,12 +126,16 @@ class ChannelType:
 @strawberry.type
 class Query:
     @strawberry.field
-    async def apps(self) -> List[AppMetadataType]:
+    async def apps(self, info: Info) -> List[AppMetadataType]:
         """List all apps in the app directory"""
-        if _storage is None:
+        storage = _resolve_storage(info)
+        if storage is None:
+            logging.warning(
+                "GraphQL requested app directory before storage initialized"
+            )
             return []
         try:
-            apps = await _storage.apps.list_apps()
+            apps = await storage.apps.list_apps()
             return [
                 AppMetadataType(
                     app_id=app.app_id,
@@ -160,12 +159,16 @@ class Query:
             return []
 
     @strawberry.field
-    async def launch_configs(self) -> List[LaunchConfigType]:
+    async def launch_configs(self, info: Info) -> List[LaunchConfigType]:
         """List all launch configurations"""
-        if _storage is None:
+        storage = _resolve_storage(info)
+        if storage is None:
+            logging.warning(
+                "GraphQL requested launch configs before storage initialized"
+            )
             return []
         try:
-            configs = await _storage.launch_configs.list_launch_configs()
+            configs = await storage.launch_configs.list_launch_configs()
             return [
                 LaunchConfigType(
                     app_id=config.app_id,
@@ -221,10 +224,13 @@ class Query:
 @strawberry.type
 class Mutation:
     @strawberry.mutation
-    async def create_launch_config(self, config: LaunchConfigInput) -> LaunchConfigType:
+    async def create_launch_config(
+        self, info: Info, config: LaunchConfigInput
+    ) -> LaunchConfigType:
         """Create or update a launch configuration"""
-        if _storage is None:
-            raise Exception("Storage not initialized")
+        storage = _resolve_storage(info)
+        if storage is None:
+            raise RuntimeError("Storage not initialized")
 
         # Convert input to LaunchConfig
         from ..storage.interfaces import LaunchConfig
@@ -238,7 +244,7 @@ class Mutation:
             timeout=config.timeout,
         )
 
-        await _storage.launch_configs.set_launch_config(launch_config)
+        await storage.launch_configs.set_launch_config(launch_config)
 
         # Return the created config
         return LaunchConfigType(
@@ -254,12 +260,13 @@ class Mutation:
         )
 
     @strawberry.mutation
-    async def delete_launch_config(self, app_id: str) -> bool:
+    async def delete_launch_config(self, info: Info, app_id: str) -> bool:
         """Delete a launch configuration"""
-        if _storage is None:
-            raise Exception("Storage not initialized")
+        storage = _resolve_storage(info)
+        if storage is None:
+            raise RuntimeError("Storage not initialized")
 
-        await _storage.launch_configs.remove_launch_config(app_id)
+        await storage.launch_configs.remove_launch_config(app_id)
         return True
 
     @strawberry.mutation

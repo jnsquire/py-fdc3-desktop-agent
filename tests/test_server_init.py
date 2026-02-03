@@ -358,6 +358,77 @@ async def test_bridge_connected_agents_update_applies_unknown_channel_state(
 
 
 @pytest.mark.asyncio
+async def test_bridge_connected_agents_update_ignores_malformed_channel_state(
+    monkeypatch, caplog
+):
+    from fdc3.desktop_agent import server as server_mod
+    from fdc3.desktop_agent.server import lifespan as lifespan_mod
+    from fdc3.desktop_agent.server import app_factory as app_factory_mod
+
+    core = CoreServices()
+    monkeypatch.setattr(lifespan_mod, "core_services", core)
+
+    class _BridgeClientCapture:
+        def __init__(
+            self,
+            settings: Any,
+            *,
+            implementation_metadata_factory: Any,
+            channels_state_factory: Any,
+            request_handler: Any,
+            connected_agents_update_handler: Any = None,
+        ):
+            self.connected_agents_update_handler = connected_agents_update_handler
+
+        async def start(self) -> None:
+            return
+
+        async def stop(self) -> None:
+            return
+
+    monkeypatch.setattr(lifespan_mod, "BridgeClient", _BridgeClientCapture)
+    monkeypatch.setattr(
+        app_factory_mod, "WebSocketConnectionManager", _InstanceConnectionManagerStub
+    )
+    monkeypatch.setattr(
+        app_factory_mod, "AgentClientConnectionManager", _AgentClientManagerStub
+    )
+
+    storage = _StorageStub()
+    config = DesktopAgentConfig(
+        storage=cast(Any, storage),
+        launcher=cast(Any, _LauncherStub()),
+        auto_discover_plugins=False,
+        bridge_enabled=True,
+        bridge_requested_name="agent-1",
+    )
+
+    app = server_mod.create_app(config)
+
+    # Malformed: members list contains a non-dict and a dict missing 'type'
+    malformed = {
+        "user:demo": ["not-a-dict", {"no_type": "x"}],
+    }
+
+    caplog.set_level("WARNING")
+    async with app.router.lifespan_context(app):
+        bridge_client = app.state.bridge_client
+        assert bridge_client is not None
+        update_handler = cast(Any, bridge_client).connected_agents_update_handler
+        assert update_handler is not None
+
+        await update_handler(
+            type("Payload", (), {"addAgent": None, "channelsState": malformed})()
+        )
+
+    # No channel contexts should have been stored
+    assert not core.channel_manager.channel_contexts
+
+    # A warning should be logged about malformed channelsState
+    assert any("Ignoring malformed channelsState" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
 async def test_bridge_connected_agents_update_merges_known_channel_and_notifies_listeners(
     monkeypatch,
 ):

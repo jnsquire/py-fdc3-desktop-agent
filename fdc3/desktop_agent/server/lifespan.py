@@ -1,19 +1,20 @@
 # Lifespan management for the FDC3 Desktop Agent server
 
 from __future__ import annotations
+from pydantic import ValidationError
 
 import json
 import logging
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any, AsyncContextManager, Protocol, cast
+from typing import TYPE_CHECKING, Any, AsyncContextManager, Protocol, cast, Mapping
 
 from fastapi import FastAPI
 
 from ..bridging import BridgeClient
 from ..bridging.client import (
     BridgeConnectionSettings,
-    RequestHandler,
+    ImplementationMetadata,
     ImplementationMetadataFactory,
     ChannelsStateFactory,
     ChannelMember,
@@ -33,6 +34,8 @@ from fdc3.models.dacp.dacp import (
 )
 from ..version import __version__
 from .constants import SYSTEM_APP_METADATA
+from .models import ChannelContextItem, ChannelsStateModel
+
 
 if TYPE_CHECKING:
     from ..config import DesktopAgentConfig
@@ -40,6 +43,7 @@ if TYPE_CHECKING:
     from ..launcher.interfaces import ProcessLauncher
     from ..storage.interfaces import Storage
     from .connection_manager import AgentClientConnectionManager
+    from ..handlers.dacp.base import BridgeClientProtocol
 
 
 class AppState(Protocol):
@@ -72,7 +76,7 @@ def create_implementation_metadata_factory(
 ) -> ImplementationMetadataFactory:
     """Create the implementation metadata factory for bridge handshake."""
 
-    def _implementation_metadata() -> dict[str, Any]:
+    def _implementation_metadata() -> ImplementationMetadata:
         # Minimal ImplementationMetadata for bridging handshake.
         # Keep optional features aligned with DACP getInfo reporting.
         # See FDC3 agent-bridging overview, BCP step 3.
@@ -90,7 +94,7 @@ def create_implementation_metadata_factory(
             "optionalFeatures": optional_features,
         }
 
-    return cast(ImplementationMetadataFactory, _implementation_metadata)
+    return _implementation_metadata
 
 
 def create_channels_state_factory(
@@ -153,7 +157,7 @@ def create_channels_state_factory(
 
         return state
 
-    return cast(ChannelsStateFactory, _channels_state)
+    return _channels_state
 
 
 async def _safe_await(label: str, awaitable) -> None:
@@ -161,6 +165,24 @@ async def _safe_await(label: str, awaitable) -> None:
         await awaitable
     except Exception:
         logger.exception("Error %s", label)
+
+
+def _ensure_app_state(state: Any) -> AppState:
+    defaults: dict[str, Any] = {
+        "bridge_client": None,
+        "distributed_adapter": None,
+        "distributed_subscription_id": None,
+        "storage": None,
+        "launcher": None,
+        "core_services": core_services,
+        "dacp_handler": None,
+        "agent_client_manager": None,
+        "instance_connection_manager": None,
+    }
+    for name, value in defaults.items():
+        if not hasattr(state, name):
+            setattr(state, name, value)
+    return cast(AppState, state)
 
 
 def create_lifespan(
@@ -188,9 +210,11 @@ def create_lifespan(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         """Lifespan handler to initialize and teardown resources."""
-        state = cast(AppState, app.state)
+        state = _ensure_app_state(app.state)
 
-        async def _apply_channels_state(channels_state: dict[str, list[dict]] | None):
+        async def _apply_channels_state(
+            channels_state: Mapping[str, list[ChannelContextItem]] | None,
+        ):
             if not channels_state:
                 return
 
@@ -201,78 +225,98 @@ def create_lifespan(
                 if not isinstance(incoming, list):
                     continue
 
-                incoming_contexts: list[Fdc3Context] = [
-                    cast(Fdc3Context, ctx)
-                    for ctx in incoming
-                    if isinstance(ctx, dict) and ctx.get("type")
-                ]
+                # Expect incoming to be ChannelContextItem instances
+                incoming_contexts: list[ChannelContextItem] = []
+                for ctx in incoming:
+                    if isinstance(ctx, ChannelContextItem):
+                        incoming_contexts.append(ctx)
                 if not incoming_contexts:
                     continue
 
-                with channel_manager._lock:
-                    existing = dict(
-                        channel_manager.channel_contexts.get(channel_id, {})
-                    )
-                    members = set(channel_manager.get_channel_members(channel_id))
-                    channel_known = (
-                        channel_id in channel_manager.channels
-                        or channel_id in channel_manager.channel_contexts
-                    )
-
-                if not channel_known:
+                # Extract processing into helper for clarity and smaller lock windows
+                def _process_channel(
+                    channel_id: str, incoming_contexts: list[ChannelContextItem]
+                ) -> list[tuple[str, Fdc3Context]]:
+                    # Initialize existing snapshot and membership
                     with channel_manager._lock:
-                        stored = channel_manager.channel_contexts.setdefault(
-                            channel_id, {}
+                        existing = dict(
+                            channel_manager.channel_contexts.get(channel_id, {})
                         )
-                        for ctx in incoming_contexts:
-                            stored[ctx["type"]] = ctx
-                        stored[channel_manager.LAST_CONTEXT_KEY] = incoming_contexts[0]
-                    continue
-
-                send_queue: list[tuple[str, Fdc3Context]] = []
-
-                for ctx in reversed(incoming_contexts):
-                    ctx_type = ctx["type"]
-                    existing_ctx = existing.get(ctx_type)
-                    if existing_ctx is None or existing_ctx != ctx:
-                        listeners = listener_store.get_context_listeners_for_type(
-                            ctx_type, channel_id=channel_id, include_global=True
+                        members = set(channel_manager.get_channel_members(channel_id))
+                        channel_known = (
+                            channel_id in channel_manager.channels
+                            or channel_id in channel_manager.channel_contexts
                         )
-                        for listener in listeners:
-                            if listener.context_type is None:
+
+                        if not channel_known:
+                            stored = channel_manager.channel_contexts.setdefault(
+                                channel_id, {}
+                            )
+                            for ctx in incoming_contexts:
+                                ctx_dict = ctx.model_dump()
+                                stored[ctx_dict["type"]] = ctx_dict
+                            stored[channel_manager.LAST_CONTEXT_KEY] = (
+                                incoming_contexts[0].model_dump()
+                            )
+                            return []
+
+                    send_queue: list[tuple[str, Fdc3Context]] = []
+
+                    # Determine listeners to notify and update 'existing'
+                    for ctx in reversed(incoming_contexts):
+                        ctx_dict = ctx.model_dump()
+                        ctx_type = ctx.type
+                        existing_ctx = existing.get(ctx_type)
+                        if existing_ctx is None or existing_ctx != ctx_dict:
+                            listeners = listener_store.get_context_listeners_for_type(
+                                ctx_type, channel_id=channel_id, include_global=True
+                            )
+                            for listener in listeners:
+                                if listener.context_type is None:
+                                    continue
+                                if listener.instance_uuid not in members:
+                                    continue
+                                send_queue.append(
+                                    (
+                                        listener.instance_uuid,
+                                        cast(Fdc3Context, ctx_dict),
+                                    )
+                                )
+                            existing[ctx_type] = ctx_dict
+
+                    most_recent = incoming_contexts[0].model_dump()
+                    existing_last = existing.get(channel_manager.LAST_CONTEXT_KEY)
+                    if existing_last != most_recent:
+                        for listener in listener_store.context_listeners.values():
+                            if listener.context_type is not None:
+                                continue
+                            if listener.channel_id not in (None, channel_id):
                                 continue
                             if listener.instance_uuid not in members:
                                 continue
-                            send_queue.append((listener.instance_uuid, ctx))
-                        existing[ctx_type] = ctx
+                            send_queue.append(
+                                (listener.instance_uuid, cast(Fdc3Context, most_recent))
+                            )
+                        existing[channel_manager.LAST_CONTEXT_KEY] = most_recent
 
-                most_recent = incoming_contexts[0]
-                existing_last = existing.get(channel_manager.LAST_CONTEXT_KEY)
-                if existing_last != most_recent:
-                    for listener in listener_store.context_listeners.values():
-                        if listener.context_type is not None:
-                            continue
-                        if listener.channel_id not in (None, channel_id):
-                            continue
-                        if listener.instance_uuid not in members:
-                            continue
-                        send_queue.append((listener.instance_uuid, most_recent))
-                    existing[channel_manager.LAST_CONTEXT_KEY] = most_recent
+                    with channel_manager._lock:
+                        channel_manager.channel_contexts[channel_id] = existing
 
-                with channel_manager._lock:
-                    channel_manager.channel_contexts[channel_id] = existing
+                    return send_queue
 
-                serialized: dict[int, str] = {}
+                send_queue = _process_channel(channel_id, incoming_contexts)
+
+                # Send deduplicated per-payload messages
+                serialized_values: dict[str, str] = {}
                 for instance_uuid, ctx in send_queue:
-                    key = id(ctx)
-                    payload = serialized.get(key)
+                    payload = serialized_values.get(json.dumps(ctx, sort_keys=True))
                     if payload is None:
                         payload = BroadcastEvent(
                             type="broadcastEvent",
                             payload=BroadcastEventPayload(context=ctx),
                             meta=AgentEventMeta(),
                         ).model_dump_json()
-                        serialized[key] = payload
+                        serialized_values[json.dumps(ctx, sort_keys=True)] = payload
                     await instance_connection_manager.send_to_instance(
                         instance_uuid, payload
                     )
@@ -338,7 +382,16 @@ def create_lifespan(
                     router.set_local_desktop_agent_name(add_agent)
                 channels_state = getattr(payload, "channelsState", None)
                 if channels_state:
-                    await _apply_channels_state(dict(channels_state))
+                    # Use Pydantic to validate the expected shape: dict[str, list[dict(type:str, ... )]]
+                    try:
+                        validated = ChannelsStateModel.model_validate(channels_state)
+                    except ValidationError:
+                        logger.warning(
+                            "Ignoring malformed channelsState in connectedAgentsUpdate: %r",
+                            channels_state,
+                        )
+                    else:
+                        await _apply_channels_state(validated.root)
 
             bridge_client = BridgeClient(
                 settings,
@@ -346,14 +399,14 @@ def create_lifespan(
                     settings
                 ),
                 channels_state_factory=create_channels_state_factory(settings),
-                request_handler=cast(RequestHandler, router.handle),
+                request_handler=router.handle,
                 connected_agents_update_handler=_handle_connected_agents_update,
             )
             await bridge_client.start()
             state.bridge_client = bridge_client
 
             # Inject into handler so outbound calls can be bridged.
-            dacp_handler.bridge_client = bridge_client
+            dacp_handler.bridge_client = cast("BridgeClientProtocol", bridge_client)
 
         # Initialize distributed adapter
         adapter = config.distributed_adapter

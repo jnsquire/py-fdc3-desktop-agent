@@ -11,8 +11,9 @@ from typing import Optional
 from fastapi import FastAPI, WebSocket
 from fastapi.staticfiles import StaticFiles
 from strawberry.fastapi import GraphQLRouter
+from starlette.requests import Request
 
-from ..api.graphql import schema, set_graphql_storage
+from ..api.graphql import schema
 from ..config import DesktopAgentConfig
 from ..storage import SqliteStorage
 from ..launcher import SubprocessLauncher
@@ -130,9 +131,11 @@ def create_app(config: Optional[DesktopAgentConfig] = None) -> FastAPI:
         name="ui",
     )
 
-    # Initialize GraphQL with storage
-    set_graphql_storage(storage)
-    graphql_app = GraphQLRouter(schema)
+    # Initialize GraphQL with storage context
+    def _graphql_context_getter(_: Request) -> dict[str, object]:
+        return {"storage": storage}
+
+    graphql_app = GraphQLRouter(schema, context_getter=_graphql_context_getter)
     app.include_router(graphql_app, prefix="/graphql")
 
     # Include HTTP routes

@@ -5,49 +5,53 @@ from typing import Dict, List, Optional, Set
 from fdc3.models.primitives import ListenerUuid
 
 
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
 class ContextListener:
-    def __init__(
-        self,
-        listener_uuid: ListenerUuid,
-        instance_uuid: str,
-        context_type: Optional[str] = None,
-        channel_id: Optional[str] = None,
-    ):
-        self.listener_uuid = listener_uuid
-        self.instance_uuid = instance_uuid
-        self.context_type = context_type
-        self.channel_id = channel_id
+    listener_uuid: ListenerUuid
+    instance_uuid: str
+    context_type: Optional[str] = None
+    channel_id: Optional[str] = None
 
 
+@dataclass(frozen=True)
 class IntentListener:
-    def __init__(self, listener_uuid: ListenerUuid, instance_uuid: str, intent: str):
-        self.listener_uuid = listener_uuid
-        self.instance_uuid = instance_uuid
-        self.intent = intent
+    listener_uuid: ListenerUuid
+    instance_uuid: str
+    intent: str
 
 
+@dataclass(frozen=True)
 class EventListener:
-    def __init__(
-        self,
-        listener_uuid: ListenerUuid,
-        instance_uuid: str,
-        event_type: str | None,
-        channel_id: Optional[str] = None,
-    ):
-        self.listener_uuid = listener_uuid
-        self.instance_uuid = instance_uuid
-        self.event_type = event_type
-        self.channel_id = channel_id
+    listener_uuid: ListenerUuid
+    instance_uuid: str
+    event_type: str | None
+    channel_id: Optional[str] = None
 
 
 class ListenerStore:
-    """Manages context listeners and intent listeners."""
+    """Manages context listeners and intent listeners.
+
+    This class keeps track of registered listeners and provides helper methods
+    to add, remove and query them. Listener objects are lightweight frozen
+    dataclasses which makes them cheap to copy and safe to use as dict values.
+    """
 
     def __init__(self):
         self.context_listeners: Dict[str, ContextListener] = {}
         self.intent_listeners: Dict[str, IntentListener] = {}
         self.event_listeners: Dict[str, EventListener] = {}
         self.listeners_by_instance: Dict[str, Set[str]] = {}
+
+    def _register_instance(
+        self, listener_uuid: ListenerUuid, instance_uuid: str
+    ) -> str:
+        """Record the listener under the instance and return the listener key."""
+        key = listener_uuid.root
+        self.listeners_by_instance.setdefault(instance_uuid, set()).add(key)
+        return key
 
     def add_context_listener(
         self,
@@ -59,20 +63,16 @@ class ListenerStore:
         listener = ContextListener(
             listener_uuid, instance_uuid, context_type, channel_id
         )
-        self.context_listeners[listener_uuid.root] = listener
-        self.listeners_by_instance.setdefault(instance_uuid, set()).add(
-            listener_uuid.root
-        )
+        key = self._register_instance(listener_uuid, instance_uuid)
+        self.context_listeners[key] = listener
         return listener
 
     def add_intent_listener(
         self, listener_uuid: ListenerUuid, instance_uuid: str, intent: str
     ) -> IntentListener:
         listener = IntentListener(listener_uuid, instance_uuid, intent)
-        self.intent_listeners[listener_uuid.root] = listener
-        self.listeners_by_instance.setdefault(instance_uuid, set()).add(
-            listener_uuid.root
-        )
+        key = self._register_instance(listener_uuid, instance_uuid)
+        self.intent_listeners[key] = listener
         return listener
 
     def add_event_listener(
@@ -83,32 +83,40 @@ class ListenerStore:
         channel_id: Optional[str] = None,
     ) -> EventListener:
         listener = EventListener(listener_uuid, instance_uuid, event_type, channel_id)
-        self.event_listeners[listener_uuid.root] = listener
-        self.listeners_by_instance.setdefault(instance_uuid, set()).add(
-            listener_uuid.root
-        )
+        key = self._register_instance(listener_uuid, instance_uuid)
+        self.event_listeners[key] = listener
         return listener
 
     def remove_listener(
-        self, listener_uuid: str
+        self, listener_uuid: str | ListenerUuid
     ) -> ContextListener | IntentListener | EventListener | None:
+        """Remove and return a listener given its UUID (or ListenerUuid).
+
+        Accepts either the listener root string or a ListenerUuid object for
+        convenience. Returns the removed listener object or None if not found.
+        """
+        if isinstance(listener_uuid, ListenerUuid):
+            key = listener_uuid.root
+        else:
+            key = listener_uuid
+
         listener: ContextListener | IntentListener | EventListener | None = None
         instance_uuid: str | None = None
 
-        if listener_uuid in self.context_listeners:
-            listener = self.context_listeners.pop(listener_uuid)
+        if key in self.context_listeners:
+            listener = self.context_listeners.pop(key)
             instance_uuid = listener.instance_uuid
-        elif listener_uuid in self.intent_listeners:
-            listener = self.intent_listeners.pop(listener_uuid)
+        elif key in self.intent_listeners:
+            listener = self.intent_listeners.pop(key)
             instance_uuid = listener.instance_uuid
-        elif listener_uuid in self.event_listeners:
-            listener = self.event_listeners.pop(listener_uuid)
+        elif key in self.event_listeners:
+            listener = self.event_listeners.pop(key)
             instance_uuid = listener.instance_uuid
         else:
             return None
 
         if instance_uuid and instance_uuid in self.listeners_by_instance:
-            self.listeners_by_instance[instance_uuid].discard(listener_uuid)
+            self.listeners_by_instance[instance_uuid].discard(key)
             if not self.listeners_by_instance[instance_uuid]:
                 del self.listeners_by_instance[instance_uuid]
 

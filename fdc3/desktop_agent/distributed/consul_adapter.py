@@ -13,9 +13,12 @@ import threading
 import json
 import uuid
 import logging
-from typing import Any, Callable, Dict, Optional, Set
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Set
 
 from .adapter import DistributedLogAdapter
+
+if TYPE_CHECKING:
+    from aiohttp import ClientSession  # type: ignore[reportMissingImports]
 
 try:
     import aiohttp  # type:ignore[unresolved-import]
@@ -35,7 +38,7 @@ class ConsulAdapter(DistributedLogAdapter):
             )
 
         self.base = f"http://{host}:{port}/v1/kv/{prefix.rstrip('/')}"
-        self._session: Optional[aiohttp.ClientSession] = None
+        self._session: Optional["ClientSession"] = None
         self._watch_tasks: Dict[str, asyncio.Task] = {}
         self._watch_tasks_lock = threading.Lock()
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -43,7 +46,8 @@ class ConsulAdapter(DistributedLogAdapter):
 
     async def start(self) -> None:
         if self._session is None:
-            self._session = aiohttp.ClientSession()  # type: ignore[assignment]
+            assert aiohttp is not None
+            self._session = aiohttp.ClientSession()
         try:
             self._loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -165,13 +169,16 @@ class ConsulAdapter(DistributedLogAdapter):
         idx = None
         seen_keys: Set[str] = set()
 
+        session = self._session
+        assert session is not None, "ConsulAdapter not started"
+
         while True:
             params: Dict[str, str] = {"recurse": "true", "wait": "300s"}
             if idx is not None:
                 params["index"] = str(idx)
 
             try:
-                async with self._session.get(topic_prefix, params=params) as resp:  # type: ignore[union-attr]
+                async with session.get(topic_prefix, params=params) as resp:
                     if resp.status != 200:
                         logger.warning(
                             "Consul responded with status %s for prefix %s",

@@ -218,13 +218,16 @@ class BridgeClient:
 
     @property
     def assigned_name(self) -> Optional[str]:
+        """Name assigned by the bridge during the handshake."""
         return self._assigned_name
 
     @property
     def is_connected(self) -> bool:
+        """Whether the bridge websocket is connected and assigned."""
         return self._ws is not None and self._assigned_name is not None
 
     def has_connected_agent(self, name: str) -> bool:
+        """Return True if the named desktop agent is currently connected."""
         if not name:
             return False
         return any(
@@ -232,32 +235,44 @@ class BridgeClient:
         )
 
     async def start(self) -> None:
+        """Start the bridge client loop if not already running."""
         if self._run_task is not None:
             return
         self._stopping.clear()
         self._run_task = asyncio.create_task(self._run_loop(), name="bridge-client")
 
     async def stop(self) -> None:
+        """Stop the bridge client and close resources.
+
+        Raises:
+            Exception: Re-raises errors from background tasks when shutting down.
+        """
         self._stopping.set()
         if self._recv_task is not None:
             self._recv_task.cancel()
             try:
                 await self._recv_task
             except asyncio.CancelledError:
-                pass
+                logger.debug("Bridge receive task cancelled during shutdown")
+            except Exception as exc:
+                logger.warning("Error waiting for receive task shutdown: %s", exc)
+                raise
             self._recv_task = None
         if self._ws is not None:
             try:
                 await self._ws.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Error closing bridge websocket: %s", exc)
             self._ws = None
         if self._run_task is not None:
             self._run_task.cancel()
             try:
                 await self._run_task
             except asyncio.CancelledError:
-                pass
+                logger.debug("Bridge run loop task cancelled during shutdown")
+            except Exception as exc:
+                logger.warning("Error waiting for run loop shutdown: %s", exc)
+                raise
             self._run_task = None
 
         await self._fail_all_pending(BridgingError.AgentDisconnected.value)
@@ -289,8 +304,10 @@ class BridgeClient:
                 if self._ws is not None:
                     try:
                         await self._ws.close()
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.warning(
+                            "Error closing websocket during cleanup: %s", exc
+                        )
                     self._ws = None
                 await self._fail_all_pending(BridgingError.AgentDisconnected.value)
 

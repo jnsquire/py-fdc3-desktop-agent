@@ -157,6 +157,18 @@ class TestListenerStore:
         store.remove_listener(listener.listener_uuid.root)
         assert len(store.get_context_listeners("fdc3.instrument")) == 0
 
+    def test_remove_listener_accepts_listener_object(self):
+        """remove_listener should accept a ListenerUuid object as well as its root string"""
+        store = ListenerStore()
+
+        listener = store.add_context_listener(
+            ListenerUuid("uuid2"), "instance1", "fdc3.instrument"
+        )
+        removed = store.remove_listener(listener.listener_uuid)
+        assert removed is not None
+        assert isinstance(removed.listener_uuid, ListenerUuid)
+        assert len(store.get_context_listeners("fdc3.instrument")) == 0
+
     def test_remove_listeners_for_instance(self):
         """Test removing all listeners for an instance"""
         store = ListenerStore()
@@ -272,7 +284,9 @@ class TestContextRouter:
 
         # Context without type should raise ValueError
         with pytest.raises(ValueError, match="Context must have a 'type' field"):
-            router.broadcast_context({"id": "test"}, "source-uuid")
+            # Use a correctly typed 'id' (dict) to keep static typing satisfied while
+            # omitting the required 'type' field which is validated at runtime.
+            router.broadcast_context({"id": {"foo": "test"}}, "source-uuid")
 
     def test_broadcast_context_no_echo_policy(self):
         """Test that broadcast avoids echoing to source instance"""
@@ -507,6 +521,8 @@ class TestChannelManager:
 
         instrument_context = manager.get_channel_context("c1", "fdc3.instrument")
         assert instrument_context is not None
+        # 'id' is optional on the context type; assert its presence before indexing
+        assert instrument_context["id"] is not None
         assert instrument_context["id"]["ticker"] == "XYZ"
 
         channel_context = manager.get_channel_context("c1")

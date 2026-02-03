@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 from fdc3.models.dacp.dacp import (
@@ -165,7 +165,7 @@ class BridgeRequestRouter:
     def set_local_desktop_agent_name(self, name: str | None) -> None:
         self._local_name = name
 
-    async def handle(self, msg: dict[str, Any]) -> Optional[dict[str, Any]]:
+    async def handle(self, msg: Mapping[str, Any]) -> Optional[dict[str, Any]]:
         """Handle a bridge request and return a bridge-shaped response."""
         req = ParsedBridgeRequest.model_validate(msg)
         if not req.request_uuid:
@@ -219,13 +219,13 @@ class BridgeRequestRouter:
         )
 
     def _build_dacp_message(
-        self, raw_msg: dict[str, Any], msg_type: str | None
-    ) -> dict[str, Any]:
+        self, raw_msg: Mapping[str, Any], msg_type: str | None
+    ) -> Mapping[str, Any]:
         """Convert bridge request to DACP message format."""
         if msg_type and msg_type.endswith("Request"):
             simplified_type = msg_type[: -len("Request")]
             if simplified_type in BRIDGE_DACP_TYPES:
-                dacp_msg = raw_msg.copy()
+                dacp_msg = dict(raw_msg)
                 dacp_msg["type"] = simplified_type
                 return dacp_msg
         return raw_msg

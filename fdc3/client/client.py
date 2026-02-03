@@ -38,6 +38,7 @@ import logging
 import uuid
 import urllib.parse
 from datetime import datetime
+from types import TracebackType
 from typing import Any, Dict, List, Optional, Protocol, Tuple, runtime_checkable
 
 import httpx
@@ -319,11 +320,16 @@ class FDC3Client:
         finally:
             self._clear_pending_response(request_uuid)
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "FDC3Client":
         await self.connect()
         return self
 
-    async def __aexit__(self, exc_type, exc, tb):
+    async def __aexit__(
+        self,
+        exc_type: Optional[type[BaseException]],
+        exc: Optional[BaseException],
+        tb: Optional[TracebackType],
+    ) -> None:
         await self.close()
 
     async def connect(self) -> None:

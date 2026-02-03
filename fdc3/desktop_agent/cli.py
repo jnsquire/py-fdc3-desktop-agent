@@ -7,11 +7,14 @@ Ctrl-C / SIGTERM so shutdown logs complete before the shell prompt returns.
 from __future__ import annotations
 
 import importlib.util
+import logging
 import os
 import signal
 import subprocess
 import sys
 from typing import List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 def _terminate_child(proc: subprocess.Popen) -> None:
@@ -21,12 +24,17 @@ def _terminate_child(proc: subprocess.Popen) -> None:
             # On Windows, terminate() sends SIGTERM equivalent
             proc.terminate()
         else:
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-    except Exception:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)  # type: ignore[attr-defined]
+    except Exception as exc:
+        logger.warning("Failed to send stop signal to process %s: %s", proc.pid, exc)
         try:
             proc.terminate()
-        except Exception:
-            pass
+        except Exception as exc_terminate:
+            logger.debug(
+                "Unable to terminate process %s after signal failure: %s",
+                proc.pid,
+                exc_terminate,
+            )
 
 
 def _build_command(argv: List[str]) -> Optional[List[str]]:
@@ -54,8 +62,14 @@ async def _register_app(json_path: str) -> int:
     try:
         with open(json_path, "r") as f:
             data = json.load(f)
-    except Exception as e:
-        print(f"Error reading JSON file {json_path}: {e}")
+    except FileNotFoundError as exc:
+        logger.error("App metadata file not found (%s): %s", json_path, exc)
+        return 1
+    except json.JSONDecodeError as exc:
+        logger.error("Invalid JSON in %s: %s", json_path, exc)
+        return 1
+    except OSError as exc:
+        logger.error("Unable to read %s: %s", json_path, exc)
         return 1
 
     config = DesktopAgentConfig()
@@ -65,7 +79,7 @@ async def _register_app(json_path: str) -> int:
     try:
         app_id = data.get("appId") or data.get("app_id")
         if not app_id:
-            print("Error: 'appId' is required in the JSON file.")
+            logger.error("Error registering app: 'appId' is required")
             return 1
 
         metadata = AppMetadata(
@@ -86,9 +100,12 @@ async def _register_app(json_path: str) -> int:
 
         launch_data = data.get("launch")
         if launch_data:
+            command = launch_data.get("command")
+            if not command:
+                raise ValueError("Launch config must include a non-empty command")
             launch_config = LaunchConfig(
                 app_id=app_id,
-                command=launch_data.get("command", ""),
+                command=command,
                 args=launch_data.get("args", []),
                 env=launch_data.get("env", {}),
                 cwd=launch_data.get("cwd", ""),
@@ -98,8 +115,11 @@ async def _register_app(json_path: str) -> int:
 
         print(f"Successfully registered app '{app_id}' in {config.db_path}")
         return 0
-    except Exception as e:
-        print(f"Error registering app: {e}")
+    except (ValueError, LookupError) as exc:
+        logger.error("App registration failed (%s): %s", json_path, exc)
+        return 1
+    except Exception:
+        logger.exception("Unexpected error registering app %s", json_path)
         return 1
     finally:
         await storage.close()
