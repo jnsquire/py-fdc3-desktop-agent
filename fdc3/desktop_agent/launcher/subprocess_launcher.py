@@ -7,10 +7,11 @@ import os
 import uuid
 from typing import Optional, Dict
 from fdc3.models.dacp.dacp import Fdc3Context
+from fdc3.models.identifiers import AppIdentifier
+from fdc3.desktop_agent.launcher.interfaces import ProcessLauncher, LaunchResult
+from fdc3.desktop_agent.storage import LaunchConfig
+from fdc3.desktop_agent.tools import create_task_safe, yield_once
 from pathlib import Path
-from .interfaces import ProcessLauncher, LaunchResult
-from ..api import AppIdentifier
-from ..storage import LaunchConfig
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,41 @@ class SubprocessLauncher(ProcessLauncher):
         self._process_events: Dict[str, asyncio.Event] = {}
         self._agent_url = agent_url
 
+    def _normalize_cwd(self, cwd: Optional[str]) -> Optional[str]:
+        if not cwd:
+            return None
+        path = Path(cwd)
+        if path.is_absolute():
+            return str(path)
+        return str(Path.cwd() / path)
+
+    def _set_process_event(self, instance_uuid: str) -> None:
+        event = self._process_events.get(instance_uuid)
+        if event is not None:
+            event.set()
+
+    def _remove_process(self, instance_uuid: str) -> None:
+        self._running_processes.pop(instance_uuid, None)
+
+    def _close_transports(self, process: asyncio.subprocess.Process) -> None:
+        """Best-effort close of underlying transports to avoid hanging proactor pipes."""
+        try:
+            tr = getattr(process, "_transport", None)
+            if tr is not None:
+                tr.close()
+        except Exception:
+            pass
+
+        for stream_name in ("stdout", "stderr"):
+            try:
+                stream = getattr(process, stream_name, None)
+                if stream is not None:
+                    tr = getattr(stream, "_transport", None)
+                    if tr is not None:
+                        tr.close()
+            except Exception:
+                pass
+
     async def launch_app(
         self,
         app_id: str,
@@ -32,8 +68,11 @@ class SubprocessLauncher(ProcessLauncher):
     ) -> LaunchResult:
         """Launch an app process with the given configuration"""
         try:
+            if not launch_config.command:
+                return LaunchResult(success=False, error="Launch command is required")
+
             # Build command line arguments
-            cmd = [launch_config.command] + launch_config.args
+            cmd = [launch_config.command] + (launch_config.args or [])
 
             # Prepare environment variables
             env = os.environ.copy()
@@ -58,15 +97,17 @@ class SubprocessLauncher(ProcessLauncher):
 
             # Add context if provided
             if context:
-                env["FDC3_CONTEXT"] = json.dumps(context)
+                try:
+                    env["FDC3_CONTEXT"] = json.dumps(context)
+                except (TypeError, ValueError) as exc:
+                    return LaunchResult(
+                        success=False, error=f"Failed to serialize context: {exc}"
+                    )
 
             # Determine working directory
-            cwd = launch_config.cwd if launch_config.cwd else None
-            if cwd and not Path(cwd).is_absolute():
-                # Relative to current working directory
-                cwd = str(Path.cwd() / cwd)
+            cwd = self._normalize_cwd(launch_config.cwd)
 
-            logger.info(f"Launching app {app_id} with command: {' '.join(cmd)}")
+            logger.info("Launching app %s with command: %s", app_id, " ".join(cmd))
 
             # Launch the process
             # By default do not capture stdout/stderr to avoid creating pipe transports
@@ -79,12 +120,12 @@ class SubprocessLauncher(ProcessLauncher):
             self._process_events[instance_uuid] = asyncio.Event()
 
             # Start a background reaper to clean up transports when the process exits
-            from ..tools import create_task_safe  # local import to avoid cycles
-
             create_task_safe(self._reap_process(instance_uuid, process))
 
             logger.info(
-                f"App {app_id} launched successfully with instance UUID {instance_uuid}"
+                "App %s launched successfully with instance UUID %s",
+                app_id,
+                instance_uuid,
             )
 
             return LaunchResult(
@@ -92,7 +133,7 @@ class SubprocessLauncher(ProcessLauncher):
             )
 
         except Exception as e:
-            logger.error(f"Failed to launch app {app_id}: {e}")
+            logger.exception("Failed to launch app %s", app_id)
             return LaunchResult(success=False, error=str(e))
 
     async def terminate_app(self, instance_uuid: str) -> bool:
@@ -111,33 +152,15 @@ class SubprocessLauncher(ProcessLauncher):
                 # Force kill if it doesn't terminate gracefully
                 process.kill()
                 await process.wait()
-            # Attempt to close underlying transports to avoid hanging proactor pipes
-            try:
-                tr = getattr(process, "_transport", None)
-                if tr is not None:
-                    try:
-                        tr.close()
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+            self._close_transports(process)
 
-            # Clear stored refs
-            try:
-                if instance_uuid in self._process_events:
-                    self._process_events[instance_uuid].set()
-            except Exception:
-                pass
-
-            try:
-                del self._running_processes[instance_uuid]
-            except Exception:
-                pass
-            logger.info(f"Terminated app instance {instance_uuid}")
+            self._set_process_event(instance_uuid)
+            self._remove_process(instance_uuid)
+            logger.info("Terminated app instance %s", instance_uuid)
             return True
 
-        except Exception as e:
-            logger.error(f"Failed to terminate app instance {instance_uuid}: {e}")
+        except Exception:
+            logger.exception("Failed to terminate app instance %s", instance_uuid)
             return False
 
     async def _reap_process(
@@ -149,48 +172,14 @@ class SubprocessLauncher(ProcessLauncher):
         except Exception:
             pass
 
-        # Attempt to close underlying transports to avoid hanging proactor pipes
-        try:
-            tr = getattr(process, "_transport", None)
-            if tr is not None:
-                try:
-                    tr.close()
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-        # Also try to close stdout/stderr stream transports if present
-        for stream_name in ("stdout", "stderr"):
-            try:
-                stream = getattr(process, stream_name, None)
-                if stream is not None:
-                    tr = getattr(stream, "_transport", None)
-                    if tr is not None:
-                        try:
-                            tr.close()
-                        except Exception:
-                            pass
-            except Exception:
-                pass
+        self._close_transports(process)
 
         # Signal any waiters and remove references
-        try:
-            if instance_uuid in self._process_events:
-                self._process_events[instance_uuid].set()
-        except Exception:
-            pass
-
-        try:
-            if instance_uuid in self._running_processes:
-                del self._running_processes[instance_uuid]
-        except Exception:
-            pass
+        self._set_process_event(instance_uuid)
+        self._remove_process(instance_uuid)
         # Yield control once to let the event loop finalize transports on Windows
         # without introducing a fixed sleep.
         try:
-            from ..tools import yield_once  # local import to avoid cycles
-
             await yield_once()
         except Exception:
             pass
@@ -206,9 +195,8 @@ class SubprocessLauncher(ProcessLauncher):
 
         # If process has exited, set the event
         if process.returncode is not None and instance_uuid in self._process_events:
-            self._process_events[instance_uuid].set()
-            # Remove from running processes while we're here
-            del self._running_processes[instance_uuid]
+            self._set_process_event(instance_uuid)
+            self._remove_process(instance_uuid)
 
         return process.returncode is None
 
@@ -248,42 +236,10 @@ class SubprocessLauncher(ProcessLauncher):
             except Exception:
                 pass
 
-            # Attempt to close underlying transports to avoid hanging proactor pipes
-            try:
-                tr = getattr(proc, "_transport", None)
-                if tr is not None:
-                    try:
-                        tr.close()
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+            self._close_transports(proc)
 
-            # Also try to close stdout/stderr stream transports if present
-            for stream_name in ("stdout", "stderr"):
-                try:
-                    stream = getattr(proc, stream_name, None)
-                    if stream is not None:
-                        tr = getattr(stream, "_transport", None)
-                        if tr is not None:
-                            try:
-                                tr.close()
-                            except Exception:
-                                pass
-                except Exception:
-                    pass
-
-            # Clear stored refs
-            try:
-                if instance_uuid in self._process_events:
-                    self._process_events[instance_uuid].set()
-            except Exception:
-                pass
-
-            try:
-                del self._running_processes[instance_uuid]
-            except Exception:
-                pass
+            self._set_process_event(instance_uuid)
+            self._remove_process(instance_uuid)
 
         # Ensure events dict is cleared
         self._process_events.clear()

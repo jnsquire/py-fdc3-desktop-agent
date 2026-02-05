@@ -121,6 +121,8 @@ def test_parse_each_registered_type(message_type):
                     "requestUuid": "r1",
                     "request_uuid": "r1",
                     "intent": "I1",
+                    "context": {"type": "test"},
+                    "source": {"appId": "a1"},
                 },
                 "meta": req_meta,
             },

@@ -11,6 +11,8 @@ from typing import Optional, Any, Literal
 from pydantic import BaseModel, Field, field_validator
 
 from .dacp import AppRequestMeta, register_message_type
+from ...api import AppIdentifier, IntentResult
+from fdc3.models.dacp.dacp import Fdc3Context
 
 
 # --- Outgoing messages (to external handlers) ---
@@ -21,12 +23,8 @@ class ForwardedIntentPayload(BaseModel):
 
     request_uuid: str = Field(..., description="Correlation UUID for response matching")
     intent: str = Field(..., description="The intent name being raised")
-    context: dict[str, Any] = Field(
-        default_factory=dict, description="Intent context data"
-    )
-    source: dict[str, Any] = Field(
-        default_factory=dict, description="Source app identifier"
-    )
+    context: Fdc3Context = Field(..., description="Intent context data")
+    source: AppIdentifier = Field(..., description="Source app identifier")
     timeout: Optional[int] = Field(
         default=None, description="Optional timeout in seconds"
     )
@@ -83,7 +81,7 @@ class IntentResultMessagePayload(BaseModel):
     """Payload for intent result message (client-side use)."""
 
     request_uuid: str = Field(..., description="Correlation UUID from forwarded intent")
-    result: Optional[dict[str, Any]] = Field(
+    result: Optional[IntentResult] = Field(
         default=None, description="Intent result data"
     )
     error: Optional[str] = Field(
@@ -155,7 +153,7 @@ class ExternalIntentResultPayload(BaseModel):
     request_uuid: str = Field(
         ..., min_length=1, description="Correlation UUID from forwarded intent"
     )
-    result: Optional[dict[str, Any]] = Field(
+    result: Optional[IntentResult] = Field(
         default=None, description="Intent result data"
     )
     error: Optional[str] = Field(

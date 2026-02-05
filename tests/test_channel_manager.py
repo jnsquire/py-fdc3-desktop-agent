@@ -1,5 +1,6 @@
 import asyncio
-from typing import cast
+from datetime import datetime
+from typing import Any, cast
 from unittest.mock import patch
 
 import pytest
@@ -7,12 +8,14 @@ import pytest
 from fdc3.desktop_agent.api import DisplayMetadata
 from fdc3.desktop_agent.distributed.adapter import DistributedLogAdapter
 from fdc3.desktop_agent.core.channel_manager import ChannelManager
+from fdc3.desktop_agent.core.channel_types import ChannelEvent
+from fdc3.models.context_types import Instrument
 
 
 class TestChannelManagerCoverage:
     def test_create_channel_emits_created_event(self):
         manager = ChannelManager()
-        events: list[dict] = []
+        events: list[ChannelEvent] = []
 
         sub_id = manager.subscribe_to_events(events.append)
         try:
@@ -26,7 +29,7 @@ class TestChannelManagerCoverage:
 
     def test_join_channel_switches_and_emits_left_joined(self):
         manager = ChannelManager()
-        events: list[dict] = []
+        events: list[ChannelEvent] = []
         manager.subscribe_to_events(events.append)
 
         manager.create_channel("c1", "user")
@@ -92,7 +95,7 @@ class TestChannelManagerCoverage:
 
     def test_subscribe_channel_filter(self):
         manager = ChannelManager()
-        c1_events: list[dict] = []
+        c1_events: list[ChannelEvent] = []
         manager.subscribe_to_events(c1_events.append, channel_filter="c1")
 
         manager.create_channel("c1", "user")
@@ -106,11 +109,11 @@ class TestChannelManagerCoverage:
         manager = ChannelManager()
         ran = asyncio.Event()
 
-        async def _handler(event: dict) -> None:
+        async def _handler(event: ChannelEvent) -> None:
             assert event["event_type"] == "created"
             ran.set()
 
-        def callback(event: dict):
+        def callback(event: ChannelEvent):
             return _handler(event)
 
         manager.subscribe_to_events(callback)
@@ -121,12 +124,12 @@ class TestChannelManagerCoverage:
     def test_emit_event_callback_exception_is_logged(self):
         manager = ChannelManager()
 
-        def bad_callback(_: dict) -> None:
+        def bad_callback(_: ChannelEvent) -> None:
             raise RuntimeError("boom")
 
         manager.subscribe_to_events(bad_callback)
 
-        with patch("fdc3.desktop_agent.core.channel_manager.logger") as mock_logger:
+        with patch("fdc3.desktop_agent.core.channel_events.logger") as mock_logger:
             manager.create_channel("c1", "user")
             mock_logger.exception.assert_called()
 
@@ -134,24 +137,24 @@ class TestChannelManagerCoverage:
     async def test_emit_event_async_callback_no_running_loop_logs(self):
         manager = ChannelManager()
 
-        async def _coro(_: dict) -> None:
+        async def _coro(_: ChannelEvent) -> None:
             return None
 
-        def callback(event: dict):
+        def callback(event: ChannelEvent):
             return _coro(event)
 
         manager.subscribe_to_events(callback)
 
         with (
             patch(
-                "fdc3.desktop_agent.core.channel_manager.asyncio.get_running_loop",
+                "fdc3.desktop_agent.core.channel_events.asyncio.get_running_loop",
                 side_effect=RuntimeError,
             ),
             patch(
-                "fdc3.desktop_agent.core.channel_manager.asyncio.get_event_loop",
+                "fdc3.desktop_agent.core.channel_events.asyncio.get_event_loop",
                 side_effect=RuntimeError,
             ),
-            patch("fdc3.desktop_agent.core.channel_manager.logger") as mock_logger,
+            patch("fdc3.desktop_agent.core.channel_events.logger") as mock_logger,
         ):
             manager.create_channel("c1", "user")
             mock_logger.exception.assert_any_call(
@@ -172,10 +175,10 @@ class TestChannelManagerCoverage:
             async def stop(self) -> None:
                 return None
 
-            async def publish(self, topic: str, event: dict) -> None:
+            async def publish(self, topic: str, message: Any) -> None:
                 nonlocal published_payload
                 assert topic == "channel_events"
-                published_payload = event
+                published_payload = cast(ChannelEvent, message)
                 published.set()
 
             async def subscribe(self, topic: str, callback):
@@ -223,7 +226,7 @@ class TestChannelManagerCoverage:
             async def stop(self) -> None:
                 return None
 
-            async def publish(self, topic: str, event: dict) -> None:
+            async def publish(self, topic: str, message: Any) -> None:
                 return None
 
             async def subscribe(self, topic: str, callback):
@@ -236,10 +239,10 @@ class TestChannelManagerCoverage:
 
         with (
             patch(
-                "fdc3.desktop_agent.tools.create_task_safe",
+                "fdc3.desktop_agent.core.channel_events.create_task_safe",
                 side_effect=RuntimeError("nope"),
             ),
-            patch("fdc3.desktop_agent.core.channel_manager.logger") as mock_logger,
+            patch("fdc3.desktop_agent.core.channel_events.logger") as mock_logger,
         ):
             manager.create_channel("c1", "user")
             mock_logger.exception.assert_any_call(
@@ -252,24 +255,24 @@ class TestChannelManagerCoverage:
 
         # adapter None -> returns without error
         manager.distributed_adapter = None
-        await manager._publish_event({"k": "v"})
+        await manager._publish_event(_make_event())
 
         class FailingAdapter:
-            async def publish(self, topic: str, event: dict) -> None:
+            async def publish(self, topic: str, message: Any) -> None:
                 raise RuntimeError("fail")
 
         manager.distributed_adapter = cast(DistributedLogAdapter, FailingAdapter())
-        await manager._publish_event({"k": "v"})
+        await manager._publish_event(_make_event())
 
     def test_broadcast_to_channel_emits_context_json(self):
         manager = ChannelManager()
-        events: list[dict] = []
+        events: list[ChannelEvent] = []
         manager.subscribe_to_events(events.append)
 
         manager.create_channel("c1", "user")
         manager.join_channel("inst", "c1")
 
-        ctx = {"type": "fdc3.instrument", "id": {"ticker": "AAPL"}}
+        ctx: Instrument = {"type": "fdc3.instrument", "id": {"ticker": "AAPL"}}
         manager.broadcast_to_channel("c1", ctx, source_instance_uuid="inst")
 
         broadcast_events = [e for e in events if e["event_type"] == "broadcast"]
@@ -288,3 +291,13 @@ def json_dumps(value: object) -> str:
     import json
 
     return json.dumps(value)
+
+
+def _make_event() -> ChannelEvent:
+    return {
+        "event_type": "created",
+        "channel_id": "c1",
+        "instance_uuid": None,
+        "context": None,
+        "timestamp": datetime.now().isoformat(),
+    }

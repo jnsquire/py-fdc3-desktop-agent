@@ -6,7 +6,14 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from .dacp import AgentResponseMeta, AppRequestMeta, register_message_type
+from .envelopes import (
+    AgentResponseMeta,
+    AppRequestMeta,
+    DacpMessage,
+    Fdc3Context,
+    register_message_type,
+)
+from ..identifiers import AppIdentifier
 
 
 # --- Incoming messages (from external handlers) ---
@@ -35,7 +42,7 @@ class RegisterExternalHandlerPayload(BaseModel):
 
 
 @register_message_type("registerExternalHandler")
-class RegisterExternalHandlerRequest(BaseModel):
+class RegisterExternalHandlerRequest(DacpMessage):
     """Request to register an external intent handler."""
 
     type: Literal["registerExternalHandler"] = "registerExternalHandler"
@@ -52,7 +59,7 @@ class UnregisterExternalHandlerPayload(BaseModel):
 
 
 @register_message_type("unregisterExternalHandler")
-class UnregisterExternalHandlerRequest(BaseModel):
+class UnregisterExternalHandlerRequest(DacpMessage):
     """Request to unregister an external intent handler."""
 
     type: Literal["unregisterExternalHandler"] = "unregisterExternalHandler"
@@ -75,7 +82,7 @@ class ExternalIntentResultPayload(BaseModel):
 
 
 @register_message_type("intentResult")
-class ExternalIntentResultRequest(BaseModel):
+class ExternalIntentResultRequest(DacpMessage):
     """Intent result message from an external handler."""
 
     type: Literal["intentResult"] = "intentResult"
@@ -96,12 +103,8 @@ class ForwardedIntentPayload(BaseModel):
 
     request_uuid: str = Field(..., description="Correlation UUID for response matching")
     intent: str = Field(..., description="The intent name being raised")
-    context: dict[str, Any] = Field(
-        default_factory=dict, description="Intent context data"
-    )
-    source: dict[str, Any] = Field(
-        default_factory=dict, description="Source app identifier"
-    )
+    context: Fdc3Context = Field(..., description="Intent context data")
+    source: AppIdentifier | None = Field(None, description="Source app identifier")
     timeout: int | None = Field(default=None, description="Optional timeout in seconds")
 
 

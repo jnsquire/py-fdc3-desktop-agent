@@ -12,6 +12,7 @@ from fdc3.desktop_agent.core.channel_manager import ChannelManager
 from fdc3.desktop_agent.core.listener_store import ListenerStore
 from fdc3.models.primitives import ListenerUuid
 from fdc3.desktop_agent.tools import yield_once
+from fdc3.desktop_agent.types import WcpIdentity, WcpSession
 
 
 class _AppsStub:
@@ -889,3 +890,179 @@ async def test_websocket_endpoint_heartbeat_send_error(monkeypatch):
         await endpoint(fake)
 
     assert fake.accepted is True
+
+
+@pytest.mark.asyncio
+async def test_websocket_endpoint_invalid_json_closes(monkeypatch):
+    from fdc3.desktop_agent.server import websocket as websocket_mod
+
+    class AllowAccess:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def validate_connection(self, websocket: WebSocket, headers: Any) -> bool:
+            return True
+
+    class WCPStub:
+        async def handle_message(
+            self, message: dict, session_id: str, wcp_sessions: dict, websocket: Any
+        ):
+            return None
+
+    class DACPStub:
+        def __init__(self):
+            self.connection_manager = type(
+                "ConnMgr", (), {"remove_connection": lambda *args, **kwargs: None}
+            )()
+
+        async def handle_message(self, *args, **kwargs):
+            return None
+
+    class AgentMgrStub:
+        def __init__(self):
+            self.disconnected: list[tuple[Any, str]] = []
+
+        async def disconnect(self, websocket: WebSocket, instance_uuid: str) -> None:
+            self.disconnected.append((websocket, instance_uuid))
+
+    class FakeWS:
+        def __init__(self):
+            self.headers = {}
+            self.accepted = False
+            self.closed = False
+            self.close_code: int | None = None
+            self._recv_calls = 0
+
+        async def accept(self) -> None:
+            self.accepted = True
+
+        async def receive_text(self) -> str:
+            self._recv_calls += 1
+            if self._recv_calls == 1:
+                return "{not-json}"
+            raise WebSocketDisconnect()
+
+        async def close(self, code: int | None = None) -> None:
+            self.closed = True
+            self.close_code = code
+
+    fake = FakeWS()
+    await websocket_mod.websocket_endpoint(
+        websocket=cast(WebSocket, fake),
+        access_control_handler=cast(Any, AllowAccess()),
+        wcp_handler=cast(Any, WCPStub()),
+        dacp_handler=cast(Any, DACPStub()),
+        wcp_sessions={},
+        agent_client_manager=cast(Any, AgentMgrStub()),
+    )
+
+    assert fake.accepted is True
+    assert fake.closed is True
+    assert fake.close_code == 1003
+
+
+@pytest.mark.asyncio
+async def test_websocket_endpoint_handler_error_cleans_up(monkeypatch):
+    from fdc3.desktop_agent.server import websocket as websocket_mod
+
+    class AllowAccess:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def validate_connection(self, websocket: WebSocket, headers: Any) -> bool:
+            return True
+
+    class WCPStub:
+        async def handle_message(
+            self, message: dict, session_id: str, wcp_sessions: dict, websocket: Any
+        ):
+            raise RuntimeError("boom")
+
+    class ConnMgrStub:
+        def __init__(self):
+            self.removed: list[str] = []
+
+        def remove_connection(self, instance_uuid: str) -> None:
+            self.removed.append(instance_uuid)
+
+    class DACPStub:
+        def __init__(self):
+            self.connection_manager = ConnMgrStub()
+
+        async def handle_message(self, *args, **kwargs):
+            return None
+
+    class AgentMgrStub:
+        def __init__(self):
+            self.disconnected: list[tuple[Any, str]] = []
+
+        async def disconnect(self, websocket: WebSocket, instance_uuid: str) -> None:
+            self.disconnected.append((websocket, instance_uuid))
+
+    class AppRegistryStub:
+        def __init__(self):
+            self.unregistered: list[str] = []
+
+        def unregister_instance(self, instance_uuid: str) -> None:
+            self.unregistered.append(instance_uuid)
+
+    class ListenerStoreStub:
+        def __init__(self):
+            self.removed: list[str] = []
+
+        def remove_listeners_for_instance(self, instance_uuid: str) -> None:
+            self.removed.append(instance_uuid)
+
+    class ChannelManagerStub:
+        def __init__(self):
+            self.left: list[str] = []
+
+        def leave_current_channel(self, instance_uuid: str) -> None:
+            self.left.append(instance_uuid)
+
+    class CoreServicesStub:
+        def __init__(self):
+            self.app_registry = AppRegistryStub()
+            self.listener_store = ListenerStoreStub()
+            self.channel_manager = ChannelManagerStub()
+
+    class FakeWS:
+        def __init__(self):
+            self.headers = {}
+            self.accepted = False
+
+        async def accept(self) -> None:
+            self.accepted = True
+
+        async def receive_text(self) -> str:
+            return json.dumps(
+                {
+                    "type": "WCP1Hello",
+                    "meta": {"connectionAttemptUuid": "sess-1"},
+                    "payload": {},
+                }
+            )
+
+    core_stub = CoreServicesStub()
+    monkeypatch.setattr(websocket_mod, "core_services", core_stub)
+
+    wcp_sessions = {"sess-1": WcpSession(identity=WcpIdentity(instanceUuid="inst-1"))}
+    agent_mgr = AgentMgrStub()
+    dacp_stub = DACPStub()
+    fake = FakeWS()
+
+    await websocket_mod.websocket_endpoint(
+        websocket=cast(WebSocket, fake),
+        access_control_handler=cast(Any, AllowAccess()),
+        wcp_handler=cast(Any, WCPStub()),
+        dacp_handler=cast(Any, dacp_stub),
+        wcp_sessions=wcp_sessions,
+        agent_client_manager=cast(Any, agent_mgr),
+    )
+
+    assert "sess-1" not in wcp_sessions
+    assert core_stub.app_registry.unregistered == ["inst-1"]
+    assert core_stub.listener_store.removed == ["inst-1"]
+    assert core_stub.channel_manager.left == ["inst-1"]
+    assert dacp_stub.connection_manager.removed == ["inst-1"]
+    assert agent_mgr.disconnected == [(cast(WebSocket, fake), "inst-1")]

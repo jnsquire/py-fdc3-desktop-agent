@@ -8,11 +8,13 @@ live in `fdc3.desktop_agent.devtools`.
 
 from __future__ import annotations
 
-from typing import Any, Coroutine
+from typing import Any, Coroutine, TypeVar
 import asyncio
 import logging
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
 
 
 # Backward-compatible re-exports (dev tooling was moved to devtools.py)
@@ -20,8 +22,8 @@ from .devtools import install_git_hooks, prepush, run_pytest  # noqa: E402,F401
 
 
 def create_task_safe(
-    coro: Coroutine[Any, Any, Any], *, name: str | None = None
-) -> asyncio.Task[Any]:
+    coro: Coroutine[Any, Any, T], *, name: str | None = None
+) -> asyncio.Task[T]:
     """Create an asyncio.Task and log uncaught exceptions.
 
     Use this helper for fire-and-forget background tasks so exceptions are
@@ -33,9 +35,9 @@ def create_task_safe(
         # No running loop; fallback to creating task on default loop
         loop = asyncio.get_event_loop()
 
-    task = loop.create_task(coro)
+    task = loop.create_task(coro, name=name)
 
-    def _on_done(t: asyncio.Task[Any]) -> None:
+    def _on_done(t: asyncio.Task[T]) -> None:
         try:
             exc = t.exception()
             if exc is not None:
@@ -47,6 +49,34 @@ def create_task_safe(
 
     task.add_done_callback(_on_done)
     return task
+
+
+async def cancel_task(
+    task: asyncio.Task[Any] | None,
+    *,
+    label: str | None = None,
+    logger_override: logging.Logger | None = None,
+    raise_on_error: bool = False,
+) -> None:
+    """Cancel a task and await its completion.
+
+    This helper ignores CancelledError and logs unexpected exceptions.
+    """
+    if task is None:
+        return
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        log = logger_override or logger
+        if label:
+            log.exception("Error waiting for %s task cancellation", label)
+        else:
+            log.exception("Error waiting for task cancellation")
+        if raise_on_error:
+            raise
 
 
 async def yield_once() -> None:

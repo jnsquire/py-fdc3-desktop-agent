@@ -1,66 +1,23 @@
-import copy
 import uuid
 import threading
-from typing import Dict, List, Optional, Callable, Any, Set
-from typing_extensions import TypedDict
-import inspect
-import json
-import asyncio
-from datetime import datetime
+from typing import Dict, List, Optional, Callable, Set
 import logging
 from fdc3.models.dacp.dacp import Fdc3Context
-from pydantic import BaseModel
 from ..distributed.adapter import DistributedLogAdapter
 from ..api import DisplayMetadata
+from . import channel_context as _channel_context
+from . import channel_events as _channel_events
+from .channel_types import (
+    ChannelEvent,
+    ChannelInfo,
+    ChannelInstance,
+    EventSubscription,
+    PrivateChannelInvite,
+    PrivateChannelState,
+)
 
 
 logger = logging.getLogger(__name__)
-
-
-class ChannelEvent(TypedDict):
-    event_type: str
-    channel_id: str
-    instance_uuid: Optional[str]
-    context: Optional[str]
-    timestamp: str
-
-
-class EventSubscription(TypedDict):
-    callback: Callable[[ChannelEvent], Any]
-    channel_filter: Optional[str]
-
-
-class ChannelInfo(TypedDict):
-    id: str
-    type: str
-    display_name: Optional[str]
-    color: Optional[str]
-    member_count: int
-
-
-class PrivateChannelInvite(BaseModel):
-    token: str
-    instanceId: Optional[str] = None
-
-
-class PrivateChannelState(TypedDict):
-    id: str
-    owner: Optional[str]
-    members: List[str]
-    invites: List[PrivateChannelInvite]
-
-
-class ChannelInstance:
-    def __init__(
-        self,
-        channel_id: str,
-        channel_type: str,
-        display_metadata: Optional[DisplayMetadata] = None,
-    ):
-        self.id = channel_id
-        self.type = channel_type
-        self.display_metadata = display_metadata
-        self.members: List[str] = []  # instance_uuids
 
 
 class ChannelManager:
@@ -390,36 +347,17 @@ class ChannelManager:
 
     def set_channel_context(self, channel_id: str, context: Fdc3Context) -> None:
         """Store the latest context for a channel."""
-        if not context or not isinstance(context, dict):
-            return
-
-        context_type = context.get("type")
-        if not context_type:
-            return
-
-        with self._lock:
-            stored = self.channel_contexts.setdefault(channel_id, {})
-            sanitized = copy.deepcopy(context)
-            stored[context_type] = sanitized
-            stored[self.LAST_CONTEXT_KEY] = sanitized
+        _channel_context.set_channel_context(self, channel_id, context)
 
     def get_channel_context(
         self, channel_id: str, context_type: Optional[str] = None
     ) -> Optional[Fdc3Context]:
         """Return the latest context for a channel, optionally filtered by type."""
-        with self._lock:
-            contexts = self.channel_contexts.get(channel_id)
-            if not contexts:
-                return None
-
-            if context_type is not None:
-                return contexts.get(context_type)
-            return contexts.get(self.LAST_CONTEXT_KEY)
+        return _channel_context.get_channel_context(self, channel_id, context_type)
 
     def clear_channel_context(self, channel_id: str) -> None:
         """Remove all stored context for a channel."""
-        with self._lock:
-            self.channel_contexts.pop(channel_id, None)
+        _channel_context.clear_channel_context(self, channel_id)
 
     def add_remote_private_channel_listener(
         self, channel_id: str, desktop_agent: str
@@ -499,60 +437,14 @@ class ChannelManager:
         context: Optional[Fdc3Context] = None,
         remote: bool = False,
     ):
-        """Emit an event to all subscribers."""
-        event_data: ChannelEvent = {
-            "event_type": event_type,
-            "channel_id": channel_id,
-            "instance_uuid": instance_uuid,
-            "context": json.dumps(context) if context else None,
-            "timestamp": datetime.now().isoformat(),
-        }
-
-        for subscription in self.event_subscriptions.values():
-            channel_filter = subscription["channel_filter"]
-            if channel_filter is None or channel_filter == channel_id:
-                try:
-                    result = subscription["callback"](event_data)
-                    if inspect.isawaitable(result):
-                        try:
-                            loop = asyncio.get_running_loop()
-                            loop.create_task(result)
-                        except RuntimeError:
-                            # No running loop in this thread; try thread-safe scheduling
-                            try:
-                                asyncio.get_event_loop().call_soon_threadsafe(
-                                    asyncio.create_task, result
-                                )
-                            except Exception:
-                                if inspect.iscoroutine(result):
-                                    result.close()
-                                logger.exception(
-                                    "Failed to schedule async channel callback"
-                                )
-                except Exception:
-                    logger.exception("Error in channel event callback")
-
-        # Publish to distributed adapter for cross-worker delivery unless this event
-        # originated from the distributed bus (avoid loops).
-        if not remote and self.distributed_adapter is not None:
-            try:
-                from ..tools import create_task_safe
-
-                coro = self._publish_event(event_data)
-                try:
-                    create_task_safe(coro)
-                except Exception:
-                    coro.close()
-                    raise
-            except Exception:
-                # Best-effort: do not break local emission if publishing fails
-                logger.exception("Failed to schedule distributed publish task")
+        _channel_events.emit_event(
+            self,
+            event_type,
+            channel_id,
+            instance_uuid=instance_uuid,
+            context=context,
+            remote=remote,
+        )
 
     async def _publish_event(self, event_data: ChannelEvent):
-        try:
-            adapter = self.distributed_adapter
-            if adapter:
-                await adapter.publish("channel_events", event_data)
-        except Exception:
-            # Swallow errors - publishing is best-effort
-            return
+        await _channel_events.publish_event(self, event_data)

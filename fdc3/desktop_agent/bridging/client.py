@@ -4,26 +4,35 @@ import asyncio
 import json
 import logging
 import uuid
-from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import (
-    Any,
-    Awaitable,
-    Callable,
-    Literal,
-    Mapping,
-    Optional,
-    Union,
-    cast,
-)
+from typing import Any, Awaitable, Callable, Optional, cast
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from typing_extensions import NotRequired, TypedDict
+from pydantic import ValidationError
 from websockets.asyncio.client import ClientConnection, connect
 
-from fdc3.models.identifiers import AppIdentifier
-from fdc3.models.identifiers import BaseImplementationMetadata
+from fdc3.models.identifiers import AppIdentifier, BaseImplementationMetadata
 from fdc3.desktop_agent.api import BridgingError
+from fdc3.desktop_agent.tools import cancel_task
+
+from .messages import (
+    BridgeAuthenticationFailed,
+    BridgeConnectedAgentsUpdate,
+    BridgeConnectedAgentsUpdatePayload,
+    BridgeHandshake,
+    BridgeHandshakePayload,
+    BridgeHello,
+    BridgeMessage,
+    BridgeMeta,
+)
+from .settings import BridgeConnectionSettings
+from .types import (
+    AppIdentifierLike,
+    BridgeResponseDict,
+    ChannelsStateFactory,
+    ConnectFunc,
+    ImplementationMetadataFactory,
+    RequestHandler,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -34,141 +43,6 @@ def _utc_now_iso() -> str:
 
 def _make_uuid() -> str:
     return str(uuid.uuid4())
-
-
-@dataclass(frozen=True)
-class BridgeConnectionSettings:
-    host: str
-    port_start: int
-    port_end: int
-    requested_name: str
-    retry_seconds: float
-    request_timeout_seconds: float
-
-
-ConnectFunc = Callable[[str], Awaitable[ClientConnection]]
-
-# Type alias for implementation metadata return type
-ImplementationMetadata = Mapping[str, Any] | BaseImplementationMetadata
-
-# Factory type alias for implementation metadata
-ImplementationMetadataFactory = Callable[[], ImplementationMetadata]
-
-# Type alias for AppIdentifier or dict representation
-AppIdentifierLike = Union[AppIdentifier, dict[str, Any]]
-
-
-class ChannelMember(TypedDict):
-    """A channel member entry for the bridging handshake channels state."""
-
-    desktopAgent: str
-    instanceUuid: str
-    appId: NotRequired[str]
-    instanceId: NotRequired[str]
-
-
-# Type alias for the full channels state mapping
-ChannelsState = Mapping[str, list[ChannelMember]]
-
-
-# Factory type alias for channels state
-ChannelsStateFactory = Callable[[], ChannelsState]
-
-
-# Type alias for request handler
-RequestHandler = Callable[[Mapping[str, Any]], Awaitable[Optional[Mapping[str, Any]]]]
-
-
-class BridgeResponseMetaDict(TypedDict, total=False):
-    """Metadata from a bridge response (dict form)."""
-
-    requestUuid: str
-    responseUuid: str
-    timestamp: str
-    errorSources: list[str]
-    errorDetails: list[dict[str, Any]]
-
-
-class BridgeResponseDict(TypedDict, total=False):
-    """Response structure from bridge agent requests (dict form)."""
-
-    type: str
-    meta: BridgeResponseMetaDict
-    payload: dict[str, Any]
-
-
-class BridgeMeta(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    requestUuid: Optional[str] = None
-    responseUuid: Optional[str] = None
-    timestamp: Optional[str] = None
-    source: Optional[AppIdentifier] = None
-    destination: Optional[AppIdentifier] = None
-
-
-class BridgeMessage(BaseModel):
-    """Generic envelope for any bridge message.
-
-    We keep this permissive (extra fields allowed) so the client can safely
-    ignore new/unknown message types while still getting typed `meta`.
-    """
-
-    model_config = ConfigDict(extra="allow")
-
-    type: str
-    payload: Optional[dict[str, Any]] = None
-    meta: Optional[BridgeMeta] = None
-
-
-class BridgeHelloPayload(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    desktopAgentBridgeVersion: str
-
-
-class BridgeHello(BridgeMessage):
-    type: Literal["hello"]
-    payload: BridgeHelloPayload
-
-
-class BridgeHandshakePayload(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    requestedName: str
-    implementationMetadata: Mapping[str, Any]
-    channelsState: Mapping[str, list[ChannelMember]] = Field(default_factory=dict)
-
-
-class BridgeHandshake(BridgeMessage):
-    type: Literal["handshake"]
-    payload: BridgeHandshakePayload
-    meta: BridgeMeta
-
-
-class BridgeConnectedAgentsUpdatePayload(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    addAgent: Optional[str] = None
-    allAgents: list[dict] = Field(default_factory=list)
-    channelsState: Optional[Mapping[str, list[dict[str, Any]]]] = None
-
-
-class BridgeConnectedAgentsUpdate(BridgeMessage):
-    type: Literal["connectedAgentsUpdate"]
-    payload: BridgeConnectedAgentsUpdatePayload
-    meta: Optional[BridgeMeta] = None
-
-
-class BridgeAuthenticationFailedPayload(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    message: Optional[str] = None
-
-
-class BridgeAuthenticationFailed(BridgeMessage):
-    type: Literal["authenticationFailed"]
-    payload: Optional[BridgeAuthenticationFailedPayload] = None
 
 
 class BridgeClient:
@@ -249,14 +123,12 @@ class BridgeClient:
         """
         self._stopping.set()
         if self._recv_task is not None:
-            self._recv_task.cancel()
-            try:
-                await self._recv_task
-            except asyncio.CancelledError:
-                logger.debug("Bridge receive task cancelled during shutdown")
-            except Exception as exc:
-                logger.warning("Error waiting for receive task shutdown: %s", exc)
-                raise
+            await cancel_task(
+                self._recv_task,
+                label="bridge receive",
+                logger_override=logger,
+                raise_on_error=True,
+            )
             self._recv_task = None
         if self._ws is not None:
             try:
@@ -265,14 +137,12 @@ class BridgeClient:
                 logger.warning("Error closing bridge websocket: %s", exc)
             self._ws = None
         if self._run_task is not None:
-            self._run_task.cancel()
-            try:
-                await self._run_task
-            except asyncio.CancelledError:
-                logger.debug("Bridge run loop task cancelled during shutdown")
-            except Exception as exc:
-                logger.warning("Error waiting for run loop shutdown: %s", exc)
-                raise
+            await cancel_task(
+                self._run_task,
+                label="bridge run loop",
+                logger_override=logger,
+                raise_on_error=True,
+            )
             self._run_task = None
 
         await self._fail_all_pending(BridgingError.AgentDisconnected.value)

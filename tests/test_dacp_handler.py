@@ -56,6 +56,27 @@ def _wcp_sessions(instance_uuid: str = "src-uuid") -> tuple[str, WcpSessions]:
     }
 
 
+@pytest.fixture
+def send_message():
+    def _factory(
+        handler: DACPHandler,
+        session_id: str,
+        wcp_sessions: WcpSessions,
+        sender: Any,
+    ):
+        async def _send(message: dict[str, Any]) -> None:
+            await handler.handle_message(
+                message=message,
+                session_id=session_id,
+                wcp_sessions=wcp_sessions,
+                sender=sender,
+            )
+
+        return _send
+
+    return _factory
+
+
 class TestDACPHandlerParsingAndDispatch:
     @pytest.mark.asyncio
     async def test_handle_message_parse_error_missing_type(self):
@@ -108,466 +129,261 @@ class TestDACPHandlerParsingAndDispatch:
             mock_logger.warning.assert_called()
 
     @pytest.mark.asyncio
-    async def test_handle_message_dispatches_known_types(self):
+    async def test_handle_message_dispatches_known_types(self, send_message):
         handler, _, _, _ = _handler()
         ws = _websocket()
         session_id, sessions = _wcp_sessions("src-uuid")
+        send = send_message(handler, session_id, sessions, ws)
 
         # Patch internal handlers so we only validate dispatch wiring.
         with ExitStack() as stack:
-            h_open = stack.enter_context(
-                patch.object(handler, "_handle_open", new_callable=AsyncMock)
-            )
-            h_broadcast = stack.enter_context(
-                patch.object(handler, "_handle_broadcast", new_callable=AsyncMock)
-            )
-            h_acl = stack.enter_context(
-                patch.object(
-                    handler, "_handle_add_context_listener", new_callable=AsyncMock
+            handler_names = [
+                "_handle_open",
+                "_handle_broadcast",
+                "_handle_add_context_listener",
+                "_handle_add_intent_listener",
+                "_handle_intent_listener_unsubscribe",
+                "_handle_add_event_listener",
+                "_handle_remove_event_listener",
+                "_handle_get_info",
+                "_handle_get_app_metadata",
+                "_handle_get_user_channels",
+                "_handle_get_current_channel",
+                "_handle_join_user_channel",
+                "_handle_leave_current_channel",
+                "_handle_join_private_channel",
+                "_handle_leave_private_channel",
+                "_handle_create_private_channel_invitation",
+                "_handle_find_intent",
+                "_handle_find_intents_by_context",
+                "_handle_find_instances",
+                "_handle_raise_intent",
+                "_handle_raise_intent_for_context",
+                "_handle_intent_result_request",
+                "_handle_raise_intent_result_response",
+                "_handle_context_listener_unsubscribe",
+                "_handle_heartbeat_acknowledgment",
+                "_handle_external_intent_result",
+            ]
+
+            mocks = {
+                name: stack.enter_context(
+                    patch.object(handler, name, new_callable=AsyncMock)
                 )
-            )
-            h_ail = stack.enter_context(
-                patch.object(
-                    handler, "_handle_add_intent_listener", new_callable=AsyncMock
-                )
-            )
-            h_ilu = stack.enter_context(
-                patch.object(
-                    handler,
-                    "_handle_intent_listener_unsubscribe",
-                    new_callable=AsyncMock,
-                )
-            )
-            h_ael = stack.enter_context(
-                patch.object(
-                    handler, "_handle_add_event_listener", new_callable=AsyncMock
-                )
-            )
-            h_rel = stack.enter_context(
-                patch.object(
-                    handler, "_handle_remove_event_listener", new_callable=AsyncMock
-                )
-            )
-            h_gi = stack.enter_context(
-                patch.object(handler, "_handle_get_info", new_callable=AsyncMock)
-            )
-            h_gam = stack.enter_context(
-                patch.object(
-                    handler, "_handle_get_app_metadata", new_callable=AsyncMock
-                )
-            )
-            h_gucs = stack.enter_context(
-                patch.object(
-                    handler, "_handle_get_user_channels", new_callable=AsyncMock
-                )
-            )
-            h_gcc = stack.enter_context(
-                patch.object(
-                    handler, "_handle_get_current_channel", new_callable=AsyncMock
-                )
-            )
-            h_juc = stack.enter_context(
-                patch.object(
-                    handler, "_handle_join_user_channel", new_callable=AsyncMock
-                )
-            )
-            h_lcc = stack.enter_context(
-                patch.object(
-                    handler, "_handle_leave_current_channel", new_callable=AsyncMock
-                )
-            )
-            h_jpc = stack.enter_context(
-                patch.object(
-                    handler,
+                for name in handler_names
+            }
+
+            messages = [
+                (
+                    "_handle_open",
+                    {
+                        "type": "open",
+                        "payload": {"app": {"appId": "a"}},
+                        "meta": {"requestUuid": "r1"},
+                    },
+                ),
+                (
+                    "_handle_broadcast",
+                    {
+                        "type": "broadcast",
+                        "payload": {"context": {"type": "t"}},
+                        "meta": {"requestUuid": "r2"},
+                    },
+                ),
+                (
+                    "_handle_add_context_listener",
+                    {
+                        "type": "addContextListener",
+                        "payload": {},
+                        "meta": {"requestUuid": "r3"},
+                    },
+                ),
+                (
+                    "_handle_add_intent_listener",
+                    {
+                        "type": "addIntentListener",
+                        "payload": {"intent": "ViewChart"},
+                        "meta": {"requestUuid": "r4"},
+                    },
+                ),
+                (
+                    "_handle_add_event_listener",
+                    {
+                        "type": "addEventListener",
+                        "payload": {"eventType": "USER_CHANNEL_CHANGED"},
+                        "meta": {"requestUuid": "r4e0"},
+                    },
+                ),
+                (
+                    "_handle_remove_event_listener",
+                    {
+                        "type": "removeEventListener",
+                        "payload": {"listenerUuid": "l-event"},
+                        "meta": {"requestUuid": "r4e1"},
+                    },
+                ),
+                (
+                    "_handle_find_intent",
+                    {
+                        "type": "findIntent",
+                        "payload": {"intent": "ViewChart"},
+                        "meta": {"requestUuid": "r4b"},
+                    },
+                ),
+                (
+                    "_handle_find_intents_by_context",
+                    {
+                        "type": "findIntentsByContext",
+                        "payload": {"context": {"type": "fdc3.instrument"}},
+                        "meta": {"requestUuid": "r4c"},
+                    },
+                ),
+                (
+                    "_handle_find_instances",
+                    {
+                        "type": "findInstances",
+                        "payload": {"app": {"appId": "app-1"}},
+                        "meta": {"requestUuid": "r4d"},
+                    },
+                ),
+                (
+                    "_handle_get_info",
+                    {"type": "getInfo", "payload": {}, "meta": {"requestUuid": "r4e"}},
+                ),
+                (
+                    "_handle_get_app_metadata",
+                    {
+                        "type": "getAppMetadata",
+                        "payload": {"app": {"appId": "app-1"}},
+                        "meta": {"requestUuid": "r4f"},
+                    },
+                ),
+                (
+                    "_handle_get_user_channels",
+                    {
+                        "type": "getUserChannels",
+                        "payload": {},
+                        "meta": {"requestUuid": "r4g"},
+                    },
+                ),
+                (
+                    "_handle_get_current_channel",
+                    {
+                        "type": "getCurrentChannel",
+                        "payload": {},
+                        "meta": {"requestUuid": "r4h"},
+                    },
+                ),
+                (
+                    "_handle_join_user_channel",
+                    {
+                        "type": "joinUserChannel",
+                        "payload": {"channelId": "user:red"},
+                        "meta": {"requestUuid": "r4i"},
+                    },
+                ),
+                (
+                    "_handle_leave_current_channel",
+                    {
+                        "type": "leaveCurrentChannel",
+                        "payload": {},
+                        "meta": {"requestUuid": "r4j"},
+                    },
+                ),
+                (
                     "_handle_join_private_channel",
-                    new_callable=AsyncMock,
-                )
-            )
-            h_lpc = stack.enter_context(
-                patch.object(
-                    handler,
+                    {
+                        "type": "joinPrivateChannel",
+                        "payload": {"channelId": "private:example"},
+                        "meta": {"requestUuid": "r4k"},
+                    },
+                ),
+                (
                     "_handle_leave_private_channel",
-                    new_callable=AsyncMock,
-                )
-            )
-            h_cpi = stack.enter_context(
-                patch.object(
-                    handler,
+                    {
+                        "type": "leavePrivateChannel",
+                        "payload": {"channelId": "private:example"},
+                        "meta": {"requestUuid": "r4l"},
+                    },
+                ),
+                (
                     "_handle_create_private_channel_invitation",
-                    new_callable=AsyncMock,
-                )
-            )
-            h_fi = stack.enter_context(
-                patch.object(handler, "_handle_find_intent", new_callable=AsyncMock)
-            )
-            h_fibc = stack.enter_context(
-                patch.object(
-                    handler, "_handle_find_intents_by_context", new_callable=AsyncMock
-                )
-            )
-            h_finst = stack.enter_context(
-                patch.object(handler, "_handle_find_instances", new_callable=AsyncMock)
-            )
-            stack.enter_context(
-                patch.object(handler, "_handle_raise_intent", new_callable=AsyncMock)
-            )
-            h_rifc = stack.enter_context(
-                patch.object(
-                    handler, "_handle_raise_intent_for_context", new_callable=AsyncMock
-                )
-            )
-            h_irr = stack.enter_context(
-                patch.object(
-                    handler, "_handle_intent_result_request", new_callable=AsyncMock
-                )
-            )
-            h_rirr = stack.enter_context(
-                patch.object(
-                    handler,
+                    {
+                        "type": "createPrivateChannelInvitation",
+                        "payload": {"channelId": "private:example"},
+                        "meta": {"requestUuid": "r4m"},
+                    },
+                ),
+                (
+                    "_handle_intent_listener_unsubscribe",
+                    {
+                        "type": "intentListenerUnsubscribe",
+                        "payload": {"listenerUuid": "l1"},
+                        "meta": {"requestUuid": "r5"},
+                    },
+                ),
+                (
+                    "_handle_raise_intent_for_context",
+                    {
+                        "type": "raiseIntentForContext",
+                        "payload": {"context": {"type": "t"}},
+                        "meta": {"requestUuid": "r6"},
+                    },
+                ),
+                (
+                    "_handle_intent_result_request",
+                    {
+                        "type": "intentResultRequest",
+                        "payload": {"intentResult": {"type": "t"}},
+                        "meta": {"requestUuid": "r7"},
+                    },
+                ),
+                (
                     "_handle_raise_intent_result_response",
-                    new_callable=AsyncMock,
-                )
-            )
-            h_clu = stack.enter_context(
-                patch.object(
-                    handler,
+                    {
+                        "type": "raiseIntentResultResponse",
+                        "payload": {},
+                        "meta": {"requestUuid": "r8"},
+                    },
+                ),
+                (
                     "_handle_context_listener_unsubscribe",
-                    new_callable=AsyncMock,
-                )
-            )
-            h_hb = stack.enter_context(
-                patch.object(
-                    handler, "_handle_heartbeat_acknowledgment", new_callable=AsyncMock
-                )
-            )
-            stack.enter_context(
-                patch.object(
-                    handler, "_handle_external_intent_result", new_callable=AsyncMock
-                )
-            )
+                    {
+                        "type": "contextListenerUnsubscribe",
+                        "payload": {"listenerUuid": "l2"},
+                        "meta": {"requestUuid": "r9"},
+                    },
+                ),
+                (
+                    "_handle_heartbeat_acknowledgment",
+                    {
+                        "type": "heartbeatAcknowledgmentRequest",
+                        "payload": {"heartbeatEventUuid": "e1"},
+                        "meta": {"requestUuid": "r10"},
+                    },
+                ),
+                (
+                    "_handle_raise_intent",
+                    {
+                        "type": "raiseIntent",
+                        "payload": {"intent": "ViewChart", "context": {"type": "t"}},
+                        "meta": {"requestUuid": "r11"},
+                    },
+                ),
+                (
+                    "_handle_external_intent_result",
+                    {
+                        "type": "intentResult",
+                        "payload": {"request_uuid": "x", "error": "fail"},
+                    },
+                ),
+            ]
 
-            # open
-            await handler.handle_message(
-                {
-                    "type": "open",
-                    "payload": {"app": {"appId": "a"}},
-                    "meta": {"requestUuid": "r1"},
-                },
-                session_id,
-                sessions,
-                ws,
-            )
-            # broadcast
-            await handler.handle_message(
-                {
-                    "type": "broadcast",
-                    "payload": {"context": {"type": "t"}},
-                    "meta": {"requestUuid": "r2"},
-                },
-                session_id,
-                sessions,
-                ws,
-            )
-            # addContextListener
-            await handler.handle_message(
-                {
-                    "type": "addContextListener",
-                    "payload": {},
-                    "meta": {"requestUuid": "r3"},
-                },
-                session_id,
-                sessions,
-                ws,
-            )
-            # addIntentListener
-            await handler.handle_message(
-                {
-                    "type": "addIntentListener",
-                    "payload": {"intent": "ViewChart"},
-                    "meta": {"requestUuid": "r4"},
-                },
-                session_id,
-                sessions,
-                ws,
-            )
+            for _, message in messages:
+                await send(message)
 
-            # addEventListener
-            await handler.handle_message(
-                {
-                    "type": "addEventListener",
-                    "payload": {"eventType": "USER_CHANNEL_CHANGED"},
-                    "meta": {"requestUuid": "r4e0"},
-                },
-                session_id,
-                sessions,
-                ws,
-            )
-
-            # removeEventListener
-            await handler.handle_message(
-                {
-                    "type": "removeEventListener",
-                    "payload": {"listenerUuid": "l-event"},
-                    "meta": {"requestUuid": "r4e1"},
-                },
-                session_id,
-                sessions,
-                ws,
-            )
-
-            # findIntent
-            await handler.handle_message(
-                {
-                    "type": "findIntent",
-                    "payload": {"intent": "ViewChart"},
-                    "meta": {"requestUuid": "r4b"},
-                },
-                session_id,
-                sessions,
-                ws,
-            )
-
-            # findIntentsByContext
-            await handler.handle_message(
-                {
-                    "type": "findIntentsByContext",
-                    "payload": {"context": {"type": "fdc3.instrument"}},
-                    "meta": {"requestUuid": "r4c"},
-                },
-                session_id,
-                sessions,
-                ws,
-            )
-
-            # findInstances
-            await handler.handle_message(
-                {
-                    "type": "findInstances",
-                    "payload": {"app": {"appId": "app-1"}},
-                    "meta": {"requestUuid": "r4d"},
-                },
-                session_id,
-                sessions,
-                ws,
-            )
-
-            # getInfo
-            await handler.handle_message(
-                {
-                    "type": "getInfo",
-                    "payload": {},
-                    "meta": {"requestUuid": "r4e"},
-                },
-                session_id,
-                sessions,
-                ws,
-            )
-
-            # getAppMetadata
-            await handler.handle_message(
-                {
-                    "type": "getAppMetadata",
-                    "payload": {"app": {"appId": "app-1"}},
-                    "meta": {"requestUuid": "r4f"},
-                },
-                session_id,
-                sessions,
-                ws,
-            )
-
-            # getUserChannels
-            await handler.handle_message(
-                {
-                    "type": "getUserChannels",
-                    "payload": {},
-                    "meta": {"requestUuid": "r4g"},
-                },
-                session_id,
-                sessions,
-                ws,
-            )
-
-            # getCurrentChannel
-            await handler.handle_message(
-                {
-                    "type": "getCurrentChannel",
-                    "payload": {},
-                    "meta": {"requestUuid": "r4h"},
-                },
-                session_id,
-                sessions,
-                ws,
-            )
-
-            # joinUserChannel
-            await handler.handle_message(
-                {
-                    "type": "joinUserChannel",
-                    "payload": {"channelId": "user:red"},
-                    "meta": {"requestUuid": "r4i"},
-                },
-                session_id,
-                sessions,
-                ws,
-            )
-
-            # leaveCurrentChannel
-            await handler.handle_message(
-                {
-                    "type": "leaveCurrentChannel",
-                    "payload": {},
-                    "meta": {"requestUuid": "r4j"},
-                },
-                session_id,
-                sessions,
-                ws,
-            )
-            # joinPrivateChannel
-            await handler.handle_message(
-                {
-                    "type": "joinPrivateChannel",
-                    "payload": {"channelId": "private:example"},
-                    "meta": {"requestUuid": "r4k"},
-                },
-                session_id,
-                sessions,
-                ws,
-            )
-            # leavePrivateChannel
-            await handler.handle_message(
-                {
-                    "type": "leavePrivateChannel",
-                    "payload": {"channelId": "private:example"},
-                    "meta": {"requestUuid": "r4l"},
-                },
-                session_id,
-                sessions,
-                ws,
-            )
-            # createPrivateChannelInvitation
-            await handler.handle_message(
-                {
-                    "type": "createPrivateChannelInvitation",
-                    "payload": {"channelId": "private:example"},
-                    "meta": {"requestUuid": "r4m"},
-                },
-                session_id,
-                sessions,
-                ws,
-            )
-            # intentListenerUnsubscribe
-            await handler.handle_message(
-                {
-                    "type": "intentListenerUnsubscribe",
-                    "payload": {"listenerUuid": "l1"},
-                    "meta": {"requestUuid": "r5"},
-                },
-                session_id,
-                sessions,
-                ws,
-            )
-            # raiseIntentForContext
-            await handler.handle_message(
-                {
-                    "type": "raiseIntentForContext",
-                    "payload": {"context": {"type": "t"}},
-                    "meta": {"requestUuid": "r6"},
-                },
-                session_id,
-                sessions,
-                ws,
-            )
-            # intentResultRequest
-            await handler.handle_message(
-                {
-                    "type": "intentResultRequest",
-                    "payload": {"intentResult": {"type": "t"}},
-                    "meta": {"requestUuid": "r7"},
-                },
-                session_id,
-                sessions,
-                ws,
-            )
-            # raiseIntentResultResponse
-            await handler.handle_message(
-                {
-                    "type": "raiseIntentResultResponse",
-                    "payload": {},
-                    "meta": {"requestUuid": "r8"},
-                },
-                session_id,
-                sessions,
-                ws,
-            )
-            # contextListenerUnsubscribe
-            await handler.handle_message(
-                {
-                    "type": "contextListenerUnsubscribe",
-                    "payload": {"listenerUuid": "l2"},
-                    "meta": {"requestUuid": "r9"},
-                },
-                session_id,
-                sessions,
-                ws,
-            )
-            # heartbeatAcknowledgmentRequest
-            await handler.handle_message(
-                {
-                    "type": "heartbeatAcknowledgmentRequest",
-                    "payload": {"heartbeatEventUuid": "e1"},
-                    "meta": {"requestUuid": "r10"},
-                },
-                session_id,
-                sessions,
-                ws,
-            )
-            # raiseIntent
-            await handler.handle_message(
-                {
-                    "type": "raiseIntent",
-                    "payload": {"intent": "ViewChart", "context": {"type": "t"}},
-                    "meta": {"requestUuid": "r11"},
-                },
-                session_id,
-                sessions,
-                ws,
-            )
-
-            # external intentResult
-            await handler.handle_message(
-                {
-                    "type": "intentResult",
-                    "payload": {"request_uuid": "x", "error": "fail"},
-                },
-                session_id,
-                sessions,
-                ws,
-            )
-
-        assert h_open.await_count == 1
-        assert h_broadcast.await_count == 1
-        assert h_acl.await_count == 1
-        assert h_ail.await_count == 1
-        assert h_fi.await_count == 1
-        assert h_finst.await_count == 1
-        assert h_fibc.await_count == 1
-        assert h_gi.await_count == 1
-        assert h_gam.await_count == 1
-        assert h_gucs.await_count == 1
-        assert h_gcc.await_count == 1
-        assert h_juc.await_count == 1
-        assert h_lcc.await_count == 1
-        assert h_jpc.await_count == 1
-        assert h_lpc.await_count == 1
-        assert h_cpi.await_count == 1
-        assert h_ilu.await_count == 1
-        assert h_ael.await_count == 1
-        assert h_rel.await_count == 1
-        assert h_rifc.await_count == 1
-        assert h_irr.await_count == 1
-        assert h_rirr.await_count == 1
-        assert h_clu.await_count == 1
-        assert h_hb.await_count == 1
+        for handler_name, _ in messages:
+            assert mocks[handler_name].await_count == 1
 
 
 class TestDACPHandlerGetInfo:
@@ -718,10 +534,11 @@ class TestDACPHandlerUserChannels:
         assert any(c["id"] == "user:red" for c in payload["payload"]["channels"])
 
     @pytest.mark.asyncio
-    async def test_join_get_current_leave_roundtrip(self):
+    async def test_join_get_current_leave_roundtrip(self, send_message):
         handler, _, _, _ = _handler()
         ws = _websocket()
         session_id, sessions = _wcp_sessions("inst-1")
+        send = send_message(handler, session_id, sessions, ws)
 
         from fdc3.desktop_agent.core import core_services
 
@@ -729,59 +546,47 @@ class TestDACPHandlerUserChannels:
         core_services.channel_manager.instance_channels.clear()
 
         # Join by unprefixed id should map to user:<id>
-        await handler.handle_message(
+        await send(
             {
                 "type": "joinUserChannel",
                 "payload": {"channelId": "red"},
                 "meta": {"requestUuid": "r2"},
-            },
-            session_id,
-            sessions,
-            ws,
+            }
         )
         payload = json.loads(ws.send_text.call_args.args[0])
         assert payload["type"] == "joinUserChannelResponse"
         assert payload["payload"]["channel"]["id"] == "user:red"
 
         ws.send_text.reset_mock()
-        await handler.handle_message(
+        await send(
             {
                 "type": "getCurrentChannel",
                 "payload": {},
                 "meta": {"requestUuid": "r3"},
-            },
-            session_id,
-            sessions,
-            ws,
+            }
         )
         payload = json.loads(ws.send_text.call_args.args[0])
         assert payload["type"] == "getCurrentChannelResponse"
         assert payload["payload"]["channel"]["id"] == "user:red"
 
         ws.send_text.reset_mock()
-        await handler.handle_message(
+        await send(
             {
                 "type": "leaveCurrentChannel",
                 "payload": {},
                 "meta": {"requestUuid": "r4"},
-            },
-            session_id,
-            sessions,
-            ws,
+            }
         )
         payload = json.loads(ws.send_text.call_args.args[0])
         assert payload["type"] == "leaveCurrentChannelResponse"
 
         ws.send_text.reset_mock()
-        await handler.handle_message(
+        await send(
             {
                 "type": "getCurrentChannel",
                 "payload": {},
                 "meta": {"requestUuid": "r5"},
-            },
-            session_id,
-            sessions,
-            ws,
+            }
         )
         payload = json.loads(ws.send_text.call_args.args[0])
         assert payload["payload"]["channel"] is None

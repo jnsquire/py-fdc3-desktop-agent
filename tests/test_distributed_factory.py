@@ -1,5 +1,6 @@
 import sys
 import types
+from datetime import datetime
 from typing import cast
 from unittest.mock import patch
 
@@ -7,6 +8,7 @@ import pytest
 
 from fdc3.desktop_agent.distributed import factory
 from fdc3.desktop_agent.distributed.adapter import DistributedLogAdapter
+from fdc3.desktop_agent.core.channel_types import ChannelEvent
 
 
 @pytest.mark.asyncio
@@ -16,8 +18,8 @@ async def test_get_adapter_default_noop(monkeypatch):
     assert isinstance(adapter, DistributedLogAdapter)
     # Noop adapter methods should be awaitable and not raise
     await adapter.start()
-    await adapter.publish("topic", {"a": 1})
-    sub = await adapter.subscribe("topic", lambda *_: None)
+    await adapter.publish("topic", _make_event())
+    sub = await adapter.subscribe("topic", lambda _event: None)
     assert sub == "noop"
     await adapter.unsubscribe("noop")
     await adapter.stop()
@@ -36,7 +38,7 @@ async def test_get_adapter_etcd_success(monkeypatch):
         async def stop(self):
             return
 
-        async def publish(self, topic: str, message) -> None:
+        async def publish(self, topic: str, message: ChannelEvent) -> None:
             return
 
         async def subscribe(self, topic: str, callback):
@@ -68,7 +70,7 @@ async def test_get_adapter_consul_success(monkeypatch):
         async def stop(self):
             return
 
-        async def publish(self, topic: str, message) -> None:
+        async def publish(self, topic: str, message: ChannelEvent) -> None:
             return
 
         async def subscribe(self, topic: str, callback):
@@ -108,7 +110,7 @@ async def test_get_adapter_etcd_fallback_relative_import_success(monkeypatch):
         async def stop(self):
             return
 
-        async def publish(self, topic: str, message) -> None:
+        async def publish(self, topic: str, message: ChannelEvent) -> None:
             return
 
         async def subscribe(self, topic: str, callback):
@@ -125,7 +127,7 @@ async def test_get_adapter_etcd_fallback_relative_import_success(monkeypatch):
         with patch("importlib.import_module", side_effect=RuntimeError("boom")):
             adapter = factory.get_adapter()
             assert isinstance(adapter, FakeEtcdRel)
-            assert await adapter.subscribe("t", lambda *_: None) == "etcd-rel-sub"
+            assert await adapter.subscribe("t", lambda _event: None) == "etcd-rel-sub"
     finally:
         del sys.modules[mod_name]
 
@@ -159,7 +161,7 @@ async def test_get_adapter_etcd_candidate_missing_attr_then_relative_import_succ
         async def stop(self):
             return
 
-        async def publish(self, topic: str, message) -> None:
+        async def publish(self, topic: str, message: ChannelEvent) -> None:
             return
 
         async def subscribe(self, topic: str, callback):
@@ -181,7 +183,7 @@ async def test_get_adapter_etcd_candidate_missing_attr_then_relative_import_succ
         with patch("importlib.import_module", return_value=imported_mod):
             adapter = factory.get_adapter()
             assert isinstance(adapter, FakeEtcdRel)
-            assert await adapter.subscribe("t", lambda *_: None) == "etcd-rel-sub"
+            assert await adapter.subscribe("t", lambda _event: None) == "etcd-rel-sub"
     finally:
         del sys.modules[mod_name]
 
@@ -227,7 +229,7 @@ async def test_get_adapter_consul_candidate_missing_attr_then_relative_import_su
         async def stop(self):
             return
 
-        async def publish(self, topic: str, message) -> None:
+        async def publish(self, topic: str, message: ChannelEvent) -> None:
             return
 
         async def subscribe(self, topic: str, callback):
@@ -249,7 +251,7 @@ async def test_get_adapter_consul_candidate_missing_attr_then_relative_import_su
         with patch("importlib.import_module", return_value=imported_mod):
             adapter = factory.get_adapter()
             assert isinstance(adapter, FakeConsulRel)
-            assert await adapter.subscribe("t", lambda *_: None) == "consul-rel-sub"
+            assert await adapter.subscribe("t", lambda _event: None) == "consul-rel-sub"
     finally:
         del sys.modules[mod_name]
 
@@ -281,8 +283,18 @@ async def test_distributed_log_adapter_abstract_methods_raise_not_implemented():
     with pytest.raises(NotImplementedError):
         await DistributedLogAdapter.stop(dummy)
     with pytest.raises(NotImplementedError):
-        await DistributedLogAdapter.publish(dummy, "t", {"a": 1})
+        await DistributedLogAdapter.publish(dummy, "t", _make_event())
     with pytest.raises(NotImplementedError):
-        await DistributedLogAdapter.subscribe(dummy, "t", lambda *_: None)
+        await DistributedLogAdapter.subscribe(dummy, "t", lambda _event: None)
     with pytest.raises(NotImplementedError):
         await DistributedLogAdapter.unsubscribe(dummy, "sub")
+
+
+def _make_event() -> ChannelEvent:
+    return {
+        "event_type": "created",
+        "channel_id": "c1",
+        "instance_uuid": None,
+        "context": None,
+        "timestamp": datetime.now().isoformat(),
+    }

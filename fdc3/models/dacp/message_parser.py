@@ -2,89 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any, Union, cast
-from pydantic import BaseModel, ValidationError
+from typing import Mapping
+from pydantic import ValidationError
 import logging
 
-from .dacp import (
-    OpenRequest,
-    BroadcastRequest,
-    AddContextListenerRequest,
-    AddIntentListenerRequest,
-    IntentListenerUnsubscribeRequest,
-    GetInfoRequest,
-    GetAppMetadataRequest,
-    GetUserChannelsRequest,
-    GetSystemChannelsRequest,
-    GetCurrentChannelRequest,
-    GetCurrentContextRequest,
-    JoinUserChannelRequest,
-    JoinChannelRequest,
-    LeaveCurrentChannelRequest,
-    FindIntentRequest,
-    FindIntentsByContextRequest,
-    FindInstancesRequest,
-    RaiseIntentRequest,
-    RaiseIntentForContextRequest,
-    IntentResultRequest,
-    RaiseIntentResultResponse,
-    ContextListenerUnsubscribeRequest,
-    AddEventListenerRequest,
-    RemoveEventListenerRequest,
-    HeartbeatAcknowledgmentRequest,
-    CreatePrivateChannelRequest,
-    CreatePrivateChannelInvitationRequest,
-    PrivateChannelAddEventListenerRequest,
-    PrivateChannelDisconnectRequest,
-    JoinPrivateChannelRequest,
-    LeavePrivateChannelRequest,
-    MESSAGE_TYPE_MAP,
-)
-from .external_models import (
-    RegisterExternalHandlerRequest,
-    UnregisterExternalHandlerRequest,
-    ExternalIntentResultRequest,
-)
+from . import external_models as _external_models  # noqa: F401
+from .dacp import DacpMessage
 
 logger = logging.getLogger(__name__)
-
-# Type alias for all valid parsed message types
-ParsedMessage = Union[
-    OpenRequest,
-    BroadcastRequest,
-    AddContextListenerRequest,
-    AddIntentListenerRequest,
-    IntentListenerUnsubscribeRequest,
-    GetInfoRequest,
-    GetAppMetadataRequest,
-    GetUserChannelsRequest,
-    GetSystemChannelsRequest,
-    GetCurrentChannelRequest,
-    GetCurrentContextRequest,
-    JoinUserChannelRequest,
-    JoinChannelRequest,
-    LeaveCurrentChannelRequest,
-    FindIntentRequest,
-    FindIntentsByContextRequest,
-    FindInstancesRequest,
-    RaiseIntentRequest,
-    RaiseIntentForContextRequest,
-    IntentResultRequest,
-    RaiseIntentResultResponse,
-    ContextListenerUnsubscribeRequest,
-    AddEventListenerRequest,
-    RemoveEventListenerRequest,
-    HeartbeatAcknowledgmentRequest,
-    RegisterExternalHandlerRequest,
-    UnregisterExternalHandlerRequest,
-    ExternalIntentResultRequest,
-    CreatePrivateChannelRequest,
-    CreatePrivateChannelInvitationRequest,
-    PrivateChannelAddEventListenerRequest,
-    PrivateChannelDisconnectRequest,
-    JoinPrivateChannelRequest,
-    LeavePrivateChannelRequest,
-]
 
 
 class MessageParseError(Exception):
@@ -95,21 +20,12 @@ class MessageParseError(Exception):
         self.request_uuid = request_uuid
 
 
-def parse_message(raw: Any) -> ParsedMessage:
-    """Parse and validate a message (dict or Pydantic model) into a Pydantic model.
+def parse_message(raw: Mapping[str, object]) -> DacpMessage:
+    """Parse and validate a DACP message into a typed model.
 
-    Accepts either a raw mapping (dict-like) or a Pydantic `BaseModel` envelope.
-    When given a model, it is converted to a plain dict via `.model_dump()`
-    (or `.dict()` for older Pydantic versions) before validation.
+    Accepts a dict-like payload.
     """
-    # Normalize to plain dict so downstream validators receive JSON-native types.
-    if isinstance(raw, BaseModel):
-        if hasattr(raw, "model_dump"):
-            data = raw.model_dump()
-        else:
-            data = raw.dict()
-    else:
-        data = dict(raw)
+    data = dict(raw)
 
     msg_type = data.get("type")
     request_uuid = (data.get("meta") or {}).get("requestUuid")
@@ -117,12 +33,12 @@ def parse_message(raw: Any) -> ParsedMessage:
     if not msg_type:
         raise MessageParseError("Missing message type", request_uuid)
 
-    model_class = MESSAGE_TYPE_MAP.get(msg_type)
+    model_class = DacpMessage.MESSAGE_TYPE_MAP.get(msg_type)
     if not model_class:
         raise MessageParseError(f"Unknown message type: {msg_type}", request_uuid)
 
     try:
-        return cast(ParsedMessage, model_class.model_validate(data))
+        return model_class.model_validate(data)
     except ValidationError as e:
         # Extract a clean error message from Pydantic validation errors
         errors = e.errors()

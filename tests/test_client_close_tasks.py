@@ -1,6 +1,8 @@
 import asyncio
+from typing import cast
 
 from fdc3.client.client import FDC3Client
+from websockets.asyncio.client import ClientConnection
 
 
 class FakeWS:
@@ -23,7 +25,7 @@ async def test_close_awaits_cancelled_tasks():
 
     client._recv_task = asyncio.create_task(sleeper())
     client._ping_task = asyncio.create_task(sleeper())
-    client._ws = FakeWS()
+    client._ws = cast(ClientConnection, FakeWS())
     client._running = True
 
     await client.close()

@@ -15,6 +15,7 @@ import uuid
 from typing import Any, Callable, Dict, Optional
 
 from .adapter import DistributedLogAdapter
+from ..tools import create_task_safe
 
 try:
     # prefer etcd3gw (HTTP gateway client)
@@ -177,8 +178,6 @@ class EtcdAdapter(DistributedLogAdapter):
                 except Exception:
                     pass
 
-            from ..tools import create_task_safe
-
             t = create_task_safe(asyncio.to_thread(_blocking_watch_gw))
             with self._watch_tasks_lock:
                 self._watch_tasks[watch_id] = t
@@ -201,8 +200,6 @@ class EtcdAdapter(DistributedLogAdapter):
                         _on_event_sync(ev)
                 except Exception:
                     pass
-
-            from ..tools import create_task_safe
 
             t = create_task_safe(asyncio.to_thread(_blocking_watch))
             with self._watch_tasks_lock:

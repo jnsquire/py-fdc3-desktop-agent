@@ -16,6 +16,7 @@ import logging
 from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Set
 
 from .adapter import DistributedLogAdapter
+from ..tools import create_task_safe
 
 if TYPE_CHECKING:
     from aiohttp import ClientSession  # type: ignore[reportMissingImports]
@@ -211,8 +212,6 @@ class ConsulAdapter(DistributedLogAdapter):
         topic_prefix = f"{self.base}/{topic}/"
         sub_id = f"consul-sub-{self._subscription_counter}"
         self._subscription_counter += 1
-
-        from ..tools import create_task_safe
 
         task = create_task_safe(self._watch_loop(topic_prefix, callback))
         with self._watch_tasks_lock:

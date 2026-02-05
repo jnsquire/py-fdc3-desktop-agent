@@ -8,7 +8,7 @@ from strawberry.types import Info
 # Import storage types
 from ..storage.interfaces import Storage as StorageInterface
 from ..core import core_services
-from ..core.channel_manager import ChannelInstance
+from ..core.channel_types import ChannelInstance
 from ..version import __version__
 
 

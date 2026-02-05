@@ -1,40 +1,21 @@
 # Lifespan management for the FDC3 Desktop Agent server
 
 from __future__ import annotations
-from pydantic import ValidationError
 
-import json
 import logging
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any, AsyncContextManager, Protocol, cast, Mapping
+from typing import TYPE_CHECKING, Any, AsyncContextManager, Protocol, cast
 
 from fastapi import FastAPI
 
 from ..bridging import BridgeClient
-from ..bridging.client import (
-    BridgeConnectionSettings,
-    ImplementationMetadata,
-    ImplementationMetadataFactory,
-    ChannelsStateFactory,
-    ChannelMember,
-    ChannelsState,
-)
-from ..bridging.router import BridgeRequestRouter
 from ..core import core_services, CoreServices
-from ..distributed.factory import get_adapter
 from ..distributed.adapter import DistributedLogAdapter
-from ..api import DisplayMetadata
-from ..tools import create_task_safe
-from fdc3.models.dacp.dacp import (
-    BroadcastEvent,
-    BroadcastEventPayload,
-    AgentEventMeta,
-    Fdc3Context,
-)
-from ..version import __version__
+from ..distributed.factory import get_adapter
+from . import lifespan_bridge as _lifespan_bridge
+from . import lifespan_distributed as _lifespan_distributed
 from .constants import SYSTEM_APP_METADATA
-from .models import ChannelContextItem, ChannelsStateModel
 
 
 if TYPE_CHECKING:
@@ -43,7 +24,6 @@ if TYPE_CHECKING:
     from ..launcher.interfaces import ProcessLauncher
     from ..storage.interfaces import Storage
     from .connection_manager import AgentClientConnectionManager
-    from ..handlers.dacp.base import BridgeClientProtocol
 
 
 class AppState(Protocol):
@@ -59,105 +39,6 @@ class AppState(Protocol):
 
 
 logger = logging.getLogger(__name__)
-
-
-DEFAULT_USER_CHANNELS: list[tuple[str, str, str]] = [
-    ("user:red", "Red", "0xFF0000"),
-    ("user:orange", "Orange", "0xFFA500"),
-    ("user:yellow", "Yellow", "0xFFFF00"),
-    ("user:green", "Green", "0x00FF00"),
-    ("user:blue", "Blue", "0x0000FF"),
-    ("user:purple", "Purple", "0x800080"),
-]
-
-
-def create_implementation_metadata_factory(
-    settings: BridgeConnectionSettings,
-) -> ImplementationMetadataFactory:
-    """Create the implementation metadata factory for bridge handshake."""
-
-    def _implementation_metadata() -> ImplementationMetadata:
-        # Minimal ImplementationMetadata for bridging handshake.
-        # Keep optional features aligned with DACP getInfo reporting.
-        # See FDC3 agent-bridging overview, BCP step 3.
-        optional_features = {
-            # We do not expose originating app metadata on context/intent payloads.
-            "OriginatingAppMetadata": False,
-            "UserChannelMembershipAPIs": True,
-            "DesktopAgentBridging": True,
-        }
-
-        return {
-            "fdc3Version": "2.2",
-            "provider": "py-fdc3-desktop-agent",
-            "providerVersion": __version__,
-            "optionalFeatures": optional_features,
-        }
-
-    return _implementation_metadata
-
-
-def create_channels_state_factory(
-    settings: BridgeConnectionSettings,
-) -> ChannelsStateFactory:
-    """Create the channels state factory for bridge handshake."""
-
-    def _channels_state() -> ChannelsState:
-        # Provide a best-effort snapshot of current channel membership for
-        # the bridging handshake. We include `instanceUuid` (internal) and
-        # enrich with `appId`/`instanceId` when known.
-        state: ChannelsState = {}
-
-        channel_manager = core_services.channel_manager
-        app_registry = core_services.app_registry
-
-        try:
-            existing_users = [
-                c
-                for c in channel_manager.list_channels()
-                if getattr(c, "type", None) == "user"
-            ]
-        except Exception:
-            existing_users = []
-
-        if not existing_users:
-            for channel_id, name, color in DEFAULT_USER_CHANNELS:
-                if channel_manager.get_channel(channel_id) is None:
-                    channel_manager.create_channel(
-                        channel_id,
-                        "user",
-                        display_metadata=DisplayMetadata(name=name, color=color),
-                    )
-
-        for channel in channel_manager.list_channels():
-            members: list[ChannelMember] = []
-            for instance_uuid in channel_manager.get_channel_members(channel.id):
-                instance_info = (
-                    app_registry.get_instance(instance_uuid)
-                    if app_registry is not None
-                    else None
-                )
-                if instance_info is not None:
-                    members.append(
-                        {
-                            "desktopAgent": settings.requested_name,
-                            "appId": instance_info.app_id,
-                            "instanceId": instance_info.instance_id,
-                            "instanceUuid": instance_info.instance_uuid,
-                        }
-                    )
-                else:
-                    members.append(
-                        {
-                            "desktopAgent": settings.requested_name,
-                            "instanceUuid": instance_uuid,
-                        }
-                    )
-            state[channel.id] = members
-
-        return state
-
-    return _channels_state
 
 
 async def _safe_await(label: str, awaitable) -> None:
@@ -183,6 +64,46 @@ def _ensure_app_state(state: Any) -> AppState:
         if not hasattr(state, name):
             setattr(state, name, value)
     return cast(AppState, state)
+
+
+async def _setup_bridge(
+    *,
+    config: DesktopAgentConfig,
+    storage: Storage,
+    launcher: ProcessLauncher,
+    instance_connection_manager: WebSocketConnectionManager,
+    dacp_handler: DACPHandler,
+) -> BridgeClient | None:
+    _lifespan_bridge.core_services = core_services
+    _lifespan_bridge.BridgeClient = BridgeClient
+    return await _lifespan_bridge._setup_bridge(
+        config=config,
+        storage=storage,
+        launcher=launcher,
+        instance_connection_manager=instance_connection_manager,
+        dacp_handler=dacp_handler,
+    )
+
+
+async def _setup_distributed_adapter(
+    config: DesktopAgentConfig,
+) -> tuple[DistributedLogAdapter | None, str | None]:
+    _lifespan_distributed.core_services = core_services
+    _lifespan_distributed.get_adapter = get_adapter
+    return await _lifespan_distributed._setup_distributed_adapter(config)
+
+
+async def _register_plugins(config: DesktopAgentConfig) -> None:
+    all_plugins = list(config.plugins)  # Copy to avoid modifying config
+    if config.auto_discover_plugins:
+        from ..plugins import discover_plugins
+
+        discovered = discover_plugins()
+        all_plugins.extend(discovered)
+
+    for plugin in all_plugins:
+        await core_services.register_plugin(plugin)
+        logger.info("Registered plugin: %s", plugin.name)
 
 
 def create_lifespan(
@@ -212,115 +133,6 @@ def create_lifespan(
         """Lifespan handler to initialize and teardown resources."""
         state = _ensure_app_state(app.state)
 
-        async def _apply_channels_state(
-            channels_state: Mapping[str, list[ChannelContextItem]] | None,
-        ):
-            if not channels_state:
-                return
-
-            channel_manager = core_services.channel_manager
-            listener_store = core_services.listener_store
-
-            for channel_id, incoming in channels_state.items():
-                if not isinstance(incoming, list):
-                    continue
-
-                # Expect incoming to be ChannelContextItem instances
-                incoming_contexts: list[ChannelContextItem] = []
-                for ctx in incoming:
-                    if isinstance(ctx, ChannelContextItem):
-                        incoming_contexts.append(ctx)
-                if not incoming_contexts:
-                    continue
-
-                # Extract processing into helper for clarity and smaller lock windows
-                def _process_channel(
-                    channel_id: str, incoming_contexts: list[ChannelContextItem]
-                ) -> list[tuple[str, Fdc3Context]]:
-                    # Initialize existing snapshot and membership
-                    with channel_manager._lock:
-                        existing = dict(
-                            channel_manager.channel_contexts.get(channel_id, {})
-                        )
-                        members = set(channel_manager.get_channel_members(channel_id))
-                        channel_known = (
-                            channel_id in channel_manager.channels
-                            or channel_id in channel_manager.channel_contexts
-                        )
-
-                        if not channel_known:
-                            stored = channel_manager.channel_contexts.setdefault(
-                                channel_id, {}
-                            )
-                            for ctx in incoming_contexts:
-                                ctx_dict = ctx.model_dump()
-                                stored[ctx_dict["type"]] = ctx_dict
-                            stored[channel_manager.LAST_CONTEXT_KEY] = (
-                                incoming_contexts[0].model_dump()
-                            )
-                            return []
-
-                    send_queue: list[tuple[str, Fdc3Context]] = []
-
-                    # Determine listeners to notify and update 'existing'
-                    for ctx in reversed(incoming_contexts):
-                        ctx_dict = ctx.model_dump()
-                        ctx_type = ctx.type
-                        existing_ctx = existing.get(ctx_type)
-                        if existing_ctx is None or existing_ctx != ctx_dict:
-                            listeners = listener_store.get_context_listeners_for_type(
-                                ctx_type, channel_id=channel_id, include_global=True
-                            )
-                            for listener in listeners:
-                                if listener.context_type is None:
-                                    continue
-                                if listener.instance_uuid not in members:
-                                    continue
-                                send_queue.append(
-                                    (
-                                        listener.instance_uuid,
-                                        cast(Fdc3Context, ctx_dict),
-                                    )
-                                )
-                            existing[ctx_type] = ctx_dict
-
-                    most_recent = incoming_contexts[0].model_dump()
-                    existing_last = existing.get(channel_manager.LAST_CONTEXT_KEY)
-                    if existing_last != most_recent:
-                        for listener in listener_store.context_listeners.values():
-                            if listener.context_type is not None:
-                                continue
-                            if listener.channel_id not in (None, channel_id):
-                                continue
-                            if listener.instance_uuid not in members:
-                                continue
-                            send_queue.append(
-                                (listener.instance_uuid, cast(Fdc3Context, most_recent))
-                            )
-                        existing[channel_manager.LAST_CONTEXT_KEY] = most_recent
-
-                    with channel_manager._lock:
-                        channel_manager.channel_contexts[channel_id] = existing
-
-                    return send_queue
-
-                send_queue = _process_channel(channel_id, incoming_contexts)
-
-                # Send deduplicated per-payload messages
-                serialized_values: dict[str, str] = {}
-                for instance_uuid, ctx in send_queue:
-                    payload = serialized_values.get(json.dumps(ctx, sort_keys=True))
-                    if payload is None:
-                        payload = BroadcastEvent(
-                            type="broadcastEvent",
-                            payload=BroadcastEventPayload(context=ctx),
-                            meta=AgentEventMeta(),
-                        ).model_dump_json()
-                        serialized_values[json.dumps(ctx, sort_keys=True)] = payload
-                    await instance_connection_manager.send_to_instance(
-                        instance_uuid, payload
-                    )
-
         # Startup
         logging.basicConfig(level=getattr(logging, config.log_level))
 
@@ -343,119 +155,21 @@ def create_lifespan(
         logger.info(f"Admin interface at: http://{display_host}:{config.port}/admin")
 
         # Register intent handler plugins
-        # First, discover plugins from entry points if enabled
-        all_plugins = list(config.plugins)  # Copy to avoid modifying config
-        if config.auto_discover_plugins:
-            from ..plugins import discover_plugins
-
-            discovered = discover_plugins()
-            all_plugins.extend(discovered)
-
-        for plugin in all_plugins:
-            await core_services.register_plugin(plugin)
-            logger.info(f"Registered plugin: {plugin.name}")
+        await _register_plugins(config)
 
         # Desktop Agent Bridging (experimental)
-        state.bridge_client = None
-        if config.bridge_enabled:
-            settings = BridgeConnectionSettings(
-                host=config.bridge_host,
-                port_start=config.bridge_port_start,
-                port_end=config.bridge_port_end,
-                requested_name=config.bridge_requested_name,
-                retry_seconds=config.bridge_connect_retry_seconds,
-                request_timeout_seconds=config.bridge_request_timeout_seconds,
-            )
-
-            router = BridgeRequestRouter(
-                storage=storage,
-                launcher=launcher,
-                connection_manager=instance_connection_manager,
-                core_services=core_services,
-                dacp_handler=dacp_handler,
-                local_desktop_agent_name=None,
-            )
-
-            async def _handle_connected_agents_update(payload):
-                add_agent = payload.addAgent
-                if isinstance(add_agent, str) and add_agent:
-                    router.set_local_desktop_agent_name(add_agent)
-                channels_state = getattr(payload, "channelsState", None)
-                if channels_state:
-                    # Use Pydantic to validate the expected shape: dict[str, list[dict(type:str, ... )]]
-                    try:
-                        validated = ChannelsStateModel.model_validate(channels_state)
-                    except ValidationError:
-                        logger.warning(
-                            "Ignoring malformed channelsState in connectedAgentsUpdate: %r",
-                            channels_state,
-                        )
-                    else:
-                        await _apply_channels_state(validated.root)
-
-            bridge_client = BridgeClient(
-                settings,
-                implementation_metadata_factory=create_implementation_metadata_factory(
-                    settings
-                ),
-                channels_state_factory=create_channels_state_factory(settings),
-                request_handler=router.handle,
-                connected_agents_update_handler=_handle_connected_agents_update,
-            )
-            await bridge_client.start()
-            state.bridge_client = bridge_client
-
-            # Inject into handler so outbound calls can be bridged.
-            dacp_handler.bridge_client = cast("BridgeClientProtocol", bridge_client)
+        state.bridge_client = await _setup_bridge(
+            config=config,
+            storage=storage,
+            launcher=launcher,
+            instance_connection_manager=instance_connection_manager,
+            dacp_handler=dacp_handler,
+        )
 
         # Initialize distributed adapter
-        adapter = config.distributed_adapter
-        if adapter is None:
-            try:
-                adapter = get_adapter()
-            except Exception:
-                logger.exception("Error creating distributed adapter")
-                adapter = None
-
-        if adapter:
-            try:
-                await adapter.start()
-                state.distributed_adapter = adapter
-
-                async def _distributed_event_handler(ev):
-                    try:
-                        if isinstance(ev, str):
-                            payload = json.loads(ev)
-                        else:
-                            payload = ev
-                        core_services.channel_manager._emit_event(
-                            payload.get("event_type"),
-                            payload.get("channel_id"),
-                            payload.get("instance_uuid"),
-                            (
-                                json.loads(payload.get("context"))
-                                if payload.get("context")
-                                else None
-                            ),
-                            remote=True,
-                        )
-                    except Exception:
-                        logger.exception("Error handling distributed event")
-
-                def _sub_cb(ev: dict):
-                    # Fire-and-forget: schedule handler safely so exceptions
-                    # are logged instead of being dropped.
-                    create_task_safe(_distributed_event_handler(ev))
-
-                sub_id = await adapter.subscribe("channel_events", _sub_cb)
-                state.distributed_subscription_id = sub_id
-            except Exception:
-                logger.exception("Error starting distributed adapter")
-                state.distributed_adapter = None
-                state.distributed_subscription_id = None
-        else:
-            state.distributed_adapter = None
-            state.distributed_subscription_id = None
+        adapter, sub_id = await _setup_distributed_adapter(config)
+        state.distributed_adapter = adapter
+        state.distributed_subscription_id = sub_id
 
         # Store references for route handlers
         state.storage = storage

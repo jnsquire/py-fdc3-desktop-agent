@@ -1178,7 +1178,7 @@ class IntentHandlersMixin:
                     self._normalize_context(request.payload.context)
                 )
                 or {},
-                source=request.meta.source.model_dump() if request.meta.source else {},
+                source=request.meta.source,
             )
         )
 

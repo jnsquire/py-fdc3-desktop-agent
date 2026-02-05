@@ -8,9 +8,10 @@ informative ImportError when those dependencies are missing.
 """
 
 from __future__ import annotations
+from fdc3.desktop_agent.core.channel_types import ChannelEvent
 
 from abc import ABC, abstractmethod
-from typing import Any, Callable
+from typing import Callable
 
 
 class DistributedLogAdapter(ABC):
@@ -27,12 +28,14 @@ class DistributedLogAdapter(ABC):
         raise NotImplementedError()
 
     @abstractmethod
-    async def publish(self, topic: str, message: Any) -> None:
+    async def publish(self, topic: str, message: ChannelEvent) -> None:
         """Publish a message to a topic/stream."""
         raise NotImplementedError()
 
     @abstractmethod
-    async def subscribe(self, topic: str, callback: Callable[[dict], None]) -> str:
+    async def subscribe(
+        self, topic: str, callback: Callable[[ChannelEvent], None]
+    ) -> str:
         """Subscribe to topic events.
 
         Returns a subscription id which can be used with `unsubscribe`.

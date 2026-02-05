@@ -1,13 +1,39 @@
 # HTTP route handlers for the FDC3 Desktop Agent server
 
-from fastapi import APIRouter, Request, HTTPException
-from fastapi.responses import RedirectResponse
-from typing import cast
+from typing import Any, TypedDict, cast
+
 import psutil
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import RedirectResponse
+
+from fdc3.models.dacp.dacp import AgentEventMeta, IntentEvent, IntentEventPayload
 
 from .lifespan import AppState
 
 router = APIRouter()
+
+
+class DiagnosticsMetrics(TypedDict):
+    serverStatus: str
+    activeConnections: int
+    registeredApps: int
+    memoryUsageBytes: int
+    memoryUsageHuman: str
+
+
+class AppDirectoryEntry(TypedDict):
+    appId: str | None
+    name: str | None
+    version: str | None
+    description: str | None
+    icons: list[Any]
+    intents: list[Any]
+
+
+class AdminRaiseIntentResponse(TypedDict, total=False):
+    error: str
+    intentResolution: dict[str, Any]
+    targets: list[str]
 
 
 def _format_bytes(num_bytes: int) -> str:
@@ -25,31 +51,31 @@ def _format_bytes(num_bytes: int) -> str:
 
 
 @router.get("/admin")
-async def admin_page(request: Request):
+async def admin_page(request: Request) -> RedirectResponse:
     """Admin page for managing launch configurations"""
     return RedirectResponse(url=str(request.url_for("ui", path="admin.html")))
 
 
 @router.get("/app-directory")
-async def app_directory_page(request: Request):
+async def app_directory_page(request: Request) -> RedirectResponse:
     """App directory management interface"""
     return RedirectResponse(url=str(request.url_for("ui", path="app_directory.html")))
 
 
 @router.get("/system-settings")
-async def system_settings_page(request: Request):
+async def system_settings_page(request: Request) -> RedirectResponse:
     """System configuration panel"""
     return RedirectResponse(url=str(request.url_for("ui", path="system_settings.html")))
 
 
 @router.get("/diagnostics")
-async def diagnostics_page(request: Request):
+async def diagnostics_page(request: Request) -> RedirectResponse:
     """System diagnostics and health checks"""
     return RedirectResponse(url=str(request.url_for("ui", path="diagnostics.html")))
 
 
 @router.get("/api/diagnostics/metrics")
-async def diagnostics_metrics(request: Request):
+async def diagnostics_metrics(request: Request) -> DiagnosticsMetrics:
     """Return real-time system metrics for the diagnostics UI."""
     state = cast(AppState, request.app.state)
     storage = state.storage
@@ -87,13 +113,13 @@ async def diagnostics_metrics(request: Request):
 
 
 @router.get("/channel-monitor")
-async def channel_monitor_page(request: Request):
+async def channel_monitor_page(request: Request) -> RedirectResponse:
     """Channel monitor UI for subscribing to channel events"""
     return RedirectResponse(url=str(request.url_for("ui", path="channel_monitor.html")))
 
 
 @router.get("/channel-sequence")
-async def channel_sequence_page(request: Request):
+async def channel_sequence_page(request: Request) -> RedirectResponse:
     """Sequence diagram view for channel traffic (uses GraphQL subscription)."""
     return RedirectResponse(
         url=str(request.url_for("ui", path="sequence_diagram.html"))
@@ -101,20 +127,20 @@ async def channel_sequence_page(request: Request):
 
 
 @router.get("/public-channels")
-async def public_channels_page(request: Request):
+async def public_channels_page(request: Request) -> RedirectResponse:
     """Public channels management interface"""
     return RedirectResponse(url=str(request.url_for("ui", path="public_channels.html")))
 
 
 @router.post("/admin/raise-intent")
-async def admin_raise_intent(request: Request):
+async def admin_raise_intent(request: Request) -> AdminRaiseIntentResponse:
     """Raise an intent from the admin UI. Expects JSON {"intent": str, "context": dict}.
 
     This will resolve the intent using the core IntentResolver and deliver
     an IntentEvent to any matching connected instances. Returns the resolved
     IntentResolution and the list of instance UUIDs targeted.
     """
-    body = await request.json()
+    body = cast(dict[str, Any], await request.json())
     intent = body.get("intent")
     context = body.get("context")
 
@@ -132,12 +158,6 @@ async def admin_raise_intent(request: Request):
 
     # Deliver intentEvent to each target instance via the DACP connection manager
     if dacp_handler is not None:
-        from fdc3.models.dacp.dacp import (
-            IntentEvent,
-            IntentEventPayload,
-            AgentEventMeta,
-        )
-
         for target_uuid in targets:
             event = IntentEvent(
                 type="intentEvent",
@@ -160,7 +180,7 @@ async def admin_raise_intent(request: Request):
     return {"intentResolution": resolution.model_dump(), "targets": targets}
 
 
-def _app_directory_entry(meta) -> dict:
+def _app_directory_entry(meta: Any) -> AppDirectoryEntry:
     return {
         "appId": getattr(meta, "app_id", None) or getattr(meta, "appId", None),
         "name": getattr(meta, "name", None),
@@ -172,7 +192,7 @@ def _app_directory_entry(meta) -> dict:
 
 
 @router.get("/v2/apps")
-async def app_directory_list(request: Request):
+async def app_directory_list(request: Request) -> list[AppDirectoryEntry]:
     """List all apps in the local app directory (FDC3 App Directory v2 compatible)."""
     storage = getattr(request.app.state, "storage", None)
     if storage is None:
@@ -185,7 +205,7 @@ async def app_directory_list(request: Request):
 
 
 @router.get("/v2/apps/{app_id}")
-async def app_directory_get(request: Request, app_id: str):
+async def app_directory_get(request: Request, app_id: str) -> AppDirectoryEntry:
     """Get app metadata from the local app directory (FDC3 App Directory v2 compatible)."""
     storage = getattr(request.app.state, "storage", None)
     if storage is None:
